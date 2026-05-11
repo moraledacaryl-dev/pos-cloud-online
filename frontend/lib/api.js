@@ -1,0 +1,150 @@
+const API_BASE = (process.env.NEXT_PUBLIC_API_BASE || '/api').replace(/\/+$/, '');
+
+function getToken() {
+  if (typeof window === 'undefined') return '';
+  return localStorage.getItem('pos_token') || '';
+}
+
+function getRefreshToken() {
+  if (typeof window === 'undefined') return '';
+  return localStorage.getItem('pos_refresh_token') || '';
+}
+
+function setToken(token) {
+  if (typeof window !== 'undefined') localStorage.setItem('pos_token', token);
+}
+
+function setRefreshToken(token) {
+  if (typeof window !== 'undefined') localStorage.setItem('pos_refresh_token', token);
+}
+
+function clearToken() {
+  if (typeof window !== 'undefined') localStorage.removeItem('pos_token');
+}
+
+function clearRefreshToken() {
+  if (typeof window !== 'undefined') localStorage.removeItem('pos_refresh_token');
+}
+
+function qs(params = {}, multi = false) {
+  const pairs = Object.entries(params).flatMap(([k, v]) => Array.isArray(v) && multi ? v.map((item) => [k, item]) : [[k, v]]);
+  const filtered = pairs.filter(([, v]) => v !== '' && v !== null && typeof v !== 'undefined');
+  return filtered.length ? `?${new URLSearchParams(filtered).toString()}` : '';
+}
+
+async function rawRequest(path, init = {}) {
+  const headers = { ...(init.headers || {}) };
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (!(init.body instanceof FormData) && init.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  const res = await fetch(`${API_BASE}${normalizedPath}`, { cache: 'no-store', ...init, headers });
+  let data = null;
+  try { data = await res.json(); } catch { data = null; }
+  return { res, data };
+}
+
+async function request(path, init = {}, retrying = false) {
+  const { res, data } = await rawRequest(path, init);
+  if (res.status === 401 && !retrying && !String(path).startsWith('/auth/')) {
+    const refresh = getRefreshToken();
+    if (refresh) {
+      try {
+        const refreshed = await request('/auth/refresh', { method: 'POST', body: JSON.stringify({ refresh_token: refresh }) }, true);
+        if (refreshed?.access_token) setToken(refreshed.access_token);
+        if (refreshed?.refresh_token) setRefreshToken(refreshed.refresh_token);
+        const retried = await rawRequest(path, init);
+        if (!retried.res.ok) throw new Error(retried.data?.detail || 'Request failed');
+        return retried.data;
+      } catch (err) {
+        clearToken(); clearRefreshToken();
+        throw err;
+      }
+    }
+  }
+  if (!res.ok) throw new Error(data?.detail || 'Request failed');
+  return data;
+}
+
+export { API_BASE, getToken, getRefreshToken, setToken, setRefreshToken, clearToken, clearRefreshToken, request };
+
+export const bootstrap = () => request('/auth/bootstrap', { method: 'POST' });
+export const login = (payload) => request('/auth/login', { method: 'POST', body: JSON.stringify(payload) });
+export const me = () => request('/auth/me');
+export const fetchUsers = () => request('/auth/users');
+export const createUser = (payload) => request('/auth/users', { method: 'POST', body: JSON.stringify(payload) });
+export const updateUser = (id, payload) => request(`/auth/users/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+export const fetchRoles = () => request('/auth/roles');
+export const fetchPermissions = () => request('/auth/permissions');
+
+export const getDashboard = () => request('/dashboard/summary');
+
+export const fetchCatalogItems = (params = {}) => request(`/catalog/items${qs(params)}`);
+export const createCatalogItem = (payload) => request('/catalog/items', { method: 'POST', body: JSON.stringify(payload) });
+export const updateCatalogItem = (id, payload) => request(`/catalog/items/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+export const deleteCatalogItem = (id) => request(`/catalog/items/${id}`, { method: 'DELETE' });
+export const syncCatalogFromAccounting = () => request('/catalog/sync-from-accounting', { method: 'POST' });
+
+export const fetchOutlets = () => request('/registers/outlets');
+export const createOutlet = (payload) => request('/registers/outlets', { method: 'POST', body: JSON.stringify(payload) });
+export const updateOutlet = (id, payload) => request(`/registers/outlets/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+export const fetchRegisters = (activeOnly = false) => request(`/registers${qs({ active_only: !!activeOnly })}`);
+export const createRegister = (payload) => request('/registers', { method: 'POST', body: JSON.stringify(payload) });
+export const updateRegister = (id, payload) => request(`/registers/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+export const fetchAccountingAccounts = () => request('/registers/accounting-accounts');
+export const validateAccountingAccount = (params = {}) => request(`/registers/accounting-accounts/validate${qs(params)}`);
+export const fetchAccountingHealth = () => request('/registers/accounting-accounts/health');
+
+export const fetchRegisterSessions = (params = {}) => request(`/register-sessions${qs(params)}`);
+export const fetchRegisterSession = (id) => request(`/register-sessions/${id}`);
+export const openRegisterSession = (payload) => request('/register-sessions/open', { method: 'POST', body: JSON.stringify(payload) });
+export const closeRegisterSession = (id, payload) => request(`/register-sessions/${id}/close`, { method: 'POST', body: JSON.stringify(payload) });
+export const reopenRegisterSession = (id, payload) => request(`/register-sessions/${id}/reopen`, { method: 'POST', body: JSON.stringify(payload) });
+
+export const fetchOrders = (params = {}) => request(`/orders${qs(params)}`);
+export const fetchOrder = (id) => request(`/orders/${id}`);
+export const createOrder = (payload) => request('/orders', { method: 'POST', body: JSON.stringify(payload) });
+export const updateOrder = (id, payload) => request(`/orders/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+export const holdOrder = (id) => request(`/orders/${id}/hold`, { method: 'POST' });
+export const resumeOrder = (id) => request(`/orders/${id}/resume`, { method: 'POST' });
+export const payOrder = (id, payload) => request(`/orders/${id}/pay`, { method: 'POST', body: JSON.stringify(payload) });
+export const voidOrder = (id, payload) => request(`/orders/${id}/void`, { method: 'POST', body: JSON.stringify(payload) });
+export const fetchRefunds = (id) => request(`/orders/${id}/refunds`);
+export const createRefund = (id, payload) => request(`/orders/${id}/refunds`, { method: 'POST', body: JSON.stringify(payload) });
+
+export const fetchCashMovements = (params = {}) => request(`/cash-movements${qs(params)}`);
+export const createCashMovement = (payload) => request('/cash-movements', { method: 'POST', body: JSON.stringify(payload) });
+
+export const fetchKitchenTickets = (params = {}) => request(`/kitchen/tickets${qs(params, true)}`);
+export const updateKitchenLineStatus = (id, payload) => request(`/kitchen/lines/${id}/status`, { method: 'POST', body: JSON.stringify(payload) });
+
+export const fetchOutbox = (params = {}) => request(`/sync/outbox${qs(params)}`);
+export const fetchSyncStatus = () => request('/sync/status');
+export const runOutboxSync = (payload = { limit: 25 }) => request('/sync/run', { method: 'POST', body: JSON.stringify(payload) });
+export const retryOutboxEvent = (eventId) => request(`/sync/retry/${eventId}`, { method: 'POST' });
+export const unblockOutboxEvent = (eventId) => request(`/sync/unblock/${eventId}`, { method: 'POST' });
+export const archiveOutboxEvent = (eventId, reason = 'Manual archive') => request(`/sync/archive/${eventId}`, { method: 'POST', body: JSON.stringify({ reason }) });
+export const resolveOutboxEvent = (eventId, resolution = 'Manually resolved') => request(`/sync/resolve/${eventId}`, { method: 'POST', body: JSON.stringify({ resolution }) });
+
+export const getSystemSettings = () => request('/system-settings');
+export const updateSystemSettings = (payload) => request('/system-settings', { method: 'PUT', body: JSON.stringify(payload) });
+export const fetchTableLayout = () => request('/system-settings/table-layout');
+export const updateTableLayout = (payload) => request('/system-settings/table-layout', { method: 'PUT', body: JSON.stringify(payload) });
+export const seedDefaults = () => request('/seed/defaults', { method: 'POST' });
+
+export const refreshSession = (payload) => request('/auth/refresh', { method: 'POST', body: JSON.stringify(payload) });
+export const logoutSession = (payload) => request('/auth/logout', { method: 'POST', body: JSON.stringify(payload) });
+
+
+export const fetchRoomCharges = (params = {}) => request(`/room-charges${qs(params)}`);
+export const fetchRoomCharge = (id) => request(`/room-charges/${id}`);
+export const updateRoomChargeStatus = (id, payload) => request(`/room-charges/${id}/status`, { method: 'POST', body: JSON.stringify(payload) });
+export const fetchInHouseBookings = (params = {}) => request(`/room-charges/in-house-bookings${qs(params)}`);
+export const createInHouseBooking = (payload) => request('/room-charges/in-house-bookings', { method: 'POST', body: JSON.stringify(payload) });
+export const updateInHouseBooking = (id, payload) => request(`/room-charges/in-house-bookings/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+
+export const fetchAuditLogs = (params = {}) => request(`/audit${qs(params)}`);
+export const fetchApprovals = (params = {}) => request(`/approvals${qs(params)}`);
+export const fetchApproval = (id) => request(`/approvals/${id}`);
+export const approveApproval = (id, payload = {}) => request(`/approvals/${id}/approve`, { method: 'POST', body: JSON.stringify(payload) });
+export const rejectApproval = (id, payload = {}) => request(`/approvals/${id}/reject`, { method: 'POST', body: JSON.stringify(payload) });
