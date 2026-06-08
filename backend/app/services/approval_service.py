@@ -62,7 +62,19 @@ def _serialize(row: ManagerApproval) -> dict:
     }
 
 
-def create_manager_approval(db: Session, *, approval_type: str, entity_type: str, entity_id: str | int | None = None, requested_by_user_id: int | None = None, approved_by_user_id: int | None = None, requested_reason: str | None = None, decision_note: str | None = None, request_details: dict | list | None = None):
+def create_manager_approval(
+    db: Session,
+    *,
+    approval_type: str,
+    entity_type: str,
+    entity_id: str | int | None = None,
+    requested_by_user_id: int | None = None,
+    approved_by_user_id: int | None = None,
+    requested_reason: str | None = None,
+    decision_note: str | None = None,
+    request_details: dict | list | None = None,
+    commit: bool = True,
+):
     approval_key = str(approval_type or '').strip().lower() or 'approval'
     requester = db.get(User, int(requested_by_user_id)) if requested_by_user_id else None
     approver = db.get(User, int(approved_by_user_id)) if approved_by_user_id else None
@@ -87,8 +99,11 @@ def create_manager_approval(db: Session, *, approval_type: str, entity_type: str
         decided_at_text=_now_text() if approver else None,
     )
     db.add(row)
-    db.commit()
-    db.refresh(row)
+    if commit:
+        db.commit()
+        db.refresh(row)
+    else:
+        db.flush()
     row = db.query(ManagerApproval).options(selectinload(ManagerApproval.requested_by), selectinload(ManagerApproval.approved_by)).filter(ManagerApproval.id == row.id).first()
     return _serialize(row)
 

@@ -22,43 +22,15 @@ function option(label, priceDelta = 0, extra = {}) {
 
 export function getProductProfile(item) {
   const explicit = maybeParseJson(item?.notes);
-  if (explicit?.modifier_groups?.length || explicit?.bundle_choices?.length || explicit?.prompt_note_label) {
-    return {
-      profile_key: explicit.profile_key || slug(item?.display_name || item?.menu_item_name),
-      customer_display_name: explicit.customer_display_name || item?.display_name || item?.menu_item_name,
-      prompt_note_label: explicit.prompt_note_label || '',
-      modifier_groups: explicit.modifier_groups || [],
-      bundle_choices: explicit.bundle_choices || [],
-      shortcuts: explicit.shortcuts || [],
-    };
-  }
-  const hay = `${item?.display_name || ''} ${item?.menu_item_name || ''} ${item?.category_name || ''} ${item?.module_slug || ''}`.toLowerCase();
-  const groups = [];
-  const bundles = [];
-  let prompt = '';
-  const beverageLike = /(coffee|latte|cappuccino|mocha|frappe|tea|juice|shake|smoothie|drink|soda|cola|espresso|americano|matcha|chocolate)/.test(hay);
-  const burgerLike = /(burger|sandwich|club|monte cristo|wrap)/.test(hay);
-  const breakfastLike = /(silog|breakfast|tocino|longganisa|bangus|bacon|hamsilog|american breakfast|english breakfast|pancake)/.test(hay);
-  const pastaLike = /(pasta|carbonara|spaghetti|marinara|bolognese)/.test(hay);
-  const riceMealLike = /(rice|chicken|wings|steak|tenderloin|meal|plate|platter)/.test(hay);
-  if (beverageLike) {
-    groups.push({ id: 'size', label: 'Size', mode: 'single', required: true, options: [option('Regular', 0, { is_default: true }), option('Large', 30), option('Upsize', 45)] });
-    groups.push({ id: 'temperature', label: 'Style', mode: 'single', required: true, options: [option('Standard', 0, { is_default: true }), option('Iced', 10), option('Less Ice', 0)] });
-    groups.push({ id: 'coffee_addons', label: 'Add-ons', mode: 'multi', required: false, options: [option('Extra shot', 30), option('Oat milk', 25), option('Whipped cream', 20), option('Syrup boost', 15)] });
-    prompt = 'Name or custom request';
-  }
-  if (burgerLike || pastaLike || riceMealLike) {
-    groups.push({ id: 'addons', label: 'Kitchen Add-ons', mode: 'multi', required: false, options: [option('Cheese', 25), option('Egg', 20), option('Bacon', 35), option('Extra sauce', 15)] });
-  }
-  if (breakfastLike) {
-    groups.push({ id: 'egg_style', label: 'Egg Style', mode: 'single', required: true, options: [option('Sunny side up', 0, { is_default: true }), option('Scrambled', 0), option('Over easy', 0)] });
-    bundles.push({ id: 'breakfast_drink', label: 'Breakfast Pairing', required: false, options: [option('No pairing', 0, { is_default: true }), option('Brewed coffee', 35), option('Fresh juice', 55), option('Hot chocolate', 45)] });
-    prompt = prompt || 'Special breakfast note';
-  }
-  if (burgerLike) {
-    bundles.push({ id: 'side_pair', label: 'Pairing', required: false, options: [option('No pairing', 0, { is_default: true }), option('Fries combo', 79), option('Fries + iced tea combo', 129)] });
-  }
-  return { profile_key: slug(item?.display_name || item?.menu_item_name), customer_display_name: item?.display_name || item?.menu_item_name, prompt_note_label: prompt, modifier_groups: groups, bundle_choices: bundles, shortcuts: [] };
+  return {
+    profile_key: explicit?.profile_key || slug(item?.display_name || item?.menu_item_name),
+    customer_display_name: explicit?.customer_display_name || item?.display_name || item?.menu_item_name,
+    prompt_note_label: explicit?.prompt_note_label || '',
+    // Sellable variants and add-ons must exist as Accounting-managed SKUs so inventory follows the sale.
+    modifier_groups: [],
+    bundle_choices: [],
+    shortcuts: [],
+  };
 }
 
 export function createDefaultSelections(profile) {
@@ -119,17 +91,7 @@ export function getLineTags(line) {
 }
 
 export function getPromotionSuggestions(cart, orderType, now = new Date()) {
-  const suggestions = [];
-  const lines = cart.map((line) => ({ line, tags: getLineTags(line) }));
-  const beverageLines = lines.filter((row) => row.tags.has('beverage'));
-  const sandwichLines = lines.filter((row) => row.tags.has('sandwich'));
-  const sideLines = lines.filter((row) => row.tags.has('side'));
-  const breakfastLines = lines.filter((row) => row.tags.has('breakfast'));
-  const hour = now.getHours();
-  if (beverageLines.length && hour >= 14 && hour < 18) suggestions.push({ code: 'happy_hour_beverage', label: 'Happy Hour Beverage 10%', description: '10% off beverage lines from 2PM to 6PM.', kind: 'percent', value: 0.10, line_ids: beverageLines.map((row) => row.line.local_id), override_required: false });
-  if (sandwichLines.length && sideLines.length && beverageLines.length) suggestions.push({ code: 'meal_combo_30', label: 'Meal Combo Less ₱30', description: 'Burger or sandwich with a side and a drink qualifies for ₱30 off.', kind: 'fixed', value: 30, line_ids: [sandwichLines[0].line.local_id], override_required: false });
-  if (orderType === 'dine_in' && breakfastLines.length && beverageLines.length) suggestions.push({ code: 'breakfast_pair_20', label: 'Breakfast Pair Less ₱20', description: 'Breakfast plate with any drink gets ₱20 off.', kind: 'fixed', value: 20, line_ids: [breakfastLines[0].line.local_id], override_required: false });
-  return suggestions;
+  return [];
 }
 
 export function applyPromotion(cart, promotion) {

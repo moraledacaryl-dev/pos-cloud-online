@@ -66,6 +66,29 @@ async function request(path, init = {}, retrying = false) {
   return data;
 }
 
+async function blobRequest(path, retrying = false) {
+  const headers = {};
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  const res = await fetch(`${API_BASE}${normalizedPath}`, { cache: 'no-store', headers });
+  if (res.status === 401 && !retrying) {
+    const refresh = getRefreshToken();
+    if (refresh) {
+      const refreshed = await request('/auth/refresh', { method: 'POST', body: JSON.stringify({ refresh_token: refresh }) }, true);
+      if (refreshed?.access_token) setToken(refreshed.access_token);
+      if (refreshed?.refresh_token) setRefreshToken(refreshed.refresh_token);
+      return blobRequest(path, true);
+    }
+  }
+  if (!res.ok) {
+    let data = null;
+    try { data = await res.json(); } catch { data = null; }
+    throw new Error(data?.detail || 'Request failed');
+  }
+  return res.blob();
+}
+
 export { API_BASE, getToken, getRefreshToken, setToken, setRefreshToken, clearToken, clearRefreshToken, request };
 
 export const bootstrap = () => request('/auth/bootstrap', { method: 'POST' });
@@ -84,6 +107,11 @@ export const createCatalogItem = (payload) => request('/catalog/items', { method
 export const updateCatalogItem = (id, payload) => request(`/catalog/items/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
 export const deleteCatalogItem = (id) => request(`/catalog/items/${id}`, { method: 'DELETE' });
 export const syncCatalogFromAccounting = () => request('/catalog/sync-from-accounting', { method: 'POST' });
+export const fetchRecipeDishes = (params = {}) => request(`/recipes/dishes${qs(params)}`);
+export const fetchRecipeDocuments = (params = {}) => request(`/recipes/${qs(params)}`);
+export const fetchRecipePdf = (menuItemId) => blobRequest(`/recipes/${encodeURIComponent(menuItemId)}/pdf`);
+export const uploadRecipePdf = ({ menuItemId, file, title = '', notes = '' }) => request(`/recipes/${encodeURIComponent(menuItemId)}/pdf${qs({ filename: file?.name || 'recipe.pdf', title, notes })}`, { method: 'PUT', headers: { 'Content-Type': 'application/pdf' }, body: file });
+export const deleteRecipePdf = (menuItemId) => request(`/recipes/${encodeURIComponent(menuItemId)}`, { method: 'DELETE' });
 
 export const fetchOutlets = () => request('/registers/outlets');
 export const createOutlet = (payload) => request('/registers/outlets', { method: 'POST', body: JSON.stringify(payload) });
@@ -107,6 +135,8 @@ export const createOrder = (payload) => request('/orders', { method: 'POST', bod
 export const updateOrder = (id, payload) => request(`/orders/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
 export const holdOrder = (id) => request(`/orders/${id}/hold`, { method: 'POST' });
 export const resumeOrder = (id) => request(`/orders/${id}/resume`, { method: 'POST' });
+export const transferOrderTable = (id, target) => request(`/orders/${id}/transfer-table`, { method: 'POST', body: JSON.stringify(typeof target === 'object' ? target : { target_table_label: target }) });
+export const mergeOrderTable = (id, target) => request(`/orders/${id}/merge-table`, { method: 'POST', body: JSON.stringify(typeof target === 'object' ? target : { target_table_label: target }) });
 export const payOrder = (id, payload) => request(`/orders/${id}/pay`, { method: 'POST', body: JSON.stringify(payload) });
 export const voidOrder = (id, payload) => request(`/orders/${id}/void`, { method: 'POST', body: JSON.stringify(payload) });
 export const fetchRefunds = (id) => request(`/orders/${id}/refunds`);
@@ -148,3 +178,11 @@ export const fetchApprovals = (params = {}) => request(`/approvals${qs(params)}`
 export const fetchApproval = (id) => request(`/approvals/${id}`);
 export const approveApproval = (id, payload = {}) => request(`/approvals/${id}/approve`, { method: 'POST', body: JSON.stringify(payload) });
 export const rejectApproval = (id, payload = {}) => request(`/approvals/${id}/reject`, { method: 'POST', body: JSON.stringify(payload) });
+
+export async function fetchCustomerDisplaySnapshot(channel = 'main') {
+  const res = await fetch(`${API_BASE}/customer-display/${encodeURIComponent(channel)}`, { cache: 'no-store' });
+  if (!res.ok) throw new Error('Customer display server is unavailable.');
+  return res.json();
+}
+
+export const updateCustomerDisplaySnapshot = (snapshot, channel = 'main') => request(`/customer-display/${encodeURIComponent(channel)}`, { method: 'PUT', body: JSON.stringify(snapshot) });

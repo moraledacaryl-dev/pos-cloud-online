@@ -90,7 +90,15 @@ def test_end_to_end_open_shift_order_room_charge_retry_sync_and_close(monkeypatc
     first = asyncio.run(run_outbox_sync(db, limit=20))
     second = asyncio.run(run_outbox_sync(db, limit=20))
     assert first['failed'] >= 1
-    assert second['synced'] >= 1
+    assert second['processed'] == 0
+    failed_rows = db.query(SyncOutboxEvent).filter(SyncOutboxEvent.status == 'failed').all()
+    assert failed_rows
+    for row in failed_rows:
+        row.next_retry_at = '2026-04-20T00:00:00'
+        db.add(row)
+    db.commit()
+    third = asyncio.run(run_outbox_sync(db, limit=20))
+    assert third['synced'] >= 1
     assert db.query(SyncOutboxEvent).filter(SyncOutboxEvent.status == 'synced').count() >= 1
 
     closed = close_register_session(db, session['id'], RegisterSessionClose(closing_actual_cash=550, close_mode='verified', blind_close=False, sign_off_name='Cashier', sign_off_role='Cashier'))

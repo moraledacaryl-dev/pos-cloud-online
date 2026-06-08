@@ -25,11 +25,28 @@ def _entity_links(entity_type: str | None, entity_id: str | None, details: dict 
     return links
 
 
-def write_audit_log(db: Session, *, action: str, entity_type: str, entity_id: str | int | None = None, actor_user_id: int | None = None, actor_username: str | None = None, request_path: str | None = None, request_method: str | None = None, ip_address: str | None = None, status_code: int | None = None, details: dict | list | None = None):
+def write_audit_log(
+    db: Session,
+    *,
+    action: str,
+    entity_type: str,
+    entity_id: str | int | None = None,
+    actor_user_id: int | None = None,
+    actor_username: str | None = None,
+    request_path: str | None = None,
+    request_method: str | None = None,
+    ip_address: str | None = None,
+    status_code: int | None = None,
+    details: dict | list | None = None,
+    commit: bool = True,
+):
     row = AuditLog(actor_user_id=actor_user_id, actor_username=actor_username, action=action, entity_type=entity_type, entity_id=str(entity_id) if entity_id is not None else None, request_path=request_path, request_method=request_method, ip_address=ip_address, status_code=status_code, details_json=json.dumps(details or {}, ensure_ascii=False))
     db.add(row)
-    db.commit()
-    db.refresh(row)
+    if commit:
+        db.commit()
+        db.refresh(row)
+    else:
+        db.flush()
     return row
 
 

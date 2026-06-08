@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { API_BASE, fetchKitchenTickets, getToken, updateKitchenLineStatus } from '../../lib/api';
 import { badgeClass, kitchenStatusLabel, sourceLabel, statusBadgeClass, useGroupedKitchenTickets } from '../../lib/kitchen';
+import ActionModal from '../../components/ActionModal';
 
 const STATIONS = [
   { key: '', label: 'All' },
@@ -56,6 +57,14 @@ function allDayRows(tickets) {
   return Array.from(map.values()).sort((a, b) => a.station.localeCompare(b.station) || a.item.localeCompare(b.item));
 }
 
+function kitchenStreamUrl(station, token) {
+  const base = API_BASE.startsWith('http') ? API_BASE : `${window.location.origin}${API_BASE}`;
+  const url = new URL(`${base}/kitchen/stream`);
+  if (station) url.searchParams.set('station', station);
+  url.searchParams.set('token', token);
+  return url.toString();
+}
+
 export default function KitchenPage({ initialStation = '', initialView = '' }) {
   const defaults = stationDefaults(initialStation);
   const [station, setStation] = useState(defaults.station);
@@ -65,6 +74,7 @@ export default function KitchenPage({ initialStation = '', initialView = '' }) {
   const [error, setError] = useState('');
   const [connectionState, setConnectionState] = useState('connecting');
   const [newTicketCount, setNewTicketCount] = useState(0);
+  const [partialLine, setPartialLine] = useState(null);
   const seenRef = useRef(new Set());
   const audioRef = useRef(null);
   const streamRef = useRef(null);
@@ -103,10 +113,7 @@ export default function KitchenPage({ initialStation = '', initialView = '' }) {
   useEffect(() => {
     const token = getToken();
     if (!token) return;
-    const url = new URL(`${API_BASE}/kitchen/stream`);
-    if (station) url.searchParams.set('station', station);
-    url.searchParams.set('token', token);
-    const es = new EventSource(url.toString());
+    const es = new EventSource(kitchenStreamUrl(station, token));
     streamRef.current = es;
     es.addEventListener('hello', () => setConnectionState('connected'));
     const refresh = () => {
@@ -149,6 +156,15 @@ export default function KitchenPage({ initialStation = '', initialView = '' }) {
     }
   }
 
+  async function handlePartialReady(row, value) {
+    const quantity = Number(row.quantity || 0);
+    const readyQuantity = Number(value || 0);
+    if (!readyQuantity || readyQuantity <= 0 || readyQuantity >= quantity) {
+      throw new Error(`Enter a quantity between 1 and ${Math.max(quantity - 1, 1)}.`);
+    }
+    await pushStatus(row.line_id, { kitchen_status: 'in_progress', item_readiness: 'partial', ready_quantity: readyQuantity }, `${row.item_name_snapshot} partially ready.`);
+  }
+
   function lineButtons(row) {
     const buttons = [];
     if (row.kitchen_status === 'held') {
@@ -160,13 +176,7 @@ export default function KitchenPage({ initialStation = '', initialView = '' }) {
       buttons.push(<button key="hold" type="button" className="secondary" onClick={() => pushStatus(row.line_id, { kitchen_status: 'held' }, `${row.item_name_snapshot} held.`)}>Hold</button>);
     }
     if (row.kitchen_status === 'in_progress' && Number(row.quantity || 0) > 1) {
-      buttons.push(<button key="partial" type="button" className="secondary" onClick={() => {
-        const qty = window.prompt(`How many of ${row.quantity} are ready?`, String(Math.max(1, Math.min(Number(row.quantity || 1) - 1, Number(row.quantity || 1)))));
-        if (!qty) return;
-        const parsed = Number(qty || 0);
-        if (!parsed || parsed <= 0 || parsed >= Number(row.quantity || 0)) return;
-        pushStatus(row.line_id, { kitchen_status: 'in_progress', item_readiness: 'partial', ready_quantity: parsed }, `${row.item_name_snapshot} partially ready.`);
-      }}>Partial</button>);
+      buttons.push(<button key="partial" type="button" className="secondary" onClick={() => setPartialLine(row)}>Partial</button>);
     }
     if (['queued', 'acknowledged', 'in_progress'].includes(row.kitchen_status)) {
       buttons.push(<button key="ready" type="button" className="secondary" onClick={() => pushStatus(row.line_id, { kitchen_status: 'ready' }, `${row.item_name_snapshot} ready.`)}>Ready</button>);
@@ -274,6 +284,21 @@ export default function KitchenPage({ initialStation = '', initialView = '' }) {
           {!grouped.length && <section className="section"><p className="muted">No tickets in this view.</p></section>}
         </section>
       )}
+      <ActionModal
+        open={!!partialLine}
+        title={`Mark ${partialLine?.item_name_snapshot || 'item'} partially ready`}
+        description={`Enter the ready quantity. The full line contains ${partialLine?.quantity || 0}.`}
+        fieldLabel="Ready quantity"
+        inputType="number"
+        min="1"
+        max={Math.max(Number(partialLine?.quantity || 1) - 1, 1)}
+        defaultValue={Math.max(Number(partialLine?.quantity || 1) - 1, 1)}
+        required
+        confirmLabel="Save partial readiness"
+        tone="normal"
+        onClose={() => setPartialLine(null)}
+        onConfirm={(value) => handlePartialReady(partialLine, value)}
+      />
     </div>
   );
 }

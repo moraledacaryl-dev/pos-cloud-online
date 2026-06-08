@@ -83,6 +83,7 @@ class CatalogItemCreate(BaseModel):
     service_charge_rate: float = 0
     is_active: bool = True
     is_available: bool = True
+    availability_override: bool | None = None
     sort_order: int = 0
     accounting_hash: str | None = None
     last_sync_at: str | None = None
@@ -102,6 +103,7 @@ class CatalogItemUpdate(BaseModel):
     service_charge_rate: float | None = None
     is_active: bool | None = None
     is_available: bool | None = None
+    availability_override: bool | None = None
     sort_order: int | None = None
     accounting_hash: str | None = None
     last_sync_at: str | None = None
@@ -175,6 +177,7 @@ class OrderCreate(BaseModel):
     order_type: str = 'dine_in'
     source_channel: str | None = None
     guest_name: str | None = None
+    service_area: str | None = None
     table_label: str | None = None
     seat_count: int | None = None
     note: str | None = None
@@ -186,6 +189,7 @@ class OrderUpdate(BaseModel):
     order_type: str | None = None
     source_channel: str | None = None
     guest_name: str | None = None
+    service_area: str | None = None
     table_label: str | None = None
     seat_count: int | None = None
     note: str | None = None
@@ -200,6 +204,16 @@ class OrderPayPayload(BaseModel):
 class OrderVoidPayload(BaseModel):
     reason: str
     approved_by_user_id: int | None = None
+
+
+class OrderTableTransferPayload(BaseModel):
+    target_table_label: str
+    target_service_area: str | None = None
+
+
+class OrderTableMergePayload(BaseModel):
+    target_table_label: str
+    target_service_area: str | None = None
 
 
 class RefundLineCreate(BaseModel):

@@ -3,8 +3,8 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import require_permissions
 from app.db.database import get_db
-from app.schemas.common import OrderCreate, OrderPayPayload, OrderUpdate, OrderVoidPayload, RefundCreate
-from app.services.pos_service import create_order, create_refund, get_order, list_orders, list_refunds, pay_order, set_order_status, update_order, void_order
+from app.schemas.common import OrderCreate, OrderPayPayload, OrderTableMergePayload, OrderTableTransferPayload, OrderUpdate, OrderVoidPayload, RefundCreate
+from app.services.pos_service import create_order, create_refund, get_order, list_orders, list_refunds, merge_order_table, pay_order, set_order_status, transfer_order_table, update_order, void_order
 
 router = APIRouter()
 
@@ -34,7 +34,7 @@ def add_order(payload: OrderCreate, db: Session = Depends(get_db), current_user=
 @router.put('/{order_id}')
 def edit_order(order_id: int, payload: OrderUpdate, db: Session = Depends(get_db), user=Depends(require_permissions('orders.manage'))):
     try:
-        return update_order(db, order_id, payload)
+        return update_order(db, order_id, payload, user_id=getattr(user, 'id', None))
     except ValueError as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
@@ -43,7 +43,7 @@ def edit_order(order_id: int, payload: OrderUpdate, db: Session = Depends(get_db
 @router.post('/{order_id}/hold')
 def hold_order(order_id: int, db: Session = Depends(get_db), user=Depends(require_permissions('orders.manage'))):
     try:
-        return set_order_status(db, order_id, 'held')
+        return set_order_status(db, order_id, 'held', user_id=getattr(user, 'id', None))
     except ValueError as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
@@ -52,7 +52,7 @@ def hold_order(order_id: int, db: Session = Depends(get_db), user=Depends(requir
 @router.post('/{order_id}/resume')
 def resume_order(order_id: int, db: Session = Depends(get_db), user=Depends(require_permissions('orders.manage'))):
     try:
-        return set_order_status(db, order_id, 'draft')
+        return set_order_status(db, order_id, 'draft', user_id=getattr(user, 'id', None))
     except ValueError as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
@@ -62,6 +62,24 @@ def resume_order(order_id: int, db: Session = Depends(get_db), user=Depends(requ
 def settle_order(order_id: int, payload: OrderPayPayload, db: Session = Depends(get_db), current_user=Depends(require_permissions('orders.manage'))):
     try:
         return pay_order(db, order_id, payload, user_id=getattr(current_user, 'id', None))
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post('/{order_id}/transfer-table')
+def transfer_table(order_id: int, payload: OrderTableTransferPayload, db: Session = Depends(get_db), user=Depends(require_permissions('orders.manage'))):
+    try:
+        return transfer_order_table(db, order_id, payload.target_table_label, target_service_area=payload.target_service_area, user_id=getattr(user, 'id', None))
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post('/{order_id}/merge-table')
+def merge_table(order_id: int, payload: OrderTableMergePayload, db: Session = Depends(get_db), user=Depends(require_permissions('orders.manage'))):
+    try:
+        return merge_order_table(db, order_id, payload.target_table_label, target_service_area=payload.target_service_area, user_id=getattr(user, 'id', None))
     except ValueError as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))

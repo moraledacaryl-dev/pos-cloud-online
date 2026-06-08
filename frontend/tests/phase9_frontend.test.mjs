@@ -3,11 +3,14 @@ import assert from "node:assert/strict";
 import {
   applyKeypadInput,
   findRoomChargeBookingMatches,
+  explainSyncError,
   rankCatalogItems,
   roomChargeStatusMeta,
+  summarizeTerminalHealth,
   summarizeOutboxRows,
   summarizeRoomChargeQueue,
 } from "../lib/ui_contracts.mjs";
+import { filterRecipeDishes, MAX_RECIPE_PDF_BYTES, validateRecipePdfFile } from "../lib/recipeLibrary.mjs";
 
 test("catalog ranking prefers exact SKU and tight name matches", () => {
   const ranked = rankCatalogItems([
@@ -64,6 +67,55 @@ test("outbox summary counts retries separately from status totals", () => {
   assert.equal(summary.retrying, 1);
 });
 
+test("sync error explanations give manager recovery actions", () => {
+  assert.match(
+    explainSyncError({ event_type: 'room_charge.request_created', last_error: 'Original receivable for reversal was not found' }).action,
+    /original room charge synced first/i,
+  );
+  assert.match(
+    explainSyncError({ event_type: 'payment.collected', last_error: '401 unauthorized invalid token' }).summary,
+    /credentials/i,
+  );
+  assert.match(
+    explainSyncError({ event_type: 'order.finalized', last_error: 'Event type is disabled' }).action,
+    /enable this sync type/i,
+  );
+  assert.match(
+    explainSyncError({ event_type: 'cash_movement.created', last_error: 'ECONNREFUSED connection timeout' }).summary,
+    /unreachable/i,
+  );
+});
+
+test("terminal health summary prioritizes offline and blocked sync states", () => {
+  assert.deepEqual(
+    summarizeTerminalHealth(null, { online: false, offlineDraftsCount: 2 }).tone,
+    'warn',
+  );
+  const blocked = summarizeTerminalHealth({
+    database: { ok: true, migration: { requires_upgrade: false } },
+    accounting_api: { ok: true },
+    sync_worker: { is_stale: false },
+    outbox: { failed: 0, blocked: 1, due_now: 0 },
+  }, { online: true });
+  assert.equal(blocked.tone, 'danger');
+  assert.match(blocked.action, /Sync Queue/i);
+});
+
 test("room charge status metadata exposes display tone", () => {
   assert.deepEqual(roomChargeStatusMeta('settled_at_frontdesk'), { tone: 'success', label: 'Settled' });
+});
+
+test("recipe dishes filter by PDF status without duplicating accounting variants", () => {
+  const rows = filterRecipeDishes([
+    { external_menu_item_id: 1, dish_name: 'Iced Coffee', category_name: 'Beverages', variants: ['Regular', 'Large'], recipe: { id: 10 } },
+    { external_menu_item_id: 2, dish_name: 'Club Sandwich', category_name: 'Meals', variants: [], recipe: null },
+  ], { q: 'large', category: 'Beverages', status: 'with_pdf' });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].dish_name, 'Iced Coffee');
+});
+
+test("recipe upload validation accepts PDFs and rejects wrong or oversized files", () => {
+  assert.equal(validateRecipePdfFile({ name: 'recipe.pdf', type: 'application/pdf', size: 1024 }), '');
+  assert.match(validateRecipePdfFile({ name: 'recipe.txt', type: 'text/plain', size: 1024 }), /PDF/);
+  assert.match(validateRecipePdfFile({ name: 'large.pdf', type: 'application/pdf', size: MAX_RECIPE_PDF_BYTES + 1 }), /15 MB/);
 });

@@ -14,20 +14,43 @@ import {
   summarizeRoomChargeQueue,
 } from '../../lib/ui_contracts.mjs';
 
-function todayISO() { return new Date().toISOString().slice(0, 10); }
+function todayISO() {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${now.getFullYear()}-${month}-${day}`;
+}
 function money(value) { return `₱${Number(value || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
 
-const STATUS_OPTIONS = ['', 'pending_frontdesk_post', 'posted_to_beds24', 'rejected', 'disputed', 'settled_at_frontdesk', 'written_off', 'cancelled'];
+const ALLOWED_STATUS_TRANSITIONS = {
+  pending_selection: ['pending_frontdesk_post', 'posted_to_beds24', 'rejected', 'disputed', 'cancelled'],
+  pending_frontdesk_post: ['posted_to_beds24', 'rejected', 'disputed', 'cancelled'],
+  posted_to_beds24: ['settled_at_frontdesk', 'disputed', 'written_off'],
+  disputed: ['settled_at_frontdesk', 'rejected', 'written_off'],
+  settled_at_frontdesk: [],
+  written_off: [],
+  rejected: [],
+  cancelled: [],
+};
 const STATUS_VIEWS = [
   { key: 'all', label: 'All' },
   { key: 'pending_frontdesk_post', label: 'Pending' },
-  { key: 'posted_to_beds24', label: 'Posted' },
+  { key: 'posted_to_beds24', label: 'Manually posted' },
   { key: 'settled_at_frontdesk', label: 'Settled' },
   { key: 'attention', label: 'Needs review' },
 ];
 
 const emptyBooking = { stay_date: todayISO(), room_number: '', guest_name: '', guest_label: '', arrival_date: '', departure_date: '', booking_status: 'in_house', beds24_booking_id: '', source: 'manual_snapshot', notes: '' };
-const emptyStatus = { posting_status: 'posted_to_beds24', beds24_posting_reference: '', note: '', dispute_note: '', later_payment_status: '', payment_date: todayISO(), rejected_reason: '', bill_to: '' };
+const emptyStatus = { posting_status: 'posted_to_beds24', beds24_posting_reference: '', note: '', dispute_note: '', later_payment_status: '', payment_date: '', rejected_reason: '', bill_to: '' };
+const STATUS_HELP = {
+  pending_frontdesk_post: 'Use this when the folio still needs front-desk posting. No payment date is recorded.',
+  posted_to_beds24: 'Use this after staff manually post the charge to Beds24. This does not mean it has been paid.',
+  rejected: 'Use rejected only when front desk confirms the charge should not be posted.',
+  disputed: 'Use disputed when the guest or front desk needs review before settlement.',
+  settled_at_frontdesk: 'Use settled only when the front desk confirms payment or final settlement.',
+  written_off: 'Use written off only after manager approval and a clear note.',
+  cancelled: 'Use cancelled when the charge was created in error before posting.',
+};
 
 function statusTone(status) {
   return roomChargeStatusMeta(status).tone;
@@ -40,7 +63,7 @@ function syncStatusFormFromRow(row) {
     note: row?.note || '',
     dispute_note: row?.dispute_note || '',
     later_payment_status: row?.later_payment_status || '',
-    payment_date: row?.payment_date || todayISO(),
+    payment_date: row?.payment_date || '',
     rejected_reason: row?.rejected_reason || '',
     bill_to: row?.bill_to || '',
   };
@@ -95,6 +118,17 @@ export default function RoomChargesPage() {
     if (!q) return bookings;
     return bookings.filter((row) => [row.room_number, row.guest_name, row.guest_label, row.beds24_booking_id].some((value) => String(value || '').toLowerCase().includes(q)));
   }, [bookings, bookingSearch]);
+  const selectedStatus = statusForm.posting_status || 'posted_to_beds24';
+  const isSettlementStatus = selectedStatus === 'settled_at_frontdesk';
+  const isPostedStatus = selectedStatus === 'posted_to_beds24';
+  const isRejectedStatus = selectedStatus === 'rejected';
+  const isDisputedStatus = selectedStatus === 'disputed';
+  const isWrittenOffStatus = selectedStatus === 'written_off';
+  const statusOptions = useMemo(() => {
+    const current = String(selected?.posting_status || 'pending_frontdesk_post').toLowerCase();
+    return Array.from(new Set([current, ...(ALLOWED_STATUS_TRANSITIONS[current] || [])])).filter(Boolean);
+  }, [selected?.posting_status]);
+  const isFinalSelectedStatus = !!selected && (ALLOWED_STATUS_TRANSITIONS[String(selected.posting_status || '').toLowerCase()] || []).length === 0;
 
   useEffect(() => {
     if (!queueRows.length) {
@@ -118,7 +152,25 @@ export default function RoomChargesPage() {
     setError('');
     setNotice('');
     try {
-      const updated = await updateRoomChargeStatus(selected.id, statusForm);
+      const payload = {
+        posting_status: selectedStatus,
+        note: statusForm.note,
+        bill_to: statusForm.bill_to,
+      };
+      if (isPostedStatus || isSettlementStatus) {
+        payload.beds24_posting_reference = statusForm.beds24_posting_reference;
+      }
+      if (isSettlementStatus) {
+        payload.payment_date = statusForm.payment_date || todayISO();
+        payload.later_payment_status = statusForm.later_payment_status || 'settled';
+      }
+      if (isRejectedStatus) {
+        payload.rejected_reason = statusForm.rejected_reason;
+      }
+      if (isDisputedStatus) {
+        payload.dispute_note = statusForm.dispute_note;
+      }
+      const updated = await updateRoomChargeStatus(selected.id, payload);
       setSelected(updated);
       setStatusForm(syncStatusFormFromRow(updated));
       setNotice(`Room charge ${updated.posting_uuid} updated to ${updated.posting_status_label}.`);
@@ -177,11 +229,11 @@ export default function RoomChargesPage() {
         <div className="toolbar">
           <div>
             <h1>Room Charge Queue</h1>
-            <p className="muted">Front desk can move each charge from pending, to posted, to settled with clear status, dispute review, and guest folio context.</p>
+            <p className="muted">Front desk can track each charge from pending, to manually posted, to settled. Marking a charge posted records staff confirmation only; it does not call Beds24.</p>
           </div>
           <div className="row wrap">
             <span className="badge warn">Pending: {summary.pending_frontdesk_post}</span>
-            <span className="badge info">Posted: {summary.posted_to_beds24}</span>
+            <span className="badge info">Manually posted: {summary.posted_to_beds24}</span>
             <span className="badge success">Settled: {summary.settled_at_frontdesk}</span>
             {!!summary.attention && <span className="badge danger">Needs review: {summary.attention}</span>}
             {loading && <span className="badge info">Loading…</span>}
@@ -237,7 +289,7 @@ export default function RoomChargesPage() {
             <div className="row" style={{ justifyContent: 'space-between' }}>
               <div>
                 <strong>{filters.view === 'all' ? 'Posting Queue' : `${STATUS_VIEWS.find((view) => view.key === filters.view)?.label || 'Queue'} Screen`}</strong>
-                <div className="small muted">Clearer pending vs posted vs settled front-desk list</div>
+                <div className="small muted">Clearer pending vs manually posted vs settled front-desk list</div>
               </div>
               <span className="small muted">{queueRows.length} results</span>
             </div>
@@ -285,7 +337,7 @@ export default function RoomChargesPage() {
 
                 <div className="status-rail">
                   <div className={`status-rail-step ${['pending_frontdesk_post', 'posted_to_beds24', 'settled_at_frontdesk'].includes(selected.posting_status) ? 'active' : ''}`}>Pending</div>
-                  <div className={`status-rail-step ${['posted_to_beds24', 'settled_at_frontdesk'].includes(selected.posting_status) ? 'active' : ''}`}>Posted</div>
+                  <div className={`status-rail-step ${['posted_to_beds24', 'settled_at_frontdesk'].includes(selected.posting_status) ? 'active' : ''}`}>Manually posted</div>
                   <div className={`status-rail-step ${selected.posting_status === 'settled_at_frontdesk' ? 'active' : ''}`}>Settled</div>
                   {['rejected', 'disputed', 'written_off', 'cancelled'].includes(String(selected.posting_status || '').toLowerCase()) && <div className="status-rail-step danger active">Exception</div>}
                 </div>
@@ -312,47 +364,66 @@ export default function RoomChargesPage() {
                 </div>
 
                 <form className="form-stack" onSubmit={handleStatusSubmit}>
+                  <div className={`card status-guidance ${statusTone(selectedStatus)}`}>
+                    <strong>{roomChargeStatusMeta(selectedStatus).label}</strong>
+                    <div className="small muted">{STATUS_HELP[selectedStatus] || 'Choose the next front-desk status for this room charge.'}</div>
+                  </div>
                   <div className="form-grid">
                     <label className="field">
                       New Status
-                      <select value={statusForm.posting_status} onChange={(e) => setStatusForm((prev) => ({ ...prev, posting_status: e.target.value }))}>
-                        {STATUS_OPTIONS.filter(Boolean).map((status) => <option key={status} value={status}>{roomChargeStatusMeta(status).label}</option>)}
+                      <select value={statusForm.posting_status} disabled={isFinalSelectedStatus} onChange={(e) => setStatusForm((prev) => ({ ...prev, posting_status: e.target.value }))}>
+                        {statusOptions.map((status) => <option key={status} value={status}>{roomChargeStatusMeta(status).label}</option>)}
                       </select>
                     </label>
-                    <label className="field">
-                      Beds24 Posting Reference
-                      <input value={statusForm.beds24_posting_reference} onChange={(e) => setStatusForm((prev) => ({ ...prev, beds24_posting_reference: e.target.value }))} placeholder="Invoice note / manual reference" />
-                    </label>
-                    <label className="field">
-                      Later Payment Status
-                      <input value={statusForm.later_payment_status} onChange={(e) => setStatusForm((prev) => ({ ...prev, later_payment_status: e.target.value }))} placeholder="pending / settled / disputed" />
-                    </label>
-                    <label className="field">
-                      Payment Date
-                      <input type="date" value={statusForm.payment_date} onChange={(e) => setStatusForm((prev) => ({ ...prev, payment_date: e.target.value }))} />
-                    </label>
+                    {(isPostedStatus || isSettlementStatus) && (
+                      <label className="field">
+                        Manual Posting Reference
+                        <input value={statusForm.beds24_posting_reference} onChange={(e) => setStatusForm((prev) => ({ ...prev, beds24_posting_reference: e.target.value }))} placeholder="Beds24 folio note / invoice reference" />
+                      </label>
+                    )}
+                    {isSettlementStatus && (
+                      <>
+                        <label className="field">
+                          Later Payment Status
+                          <select value={statusForm.later_payment_status || 'settled'} onChange={(e) => setStatusForm((prev) => ({ ...prev, later_payment_status: e.target.value }))}>
+                            <option value="settled">Settled</option>
+                            <option value="pending">Pending follow-up</option>
+                            <option value="disputed">Disputed after posting</option>
+                          </select>
+                        </label>
+                        <label className="field">
+                          Payment Date
+                          <input type="date" value={statusForm.payment_date} onChange={(e) => setStatusForm((prev) => ({ ...prev, payment_date: e.target.value }))} placeholder={todayISO()} />
+                        </label>
+                      </>
+                    )}
                     <label className="field">
                       Bill To
                       <input value={statusForm.bill_to} onChange={(e) => setStatusForm((prev) => ({ ...prev, bill_to: e.target.value }))} placeholder="guest / company / event organizer" />
                     </label>
-                    <label className="field">
-                      Rejected Reason
-                      <input value={statusForm.rejected_reason} onChange={(e) => setStatusForm((prev) => ({ ...prev, rejected_reason: e.target.value }))} placeholder="Only if rejected" />
-                    </label>
+                    {isRejectedStatus && (
+                      <label className="field">
+                        Rejected Reason
+                        <input value={statusForm.rejected_reason} onChange={(e) => setStatusForm((prev) => ({ ...prev, rejected_reason: e.target.value }))} placeholder="Wrong guest, checked out, duplicate, etc." />
+                      </label>
+                    )}
                   </div>
                   <label className="field">
-                    Posting Note
-                    <textarea value={statusForm.note} onChange={(e) => setStatusForm((prev) => ({ ...prev, note: e.target.value }))} placeholder="Front-desk note, posting detail, or follow-up" />
+                    {isWrittenOffStatus ? 'Write-off Note' : 'Posting Note'}
+                    <textarea value={statusForm.note} onChange={(e) => setStatusForm((prev) => ({ ...prev, note: e.target.value }))} placeholder={isWrittenOffStatus ? 'Manager approval reason and write-off detail' : 'Front-desk note, posting detail, or follow-up'} />
                   </label>
-                  <label className="field">
-                    Dispute Note
-                    <textarea value={statusForm.dispute_note} onChange={(e) => setStatusForm((prev) => ({ ...prev, dispute_note: e.target.value }))} placeholder="Explain any guest dispute or mismatch" />
-                  </label>
+                  {isDisputedStatus && (
+                    <label className="field">
+                      Dispute Note
+                      <textarea value={statusForm.dispute_note} onChange={(e) => setStatusForm((prev) => ({ ...prev, dispute_note: e.target.value }))} placeholder="Explain any guest dispute or mismatch" />
+                    </label>
+                  )}
                   <div className="row wrap">
-                    <button type="submit" className="primary">Update Status</button>
-                    <button type="button" className="secondary" onClick={() => setStatusForm((prev) => ({ ...prev, posting_status: 'posted_to_beds24' }))}>Mark as Posted</button>
-                    <button type="button" className="secondary" onClick={() => setStatusForm((prev) => ({ ...prev, posting_status: 'settled_at_frontdesk' }))}>Mark as Settled</button>
-                    <button type="button" className="secondary" onClick={() => setStatusForm((prev) => ({ ...prev, posting_status: 'disputed' }))}>Flag as Disputed</button>
+                    <button type="submit" className="primary" disabled={isFinalSelectedStatus}>Update Status</button>
+                    {statusOptions.includes('posted_to_beds24') && <button type="button" className="secondary" onClick={() => setStatusForm((prev) => ({ ...prev, posting_status: 'posted_to_beds24', later_payment_status: '', payment_date: '' }))}>Mark Posted Manually</button>}
+                    {statusOptions.includes('settled_at_frontdesk') && <button type="button" className="secondary" onClick={() => setStatusForm((prev) => ({ ...prev, posting_status: 'settled_at_frontdesk', later_payment_status: prev.later_payment_status || 'settled', payment_date: prev.payment_date || todayISO() }))}>Mark as Settled</button>}
+                    {statusOptions.includes('disputed') && <button type="button" className="secondary" onClick={() => setStatusForm((prev) => ({ ...prev, posting_status: 'disputed', later_payment_status: '', payment_date: '' }))}>Flag as Disputed</button>}
+                    {isFinalSelectedStatus && <span className="small muted">Final status. Manager reopen is not enabled for this queue.</span>}
                   </div>
                 </form>
               </div>

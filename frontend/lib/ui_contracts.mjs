@@ -92,7 +92,7 @@ export function roomChargeStatusMeta(status) {
   const key = String(status || '').trim().toLowerCase();
   const map = {
     pending_frontdesk_post: { tone: 'warn', label: 'Pending post' },
-    posted_to_beds24: { tone: 'info', label: 'Posted' },
+    posted_to_beds24: { tone: 'info', label: 'Manually marked posted' },
     settled_at_frontdesk: { tone: 'success', label: 'Settled' },
     rejected: { tone: 'danger', label: 'Rejected' },
     disputed: { tone: 'warn', label: 'Disputed' },
@@ -159,6 +159,98 @@ export function summarizeOutboxRows(rows = []) {
     if (moneyNumber(row.retry_count) > 0 && status !== 'synced') summary.retrying += 1;
   }
   return summary;
+}
+
+export function summarizeTerminalHealth(health = null, { online = true, error = '', offlineDraftsCount = 0 } = {}) {
+  if (!online) {
+    return {
+      tone: 'warn',
+      label: 'Offline draft mode',
+      detail: 'Save orders locally. Payments, room charges, cash movements, and close session must wait for connection.',
+      action: offlineDraftsCount ? 'Restore or review local drafts when POS is online again.' : 'Use Save Offline Draft before leaving the screen.',
+    };
+  }
+  if (error) {
+    return {
+      tone: 'danger',
+      label: 'Health check failed',
+      detail: error,
+      action: 'Tell a manager to open Sync Queue diagnostics if this stays red.',
+    };
+  }
+  if (!health) {
+    return {
+      tone: 'info',
+      label: 'Checking systems',
+      detail: 'Reading POS server, Accounting sync, worker, and queue status.',
+      action: 'Continue order taking while the check finishes.',
+    };
+  }
+
+  const outbox = health.outbox || {};
+  const issues = [];
+  if (!health.database?.ok || health.database?.migration?.requires_upgrade) issues.push('database migration');
+  if (!health.accounting_api?.ok) issues.push('Accounting connection');
+  if (health.sync_worker?.is_stale) issues.push('sync worker');
+  if (moneyNumber(outbox.blocked) > 0) issues.push(`${moneyNumber(outbox.blocked)} blocked sync`);
+  if (moneyNumber(outbox.failed) > 0) issues.push(`${moneyNumber(outbox.failed)} failed sync`);
+  if (offlineDraftsCount > 0) issues.push(`${offlineDraftsCount} local draft${offlineDraftsCount === 1 ? '' : 's'}`);
+
+  if (!issues.length) {
+    return {
+      tone: 'success',
+      label: 'Ready',
+      detail: `${moneyNumber(outbox.due_now)} queued sync event${moneyNumber(outbox.due_now) === 1 ? '' : 's'} now. Worker is healthy.`,
+      action: 'Normal cashier operations can continue.',
+    };
+  }
+  const severe = issues.some((item) => /database|Accounting|blocked/.test(item));
+  return {
+    tone: severe ? 'danger' : 'warn',
+    label: severe ? 'Manager review' : 'Watch',
+    detail: issues.join(' / '),
+    action: severe ? 'Open Sync Queue before closing or posting room charges.' : 'Continue service, then clear the queue during the next quiet moment.',
+  };
+}
+
+export function explainSyncError(row = {}) {
+  const error = String(row.last_error || row.error || '').toLowerCase();
+  const type = String(row.event_type || '').toLowerCase();
+  const text = String(row.last_error || row.error || '').trim();
+  if (!text) {
+    return {
+      summary: 'No error was recorded for this event.',
+      action: 'Retry if the event is still pending, or inspect the raw payload before archiving.',
+    };
+  }
+  if (type === 'room_charge.request_created' && /original receivable|not found|reverses_source|reversal/.test(error)) {
+    return {
+      summary: 'Accounting rejected this room-charge reversal because the original receivable was not found or not linked.',
+      action: 'Confirm the original room charge synced first, then retry this reversal.',
+    };
+  }
+  if (/401|403|unauthorized|forbidden|invalid token|secret|auth/.test(error)) {
+    return {
+      summary: 'Accounting rejected the sync credentials.',
+      action: 'Check the Accounting URL, token, and integration secret in Settings, then retry.',
+    };
+  }
+  if (/disabled|sync type|event type.*off|not enabled/.test(error)) {
+    return {
+      summary: 'This event type is disabled for sync.',
+      action: 'Enable this sync type in Settings or archive the event with a clear reason.',
+    };
+  }
+  if (/failed to fetch|network|timeout|econnrefused|unreachable|connection/.test(error)) {
+    return {
+      summary: 'Accounting API is unreachable.',
+      action: 'Check the Accounting service and network connection, then retry.',
+    };
+  }
+  return {
+    summary: text.length > 140 ? `${text.slice(0, 140)}...` : text,
+    action: 'Open details, confirm the payload is correct, then retry or archive with a note.',
+  };
 }
 
 export function deriveKdsBoard(rows = []) {

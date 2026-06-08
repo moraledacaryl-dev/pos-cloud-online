@@ -301,7 +301,7 @@ export default function OrdersPage() {
       </div>
 
       {refundModalOpen && (
-        <div className="modal-backdrop">
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
           <div className="modal-card modal-card-medium">
             <div className="modal-header">
               <div>

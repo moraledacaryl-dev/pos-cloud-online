@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import uuid
 from datetime import datetime
@@ -49,11 +50,16 @@ from app.schemas.common import (
 from app.services.approval_service import create_manager_approval
 from app.services.audit_service import write_audit_log
 from app.services.kds_stream import publish_kds_event
+from app.services.permission_service import get_user_permission_keys
 
+
+logger = logging.getLogger(__name__)
 
 TENDER_TYPES = ['cash', 'gcash', 'card', 'bank_transfer', 'room_charge', 'mixed']
 IMMEDIATE_SETTLEMENT_TENDERS = {'cash', 'gcash', 'card', 'bank_transfer'}
 FOLIO_PENDING_TENDERS = {'room_charge'}
+ACTIVE_TABLE_ORDER_STATUSES = {'draft', 'held', 'open', 'sent', 'served', 'unpaid'}
+INACTIVE_TABLE_ORDER_STATUSES = {'paid', 'voided', 'cancelled', 'refunded', 'merged', 'closed', 'folio_pending'}
 KDS_STATION_ALIASES = {
     '': 'kitchen',
     'restaurant': 'kitchen',
@@ -131,17 +137,23 @@ def _actor_username(db: Session, user_id: int | None) -> str | None:
     return user.username if user else None
 
 
-def _audit_event(db: Session, *, action: str, entity_type: str, entity_id: int | str | None = None, user_id: int | None = None, details: dict | list | None = None):
+def _audit_event(db: Session, *, action: str, entity_type: str, entity_id: int | str | None = None, user_id: int | None = None, details: dict | list | None = None, commit: bool = True):
     try:
-        write_audit_log(db, action=action, entity_type=entity_type, entity_id=entity_id, actor_user_id=user_id, actor_username=_actor_username(db, user_id), details=details or {})
+        write_audit_log(db, action=action, entity_type=entity_type, entity_id=entity_id, actor_user_id=user_id, actor_username=_actor_username(db, user_id), details=details or {}, commit=commit)
     except Exception:
-        pass
+        logger.exception('Failed to write audit event action=%s entity_type=%s entity_id=%s', action, entity_type, entity_id)
 
 
-def _record_approval(db: Session, *, approval_type: str, entity_type: str, entity_id: int | str | None = None, requested_by_user_id: int | None = None, approved_by_user_id: int | None = None, requested_reason: str | None = None, decision_note: str | None = None, request_details: dict | list | None = None):
+def _record_approval(db: Session, *, approval_type: str, entity_type: str, entity_id: int | str | None = None, requested_by_user_id: int | None = None, approved_by_user_id: int | None = None, requested_reason: str | None = None, decision_note: str | None = None, request_details: dict | list | None = None, required: bool = False, commit: bool = True):
     try:
-        return create_manager_approval(db, approval_type=approval_type, entity_type=entity_type, entity_id=entity_id, requested_by_user_id=requested_by_user_id, approved_by_user_id=approved_by_user_id, requested_reason=requested_reason, decision_note=decision_note, request_details=request_details)
-    except Exception:
+        approval = create_manager_approval(db, approval_type=approval_type, entity_type=entity_type, entity_id=entity_id, requested_by_user_id=requested_by_user_id, approved_by_user_id=approved_by_user_id, requested_reason=requested_reason, decision_note=decision_note, request_details=request_details, commit=commit)
+        if required and approval.get('status') != 'approved':
+            raise ValueError('Manager approval is required before this action can be completed.')
+        return approval
+    except Exception as exc:
+        logger.exception('Failed to record manager approval approval_type=%s entity_type=%s entity_id=%s', approval_type, entity_type, entity_id)
+        if required:
+            raise ValueError('Manager approval could not be recorded. Please retry.') from exc
         return None
 
 
@@ -245,6 +257,16 @@ ROOM_CHARGE_STATUSES = {
     'written_off',
     'cancelled',
 }
+ALLOWED_ROOM_CHARGE_TRANSITIONS = {
+    'pending_selection': {'pending_frontdesk_post', 'posted_to_beds24', 'rejected', 'disputed', 'cancelled'},
+    'pending_frontdesk_post': {'posted_to_beds24', 'rejected', 'disputed', 'cancelled'},
+    'posted_to_beds24': {'settled_at_frontdesk', 'disputed', 'written_off'},
+    'disputed': {'settled_at_frontdesk', 'rejected', 'written_off'},
+    'settled_at_frontdesk': set(),
+    'written_off': set(),
+    'rejected': set(),
+    'cancelled': set(),
+}
 ROOM_CHARGE_SERVICE_TYPES = {'room_service', 'signed_from_cafe'}
 ROOM_CHARGE_ORDER_SOURCES = {'cafe', 'room_service', 'restaurant'}
 
@@ -255,6 +277,8 @@ def _clean_text(value: str | None) -> str | None:
 
 
 def _room_charge_status_label(value: str | None) -> str:
+    if value == 'posted_to_beds24':
+        return 'Manually Marked Posted'
     return str(value or 'pending_frontdesk_post').replace('_', ' ').title()
 
 def _infer_room_number(*values) -> str | None:
@@ -323,6 +347,8 @@ def _serialize_room_charge_posting(row: RoomChargePosting) -> dict:
         'payment_date': row.payment_date,
         'bill_to': row.bill_to,
         'rejected_reason': row.rejected_reason,
+        'synced_to_accounting': bool(row.synced_to_accounting),
+        'last_sync_at': row.last_sync_at,
         'created_at': row.created_at.isoformat() if row.created_at else None,
         'updated_at': row.updated_at.isoformat() if row.updated_at else None,
         'booking_snapshot': _serialize_in_house_booking_snapshot(row.booking_snapshot) if row.booking_snapshot else None,
@@ -397,8 +423,8 @@ def _build_room_charge_posting(db: Session, row: PosOrder, payment_row: PosOrder
     )
     db.add(posting)
     db.flush()
-    _audit_event(db, action='room_charge.created', entity_type='room_charge_posting', entity_id=posting.id, user_id=user_id, details={'room_charge_posting_id': posting.id, 'order_id': row.id, 'room_number': posting.room_number, 'booking_date': posting.booking_date, 'charge_amount': posting.charge_amount})
-    _audit_event(db, action='room_charge.booking_selected', entity_type='room_charge_posting', entity_id=posting.id, user_id=user_id, details={'room_charge_posting_id': posting.id, 'order_id': row.id, 'booking_snapshot_id': posting.booking_snapshot_id, 'room_number': posting.room_number, 'guest_label': posting.guest_label})
+    _audit_event(db, action='room_charge.created', entity_type='room_charge_posting', entity_id=posting.id, user_id=user_id, details={'room_charge_posting_id': posting.id, 'order_id': row.id, 'room_number': posting.room_number, 'booking_date': posting.booking_date, 'charge_amount': posting.charge_amount}, commit=False)
+    _audit_event(db, action='room_charge.booking_selected', entity_type='room_charge_posting', entity_id=posting.id, user_id=user_id, details={'room_charge_posting_id': posting.id, 'order_id': row.id, 'booking_snapshot_id': posting.booking_snapshot_id, 'room_number': posting.room_number, 'guest_label': posting.guest_label}, commit=False)
     return posting
 
 def setting_json(db: Session, key: str, default: dict | list | None = None):
@@ -460,9 +486,7 @@ def ensure_default_outlet_registers(db: Session):
         'current_erp_financial_accounts_path': '/financial-accounts',
         'current_erp_transfers_path': '/transfers',
         'current_erp_receivables_path': '/receivables',
-        'future_facade_sales_path': '/integrations/pos/sales/finalize',
-        'future_facade_cash_path': '/integrations/pos/cash-events',
-        'future_facade_reconciliation_path': '/integrations/pos/reconciliations',
+        'healthcheck_path': '/healthz',
     }
     if not db.query(SystemSetting).filter(SystemSetting.key == 'accounting_sync').first():
         save_setting_json(db, 'accounting_sync', default_sync, username='system')
@@ -518,6 +542,7 @@ def _serialize_catalog_item(row: CatalogItem) -> dict:
         'service_charge_rate': row.service_charge_rate,
         'is_active': bool(row.is_active),
         'is_available': bool(row.is_available),
+        'availability_override': row.availability_override,
         'sort_order': row.sort_order,
         'accounting_hash': row.accounting_hash,
         'last_sync_at': row.last_sync_at,
@@ -526,7 +551,7 @@ def _serialize_catalog_item(row: CatalogItem) -> dict:
 
 
 
-def compute_session_expected_cash(db: Session, session_id: int) -> float:
+def compute_session_expected_cash(db: Session, session_id: int, *, commit: bool = True) -> float:
     session = db.get(RegisterSession, int(session_id))
     if not session:
         raise ValueError('Register session not found.')
@@ -541,8 +566,11 @@ def compute_session_expected_cash(db: Session, session_id: int) -> float:
     expected = float(total_in) - float(total_out)
     session.closing_expected_cash = expected
     db.add(session)
-    db.commit()
-    db.refresh(session)
+    if commit:
+        db.commit()
+        db.refresh(session)
+    else:
+        db.flush()
     return expected
 
 
@@ -690,6 +718,7 @@ def _serialize_order(row: PosOrder, include_lines: bool = True, db: Session | No
         'order_type': row.order_type,
         'source_channel': row.source_channel,
         'guest_name': row.guest_name,
+        'service_area': row.service_area,
         'table_label': row.table_label,
         'seat_count': row.seat_count,
         'status': row.status,
@@ -894,6 +923,19 @@ def update_catalog_item(db: Session, item_id: int, payload: CatalogItemUpdate):
     if not row:
         raise ValueError('Catalog item not found.')
     data = payload.model_dump(exclude_unset=True)
+    is_synced = bool(row.external_menu_item_id or row.external_sku_id)
+    if is_synced:
+        forbidden = set(data) - {'is_available'}
+        if forbidden:
+            raise ValueError('Accounting owns synced catalog details. POS can only set a local sold-out override.')
+        if 'is_available' in data:
+            requested = bool(data['is_available'])
+            row.availability_override = False if not requested else None
+            row.is_available = requested
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        return _serialize_catalog_item(row)
     for key, value in data.items():
         setattr(row, key, value)
     db.add(row)
@@ -906,6 +948,8 @@ def delete_catalog_item(db: Session, item_id: int):
     row = db.get(CatalogItem, int(item_id))
     if not row:
         raise ValueError('Catalog item not found.')
+    if row.external_menu_item_id or row.external_sku_id:
+        raise ValueError('Accounting-owned catalog items cannot be deleted from POS.')
     db.delete(row)
     db.commit()
     return {'ok': True}
@@ -932,8 +976,7 @@ def create_outbox_event(db: Session, *, aggregate_type: str, aggregate_id: int, 
             existing.status = 'pending'
             existing.last_error = None
         db.add(existing)
-        db.commit()
-        db.refresh(existing)
+        db.flush()
         return existing
     event = SyncOutboxEvent(
         event_uuid=str(uuid.uuid4()),
@@ -945,8 +988,7 @@ def create_outbox_event(db: Session, *, aggregate_type: str, aggregate_id: int, 
         status='pending',
     )
     db.add(event)
-    db.commit()
-    db.refresh(event)
+    db.flush()
     return event
 
 
@@ -954,6 +996,8 @@ def open_register_session(db: Session, payload: RegisterSessionOpen, user_id: in
     register = db.query(Register).options(selectinload(Register.outlet)).filter(Register.id == int(payload.register_id)).first()
     if not register:
         raise ValueError('Register not found.')
+    if not register.accounting_financial_account_id:
+        raise ValueError('This register is missing its Accounting drawer mapping. Ask a manager to map the register before opening a shift.')
     existing = db.query(RegisterSession).filter(RegisterSession.register_id == register.id, RegisterSession.status == 'open').first()
     if existing:
         raise ValueError('This register already has an open session.')
@@ -1027,6 +1071,8 @@ def close_register_session(db: Session, session_id: int, payload: RegisterSessio
         raise ValueError('Register session not found.')
     if row.status != 'open':
         raise ValueError('Only open sessions can be closed.')
+    if not row.register or not row.register.accounting_financial_account_id:
+        raise ValueError('This register is missing its Accounting drawer mapping. Ask a manager to map the register before closing the shift.')
     expected = compute_session_expected_cash(db, row.id)
     close_mode = (payload.close_mode or ('blind' if payload.blind_close else 'verified')).strip().lower()
     row.closing_actual_cash = float(payload.closing_actual_cash or 0)
@@ -1075,6 +1121,7 @@ def close_register_session(db: Session, session_id: int, payload: RegisterSessio
             'register_accounting_financial_account_id': row.register.accounting_financial_account_id,
         },
     )
+    db.commit()
     _audit_event(db, action='session.closed', entity_type='register_session', entity_id=row.id, user_id=user_id, details={'session_id': row.id, 'session_code': row.session_code, 'variance_amount': row.variance_amount, 'close_mode': close_mode, 'variance_note': row.variance_note, 'sign_off_name': row.close_sign_off_name})
     row = db.query(RegisterSession).options(selectinload(RegisterSession.register), selectinload(RegisterSession.opened_by), selectinload(RegisterSession.closed_by), selectinload(RegisterSession.orders)).filter(RegisterSession.id == row.id).first()
     return _serialize_session(row)
@@ -1089,6 +1136,7 @@ def reopen_register_session(db: Session, session_id: int, payload: RegisterSessi
     existing_open = db.query(RegisterSession).filter(RegisterSession.register_id == row.register_id, RegisterSession.status == 'open', RegisterSession.id != row.id).first()
     if existing_open:
         raise ValueError('Another session is already open for this register.')
+    approval = _record_approval(db, approval_type='reopen_session', entity_type='register_session', entity_id=row.id, requested_by_user_id=user_id, approved_by_user_id=approved_by_user_id, requested_reason=payload.reason, decision_note=payload.note, request_details={'session_id': row.id, 'session_code': row.session_code, 'reason': payload.reason}, required=True, commit=False)
     row.status = 'open'
     reopen_note = f"Reopened at {now_iso()}"
     if payload.reason:
@@ -1101,9 +1149,8 @@ def reopen_register_session(db: Session, session_id: int, payload: RegisterSessi
     row.closing_actual_cash = None
     row.variance_amount = 0
     db.add(row)
+    _audit_event(db, action='session.reopened', entity_type='register_session', entity_id=row.id, user_id=user_id, details={'session_id': row.id, 'session_code': row.session_code, 'reason': payload.reason, 'approval_id': approval.get('id') if approval else None}, commit=False)
     db.commit()
-    _record_approval(db, approval_type='reopen_session', entity_type='register_session', entity_id=row.id, requested_by_user_id=user_id, approved_by_user_id=approved_by_user_id, requested_reason=payload.reason, decision_note=payload.note, request_details={'session_id': row.id, 'session_code': row.session_code, 'reason': payload.reason})
-    _audit_event(db, action='session.reopened', entity_type='register_session', entity_id=row.id, user_id=user_id, details={'session_id': row.id, 'session_code': row.session_code, 'reason': payload.reason})
     row = db.query(RegisterSession).options(selectinload(RegisterSession.register), selectinload(RegisterSession.opened_by), selectinload(RegisterSession.closed_by), selectinload(RegisterSession.orders)).filter(RegisterSession.id == row.id).first()
     return _serialize_session(row)
 
@@ -1126,6 +1173,7 @@ def create_order(db: Session, payload: OrderCreate, user_id: int | None = None):
         order_type=payload.order_type or session.register.default_order_type,
         source_channel=payload.source_channel,
         guest_name=payload.guest_name,
+        service_area=_clean_text(payload.service_area),
         table_label=payload.table_label,
         seat_count=payload.seat_count,
         status='draft',
@@ -1136,10 +1184,10 @@ def create_order(db: Session, payload: OrderCreate, user_id: int | None = None):
     db.flush()
     _rebuild_order_lines(db, row, payload.lines)
     db.add(row)
-    db.commit()
     if float(row.discount_amount or 0) > 0:
-        _record_approval(db, approval_type='discount', entity_type='order', entity_id=row.id, requested_by_user_id=user_id, approved_by_user_id=getattr(payload, 'approved_by_user_id', None), requested_reason='Order discount applied', request_details={'order_id': row.id, 'order_no': row.order_no, 'discount_amount': row.discount_amount})
-    _audit_event(db, action='order.created', entity_type='order', entity_id=row.id, user_id=user_id, details={'order_id': row.id, 'order_no': row.order_no, 'status': row.status, 'total_amount': row.total_amount, 'discount_amount': row.discount_amount})
+        _record_approval(db, approval_type='discount', entity_type='order', entity_id=row.id, requested_by_user_id=user_id, approved_by_user_id=getattr(payload, 'approved_by_user_id', None), requested_reason='Order discount applied', request_details={'order_id': row.id, 'order_no': row.order_no, 'discount_amount': row.discount_amount}, required=True, commit=False)
+    _audit_event(db, action='order.created', entity_type='order', entity_id=row.id, user_id=user_id, details={'order_id': row.id, 'order_no': row.order_no, 'status': row.status, 'total_amount': row.total_amount, 'discount_amount': row.discount_amount}, commit=False)
+    db.commit()
     row = db.query(PosOrder).options(selectinload(PosOrder.lines), selectinload(PosOrder.payments), selectinload(PosOrder.register), selectinload(PosOrder.cashier)).filter(PosOrder.id == row.id).first()
     _publish_kds_refresh(_order_stations(row), reason='ticket_created', payload={'order_id': row.id, 'order_no': row.order_no})
     return _serialize_order(row, include_lines=True, db=db)
@@ -1216,7 +1264,7 @@ def _rebuild_order_lines(db: Session, row: PosOrder, line_payloads):
     return row
 
 
-def update_order(db: Session, order_id: int, payload: OrderUpdate):
+def update_order(db: Session, order_id: int, payload: OrderUpdate, user_id: int | None = None):
     row = db.query(PosOrder).options(selectinload(PosOrder.lines), selectinload(PosOrder.payments), selectinload(PosOrder.register), selectinload(PosOrder.cashier)).filter(PosOrder.id == int(order_id)).first()
     if not row:
         raise ValueError('Order not found.')
@@ -1230,10 +1278,10 @@ def update_order(db: Session, order_id: int, payload: OrderUpdate):
     if line_payloads is not None:
         _rebuild_order_lines(db, row, line_payloads)
     db.add(row)
-    db.commit()
     if float(row.discount_amount or 0) > 0:
-        _record_approval(db, approval_type='discount', entity_type='order', entity_id=row.id, requested_by_user_id=None, approved_by_user_id=approved_by_user_id, requested_reason='Order discount updated', request_details={'order_id': row.id, 'order_no': row.order_no, 'discount_amount': row.discount_amount})
-    _audit_event(db, action='order.updated', entity_type='order', entity_id=row.id, user_id=None, details={'order_id': row.id, 'order_no': row.order_no, 'status': row.status, 'discount_amount': row.discount_amount})
+        _record_approval(db, approval_type='discount', entity_type='order', entity_id=row.id, requested_by_user_id=user_id, approved_by_user_id=approved_by_user_id, requested_reason='Order discount updated', request_details={'order_id': row.id, 'order_no': row.order_no, 'discount_amount': row.discount_amount}, required=True, commit=False)
+    _audit_event(db, action='order.updated', entity_type='order', entity_id=row.id, user_id=user_id, details={'order_id': row.id, 'order_no': row.order_no, 'status': row.status, 'discount_amount': row.discount_amount}, commit=False)
+    db.commit()
     row = db.query(PosOrder).options(selectinload(PosOrder.lines), selectinload(PosOrder.payments), selectinload(PosOrder.register), selectinload(PosOrder.cashier)).filter(PosOrder.id == row.id).first()
     _publish_kds_refresh(_order_stations(row), reason='ticket_updated', payload={'order_id': row.id, 'order_no': row.order_no})
     return _serialize_order(row, include_lines=True, db=db)
@@ -1257,6 +1305,7 @@ def list_orders(db: Session, status: str | None = None, session_id: int | None =
         query = query.filter(
             PosOrder.order_no.ilike(like)
             | PosOrder.guest_name.ilike(like)
+            | PosOrder.service_area.ilike(like)
             | PosOrder.table_label.ilike(like)
             | PosOrder.note.ilike(like)
         )
@@ -1391,6 +1440,10 @@ def update_room_charge_posting_status(db: Session, posting_id: int, payload: Roo
     if status not in ROOM_CHARGE_STATUSES:
         raise ValueError('Unsupported room charge status.')
     previous_status = row.posting_status
+    if status != previous_status:
+        allowed_next = ALLOWED_ROOM_CHARGE_TRANSITIONS.get(previous_status, set())
+        if status not in allowed_next:
+            raise ValueError(f'Cannot change room charge from {_room_charge_status_label(previous_status)} to {_room_charge_status_label(status)}.')
     row.posting_status = status
     if payload.beds24_posting_reference is not None:
         row.beds24_posting_reference = _clean_text(payload.beds24_posting_reference)
@@ -1398,8 +1451,6 @@ def update_room_charge_posting_status(db: Session, posting_id: int, payload: Roo
         row.note = _clean_text(payload.note)
     if payload.dispute_note is not None:
         row.dispute_note = _clean_text(payload.dispute_note)
-    if payload.later_payment_status is not None:
-        row.later_payment_status = _clean_text(payload.later_payment_status)
     if payload.bill_to is not None:
         row.bill_to = _clean_text(payload.bill_to)
     if payload.rejected_reason is not None:
@@ -1413,24 +1464,28 @@ def update_room_charge_posting_status(db: Session, posting_id: int, payload: Roo
         row.settled_at_frontdesk_at_text = now_iso()
         row.payment_date = _clean_text(payload.payment_date) or today_iso()
         row.later_payment_status = _clean_text(payload.later_payment_status) or 'settled'
-    elif payload.payment_date is not None:
-        row.payment_date = _clean_text(payload.payment_date)
+    elif status in {'posted_to_beds24', 'pending_frontdesk_post', 'rejected', 'disputed', 'written_off', 'cancelled'}:
+        # Settlement fields are intentionally ignored outside settlement actions.
+        pass
     db.add(row)
-    db.commit()
-    if status == 'posted_to_beds24':
-        _audit_event(db, action='room_charge.posted_to_beds24', entity_type='room_charge_posting', entity_id=row.id, user_id=user_id, details={'room_charge_posting_id': row.id, 'order_id': row.order_id, 'beds24_posting_reference': row.beds24_posting_reference})
-    elif status == 'rejected':
-        _audit_event(db, action='room_charge.rejected', entity_type='room_charge_posting', entity_id=row.id, user_id=user_id, details={'room_charge_posting_id': row.id, 'order_id': row.order_id, 'rejected_reason': row.rejected_reason})
-    elif status == 'disputed':
-        _record_approval(db, approval_type='room_charge_dispute', entity_type='room_charge_posting', entity_id=row.id, requested_by_user_id=user_id, approved_by_user_id=approved_by_user_id, requested_reason=row.dispute_note or 'Room charge disputed', request_details={'room_charge_posting_id': row.id, 'order_id': row.order_id, 'previous_status': previous_status, 'posting_status': status})
-        _audit_event(db, action='room_charge.disputed', entity_type='room_charge_posting', entity_id=row.id, user_id=user_id, details={'room_charge_posting_id': row.id, 'order_id': row.order_id, 'dispute_note': row.dispute_note})
+    approval = None
+    if status == 'disputed':
+        approval = _record_approval(db, approval_type='room_charge_dispute', entity_type='room_charge_posting', entity_id=row.id, requested_by_user_id=user_id, approved_by_user_id=approved_by_user_id, requested_reason=row.dispute_note or 'Room charge disputed', request_details={'room_charge_posting_id': row.id, 'order_id': row.order_id, 'previous_status': previous_status, 'posting_status': status}, required=True, commit=False)
     elif status == 'written_off':
-        _record_approval(db, approval_type='room_charge_write_off', entity_type='room_charge_posting', entity_id=row.id, requested_by_user_id=user_id, approved_by_user_id=approved_by_user_id, requested_reason=row.note or 'Room charge write-off', request_details={'room_charge_posting_id': row.id, 'order_id': row.order_id, 'previous_status': previous_status, 'posting_status': status})
-        _audit_event(db, action='room_charge.written_off', entity_type='room_charge_posting', entity_id=row.id, user_id=user_id, details={'room_charge_posting_id': row.id, 'order_id': row.order_id, 'note': row.note})
-    if status == 'settled_at_frontdesk' or payload.later_payment_status is not None or payload.payment_date is not None:
-        _audit_event(db, action='room_charge.settlement_updated', entity_type='room_charge_posting', entity_id=row.id, user_id=user_id, details={'room_charge_posting_id': row.id, 'order_id': row.order_id, 'posting_status': status, 'later_payment_status': row.later_payment_status, 'payment_date': row.payment_date})
+        approval = _record_approval(db, approval_type='room_charge_write_off', entity_type='room_charge_posting', entity_id=row.id, requested_by_user_id=user_id, approved_by_user_id=approved_by_user_id, requested_reason=row.note or 'Room charge write-off', request_details={'room_charge_posting_id': row.id, 'order_id': row.order_id, 'previous_status': previous_status, 'posting_status': status}, required=True, commit=False)
+    if status == 'posted_to_beds24':
+        _audit_event(db, action='room_charge.marked_posted_manually', entity_type='room_charge_posting', entity_id=row.id, user_id=user_id, details={'room_charge_posting_id': row.id, 'order_id': row.order_id, 'beds24_posting_reference': row.beds24_posting_reference}, commit=False)
+    elif status == 'rejected':
+        _audit_event(db, action='room_charge.rejected', entity_type='room_charge_posting', entity_id=row.id, user_id=user_id, details={'room_charge_posting_id': row.id, 'order_id': row.order_id, 'rejected_reason': row.rejected_reason}, commit=False)
+    elif status == 'disputed':
+        _audit_event(db, action='room_charge.disputed', entity_type='room_charge_posting', entity_id=row.id, user_id=user_id, details={'room_charge_posting_id': row.id, 'order_id': row.order_id, 'dispute_note': row.dispute_note, 'approval_id': approval.get('id') if approval else None}, commit=False)
+    elif status == 'written_off':
+        _audit_event(db, action='room_charge.written_off', entity_type='room_charge_posting', entity_id=row.id, user_id=user_id, details={'room_charge_posting_id': row.id, 'order_id': row.order_id, 'note': row.note, 'approval_id': approval.get('id') if approval else None}, commit=False)
+    if status == 'settled_at_frontdesk':
+        _audit_event(db, action='room_charge.settlement_updated', entity_type='room_charge_posting', entity_id=row.id, user_id=user_id, details={'room_charge_posting_id': row.id, 'order_id': row.order_id, 'posting_status': status, 'later_payment_status': row.later_payment_status, 'payment_date': row.payment_date}, commit=False)
     if previous_status == 'disputed' and status != 'disputed':
-        _audit_event(db, action='room_charge.dispute_resolved', entity_type='room_charge_posting', entity_id=row.id, user_id=user_id, details={'room_charge_posting_id': row.id, 'order_id': row.order_id, 'from_status': previous_status, 'to_status': status})
+        _audit_event(db, action='room_charge.dispute_resolved', entity_type='room_charge_posting', entity_id=row.id, user_id=user_id, details={'room_charge_posting_id': row.id, 'order_id': row.order_id, 'from_status': previous_status, 'to_status': status}, commit=False)
+    db.commit()
     row = db.query(RoomChargePosting).options(
         selectinload(RoomChargePosting.order),
         selectinload(RoomChargePosting.booking_snapshot),
@@ -1441,7 +1496,7 @@ def update_room_charge_posting_status(db: Session, posting_id: int, payload: Roo
     return _serialize_room_charge_posting(row)
 
 
-def set_order_status(db: Session, order_id: int, status: str):
+def set_order_status(db: Session, order_id: int, status: str, user_id: int | None = None):
     row = db.query(PosOrder).options(selectinload(PosOrder.lines), selectinload(PosOrder.payments), selectinload(PosOrder.register), selectinload(PosOrder.cashier)).filter(PosOrder.id == int(order_id)).first()
     if not row:
         raise ValueError('Order not found.')
@@ -1450,9 +1505,114 @@ def set_order_status(db: Session, order_id: int, status: str):
     row.status = status
     db.add(row)
     db.commit()
-    _audit_event(db, action='order.status_updated', entity_type='order', entity_id=row.id, user_id=None, details={'order_id': row.id, 'order_no': row.order_no, 'status': status})
+    _audit_event(db, action='order.status_updated', entity_type='order', entity_id=row.id, user_id=user_id, details={'order_id': row.id, 'order_no': row.order_no, 'status': status})
     _publish_kds_refresh(_order_stations(row), reason='ticket_status_updated', payload={'order_id': row.id, 'order_no': row.order_no, 'status': status})
     return _serialize_order(row, include_lines=True, db=db)
+
+
+def transfer_order_table(db: Session, order_id: int, target_table_label: str, target_service_area: str | None = None, user_id: int | None = None):
+    row = db.query(PosOrder).options(selectinload(PosOrder.lines), selectinload(PosOrder.payments), selectinload(PosOrder.register), selectinload(PosOrder.cashier)).filter(PosOrder.id == int(order_id)).first()
+    if not row:
+        raise ValueError('Order not found.')
+    if row.status not in ACTIVE_TABLE_ORDER_STATUSES:
+        raise ValueError('Only active unpaid table orders can be transferred.')
+    target = (target_table_label or '').strip()
+    target_area = _clean_text(target_service_area) or row.service_area
+    if not target:
+        raise ValueError('target_table_label is required.')
+    occupied_query = db.query(PosOrder).filter(
+        PosOrder.id != row.id,
+        PosOrder.table_label == target,
+        PosOrder.status.in_(sorted(ACTIVE_TABLE_ORDER_STATUSES)),
+    )
+    if target_area:
+        occupied_query = occupied_query.filter(PosOrder.service_area == target_area)
+    occupied = occupied_query.first()
+    if occupied:
+        area_label = f'{target_area} · ' if target_area else ''
+        raise ValueError(f'Table {area_label}{target} already has an active order. Use merge instead.')
+    previous = row.table_label
+    previous_area = row.service_area
+    row.service_area = target_area
+    row.table_label = target
+    from_label = f'{previous_area} · {previous}' if previous_area and previous else (previous or 'unassigned')
+    to_label = f'{target_area} · {target}' if target_area else target
+    row.note = f'{row.note or ""}\nTransferred from {from_label} to {to_label}.'.strip()
+    db.add(row)
+    db.commit()
+    _audit_event(db, action='order.table_transferred', entity_type='order', entity_id=row.id, user_id=user_id, details={'order_id': row.id, 'order_no': row.order_no, 'from_service_area': previous_area, 'from_table': previous, 'to_service_area': target_area, 'to_table': target})
+    return get_order(db, row.id)
+
+
+def merge_order_table(db: Session, order_id: int, target_table_label: str, target_service_area: str | None = None, user_id: int | None = None):
+    source = db.query(PosOrder).options(selectinload(PosOrder.lines), selectinload(PosOrder.payments), selectinload(PosOrder.refunds)).filter(PosOrder.id == int(order_id)).first()
+    if not source:
+        raise ValueError('Order not found.')
+    if source.status not in ACTIVE_TABLE_ORDER_STATUSES:
+        raise ValueError('Only active unpaid table orders can be merged.')
+    if source.status == 'folio_pending' or float(source.paid_amount or 0) > 0 or source.payments:
+        raise ValueError('Partially paid orders cannot be merged. Refund or settle first.')
+    if source.refunds:
+        raise ValueError('Orders with refund records cannot be merged.')
+    if _get_room_charge_postings_for_order(db, source.id):
+        raise ValueError('Orders with room-charge postings cannot be merged.')
+    target_label = (target_table_label or '').strip()
+    target_area = _clean_text(target_service_area) or source.service_area
+    target_query = db.query(PosOrder).options(selectinload(PosOrder.lines), selectinload(PosOrder.payments), selectinload(PosOrder.register), selectinload(PosOrder.cashier)).filter(
+        PosOrder.id != source.id,
+        PosOrder.table_label == target_label,
+        PosOrder.status.in_(sorted(ACTIVE_TABLE_ORDER_STATUSES)),
+    )
+    if target_area:
+        target_query = target_query.filter(PosOrder.service_area == target_area)
+    target = target_query.first()
+    if not target:
+        area_label = f'{target_area} · ' if target_area else ''
+        raise ValueError(f'Table {area_label}{target_label or "(blank)"} does not have an active order to merge into.')
+    if target.register_session_id != source.register_session_id:
+        raise ValueError('Orders must be in the same register session before merging.')
+
+    source_label = source.table_label
+    for line in list(source.lines or []):
+        line.order = target
+        db.add(line)
+    db.flush()
+    subtotal = 0.0
+    discount = 0.0
+    tax_amount = 0.0
+    service_charge = 0.0
+    for line in target.lines or []:
+        catalog = db.get(CatalogItem, int(line.catalog_item_id))
+        gross = float(line.quantity or 0) * float(line.unit_price or 0)
+        subtotal += gross
+        discount += float(line.discount_amount or 0)
+        tax_amount += float(line.line_total or 0) * float(catalog.tax_rate or 0)
+        service_charge += float(line.line_total or 0) * float(catalog.service_charge_rate or 0)
+    target.subtotal_amount = round(subtotal, 2)
+    target.discount_amount = round(discount, 2)
+    target.tax_amount = round(tax_amount, 2)
+    target.service_charge_amount = round(service_charge, 2)
+    target.total_amount = round(subtotal - discount + tax_amount + service_charge, 2)
+    target.balance_due = round(float(target.total_amount or 0) - float(target.paid_amount or 0), 2)
+    if source.seat_count:
+        target.seat_count = int(target.seat_count or 0) + int(source.seat_count or 0)
+    merge_from_label = f'{source.service_area} · {source_label}' if source.service_area and source_label else (source_label or 'unassigned')
+    merge_note = f'Merged order {source.order_no} from {merge_from_label}'
+    if source.guest_name:
+        merge_note += f' · Guest/group: {source.guest_name}'
+    if source.seat_count:
+        merge_note += f' · Pax: {source.seat_count}'
+    target.note = f'{target.note or ""}\n{merge_note}.'.strip()
+    source.status = 'merged'
+    source.kitchen_status = 'merged'
+    source.void_reason = None
+    target_to_label = f'{target.service_area} · {target_label}' if target.service_area and target_label else target_label
+    source.note = f'{source.note or ""}\nMerged into {target.order_no} at {target_to_label}.'.strip()
+    db.add(target)
+    db.add(source)
+    db.commit()
+    _audit_event(db, action='order.table_merged', entity_type='order', entity_id=target.id, user_id=user_id, details={'source_order_id': source.id, 'source_order_no': source.order_no, 'source_service_area': source.service_area, 'source_table': source_label, 'source_guest_name': source.guest_name, 'source_seat_count': source.seat_count, 'target_order_id': target.id, 'target_order_no': target.order_no, 'target_service_area': target.service_area, 'target_table': target_label})
+    return get_order(db, target.id)
 
 
 def pay_order(db: Session, order_id: int, payload: OrderPayPayload, user_id: int | None = None):
@@ -1567,14 +1727,6 @@ def pay_order(db: Session, order_id: int, payload: OrderPayPayload, user_id: int
                 create_outbox=True,
             )
         elif _normalize_tender_type(payment.tender_type) in FOLIO_PENDING_TENDERS and payment.amount_applied > 0:
-            create_outbox_event(
-                db,
-                aggregate_type='order_payment',
-                aggregate_id=payment.id,
-                event_type='payment.folio_pending',
-                payload=payment_payload,
-                idempotency_key=f'payment.folio_pending:{payment.id}',
-            )
             posting = next((item for item in (payment_payload.get('room_charge_postings') or []) if int(item.get('order_payment_id') or 0) == int(payment.id)), None)
             if posting:
                 create_outbox_event(
@@ -1602,6 +1754,7 @@ def pay_order(db: Session, order_id: int, payload: OrderPayPayload, user_id: int
         event_type='order.finalized',
         payload=_serialize_order(row, include_lines=True, db=db),
     )
+    db.commit()
     immediate_paid, folio_pending = _order_settlement_totals(row)
     _audit_event(db, action='order.finalized', entity_type='order', entity_id=row.id, user_id=user_id, details={'order_id': row.id, 'order_no': row.order_no, 'status': row.status, 'settlement_state': _order_settlement_state(row), 'paid_amount': immediate_paid, 'folio_pending_amount': folio_pending})
     _publish_kds_refresh(_order_stations(row), reason='ticket_finalized', payload={'order_id': row.id, 'order_no': row.order_no, 'status': row.status})
@@ -1622,11 +1775,7 @@ def _approval_user_for_refund(db: Session, approved_by_user_id: int | None):
     if not approved_user or not approved_user.is_active:
         raise ValueError('Approving user not found.')
     role_codes = {link.role.code for link in getattr(approved_user, 'user_roles', []) if getattr(link, 'role', None)}
-    permission_keys = set()
-    try:
-                permission_keys = set(get_user_permission_keys(db, approved_user))
-    except Exception:
-        permission_keys = set()
+    permission_keys = set(get_user_permission_keys(db, approved_user))
     if approved_user.role not in {'owner', 'manager'} and not ({'owner', 'manager'} & role_codes) and 'orders.void' not in permission_keys and '*' not in permission_keys:
         raise ValueError('Refund approval requires an owner or manager account.')
     return approved_user
@@ -1777,8 +1926,11 @@ def create_refund(db: Session, order_id: int, payload: RefundCreate, cashier_use
         
         if tender == 'room_charge':
             # For room charges, create reversal posting instead of refund payment
+            original_posting = db.query(RoomChargePosting).filter(RoomChargePosting.order_payment_id == payment.id).first()
+            if not original_posting:
+                raise ValueError('Room charge posting not found for refund allocation.')
             room_charge_reversals.append({
-                'original_posting_id': payment.room_charge_posting_id,
+                'original_posting_id': original_posting.id,
                 'amount': alloc,
                 'reason': payload.reason_text or payload.reason_code or 'Refund',
                 'note': payload.note,
@@ -1838,9 +1990,8 @@ def create_refund(db: Session, order_id: int, payload: RefundCreate, cashier_use
             reversal_posting = RoomChargePosting(
                 posting_uuid=str(uuid.uuid4()),
                 order_id=row.id,
-                register_session_id=row.register_session_id,
-                register_id=row.register_id,
-                business_date=row.business_date,
+                order_payment_id=None,
+                booking_snapshot_id=original_posting.booking_snapshot_id,
                 posting_status='pending_frontdesk_post',  # Reversal needs front desk action
                 charge_amount=-abs(reversal['amount']),  # Negative amount for reversal
                 service_type=original_posting.service_type,
@@ -1865,20 +2016,9 @@ def create_refund(db: Session, order_id: int, payload: RefundCreate, cashier_use
             # Create outbox event for the reversal posting
             reversal_payload = {
                 'order': _serialize_order(row, include_lines=True, db=db),
-                'room_charge_posting': {
-                    'id': reversal_posting.id,
-                    'posting_uuid': reversal_posting.posting_uuid,
-                    'order_id': reversal_posting.order_id,
-                    'business_date': reversal_posting.business_date.isoformat() if reversal_posting.business_date else None,
-                    'charge_amount': reversal_posting.charge_amount,
-                    'service_type': reversal_posting.service_type,
-                    'service_date': reversal_posting.service_date.isoformat() if reversal_posting.service_date else None,
-                    'room_number': reversal_posting.room_number,
-                    'guest_label': reversal_posting.guest_label,
-                    'note': reversal_posting.note,
-                    'posting_status': reversal_posting.posting_status,
-                    'created_by_user_id': reversal_posting.created_by_user_id,
-                }
+                'room_charge_posting': _serialize_room_charge_posting(reversal_posting),
+                'reverses_source_type': 'pos_room_charge',
+                'reverses_source_id': original_posting.id,
             }
             create_outbox_event(
                 db,
@@ -1901,6 +2041,8 @@ def create_refund(db: Session, order_id: int, payload: RefundCreate, cashier_use
             refund_row.payments.append(refund_payment)
 
     db.add(refund_row)
+    approval = _record_approval(db, approval_type='refund', entity_type='refund', entity_id=refund_row.id, requested_by_user_id=cashier_user_id, approved_by_user_id=approved_user.id, requested_reason=payload.reason_text or payload.reason_code or 'Refund processed', request_details={'refund_id': refund_row.id, 'order_id': row.id, 'refund_mode': refund_mode, 'refunded_amount': refund_amount}, required=True, commit=False)
+    _audit_event(db, action='refund.created', entity_type='refund', entity_id=refund_row.id, user_id=cashier_user_id, details={'refund_id': refund_row.id, 'order_id': row.id, 'order_no': row.order_no, 'refunded_amount': refund_amount, 'approval_id': approval.get('id') if approval else None}, commit=False)
     db.commit()
     db.refresh(refund_row)
 
@@ -1912,9 +2054,6 @@ def create_refund(db: Session, order_id: int, payload: RefundCreate, cashier_use
         selectinload(Refund.cashier),
         selectinload(Refund.approved_by),
     ).filter(Refund.id == refund_row.id).first()
-
-    approval = _record_approval(db, approval_type='refund', entity_type='refund', entity_id=refund_row.id, requested_by_user_id=cashier_user_id, approved_by_user_id=approved_user.id, requested_reason=payload.reason_text or payload.reason_code or 'Refund processed', request_details={'refund_id': refund_row.id, 'order_id': row.id, 'refund_mode': refund_mode, 'refunded_amount': refund_amount})
-    _audit_event(db, action='refund.created', entity_type='refund', entity_id=refund_row.id, user_id=cashier_user_id, details={'refund_id': refund_row.id, 'order_id': row.id, 'order_no': row.order_no, 'refunded_amount': refund_amount, 'approval_id': approval.get('id') if approval else None})
 
     for payment in refund_row.payments:
         if payment.tender_type == 'room_charge':
@@ -1956,6 +2095,7 @@ def create_refund(db: Session, order_id: int, payload: RefundCreate, cashier_use
                 idempotency_key=f'payment.refunded:{payment.id}',
             )
 
+    db.commit()
     return _serialize_refund(refund_row, include_details=True)
 
 
@@ -1965,10 +2105,22 @@ def void_order(db: Session, order_id: int, reason: str, user_id: int | None = No
         raise ValueError('Order not found.')
     if row.status == 'voided':
         raise ValueError('Order is already voided.')
+    approval = _record_approval(db, approval_type='void', entity_type='order', entity_id=row.id, requested_by_user_id=user_id, approved_by_user_id=approved_by_user_id, requested_reason=reason, request_details={'order_id': row.id, 'order_no': row.order_no}, required=True, commit=False)
     row.status = 'voided'
     row.void_reason = reason
     row.kitchen_status = 'voided'
     db.add(row)
+    create_outbox_event(
+        db,
+        aggregate_type='order',
+        aggregate_id=row.id,
+        event_type='order.voided',
+        payload={
+            **_serialize_order(row, include_lines=True, db=db),
+            'reason': reason,
+        },
+    )
+    _audit_event(db, action='order.voided', entity_type='order', entity_id=row.id, user_id=user_id, details={'order_id': row.id, 'order_no': row.order_no, 'reason': reason, 'approval_id': approval.get('id') if approval else None}, commit=False)
     db.commit()
     db.refresh(row)
     for payment in row.payments:
@@ -1989,19 +2141,7 @@ def void_order(db: Session, order_id: int, reason: str, user_id: int | None = No
                 source_order_id=row.id,
                 create_outbox=True,
             )
-    approval = _record_approval(db, approval_type='void', entity_type='order', entity_id=row.id, requested_by_user_id=user_id, approved_by_user_id=approved_by_user_id, requested_reason=reason, request_details={'order_id': row.id, 'order_no': row.order_no})
     row = db.query(PosOrder).options(selectinload(PosOrder.lines), selectinload(PosOrder.payments), selectinload(PosOrder.register), selectinload(PosOrder.cashier)).filter(PosOrder.id == row.id).first()
-    create_outbox_event(
-        db,
-        aggregate_type='order',
-        aggregate_id=row.id,
-        event_type='order.voided',
-        payload={
-            **_serialize_order(row, include_lines=True, db=db),
-            'reason': reason,
-        },
-    )
-    _audit_event(db, action='order.voided', entity_type='order', entity_id=row.id, user_id=user_id, details={'order_id': row.id, 'order_no': row.order_no, 'reason': reason, 'approval_id': approval.get('id') if approval else None})
     return _serialize_order(row, include_lines=True, db=db)
 
 
@@ -2068,16 +2208,15 @@ def create_cash_movement(
         requires_approval=requires_approval,
     )
     db.add(row)
-    db.commit()
-    db.refresh(row)
+    db.flush()
     approval = None
     if movement_type in {'paid_out', 'adjustment_in', 'adjustment_out', 'cash_adjustment'} or requires_approval:
         approval_type = 'cash_paid_out' if movement_type == 'paid_out' else 'cash_adjustment'
         if movement_type in transfer_types:
             approval_type = 'cash_adjustment'
-        approval = _record_approval(db, approval_type=approval_type, entity_type='cash_movement', entity_id=row.id, requested_by_user_id=None if source_order_id else explicit_approver, approved_by_user_id=explicit_approver, requested_reason=payload.note or payload.category or movement_type, request_details={'cash_movement_id': row.id, 'movement_type': movement_type, 'amount': row.amount, 'session_id': row.register_session_id, 'to_account_id': to_account_id, 'destination_register_id': payload.destination_register_id})
-    _audit_event(db, action='cash_movement.created', entity_type='cash_movement', entity_id=row.id, user_id=explicit_approver or approved_by_user_id, details={'cash_movement_id': row.id, 'session_id': row.register_session_id, 'movement_type': movement_type, 'direction': direction, 'amount': row.amount, 'approval_id': approval.get('id') if approval else None, 'to_accounting_financial_account_id': to_account_id, 'destination_register_id': payload.destination_register_id})
-    compute_session_expected_cash(db, session.id)
+        approval = _record_approval(db, approval_type=approval_type, entity_type='cash_movement', entity_id=row.id, requested_by_user_id=None if source_order_id else explicit_approver, approved_by_user_id=explicit_approver, requested_reason=payload.note or payload.category or movement_type, request_details={'cash_movement_id': row.id, 'movement_type': movement_type, 'amount': row.amount, 'session_id': row.register_session_id, 'to_account_id': to_account_id, 'destination_register_id': payload.destination_register_id}, required=True, commit=False)
+    _audit_event(db, action='cash_movement.created', entity_type='cash_movement', entity_id=row.id, user_id=explicit_approver or approved_by_user_id, details={'cash_movement_id': row.id, 'session_id': row.register_session_id, 'movement_type': movement_type, 'direction': direction, 'amount': row.amount, 'approval_id': approval.get('id') if approval else None, 'to_accounting_financial_account_id': to_account_id, 'destination_register_id': payload.destination_register_id}, commit=False)
+    compute_session_expected_cash(db, session.id, commit=False)
     if create_outbox:
         if movement_type in transfer_types:
             create_outbox_event(
@@ -2110,6 +2249,8 @@ def create_cash_movement(
                 payload=_serialize_cash_movement(db.query(CashMovement).options(selectinload(CashMovement.register), selectinload(CashMovement.destination_register), selectinload(CashMovement.source_order), selectinload(CashMovement.approved_by)).filter(CashMovement.id == row.id).first()),
                 idempotency_key=f'cash_movement.created:{row.id}',
             )
+    db.commit()
+    db.refresh(row)
     row = db.query(CashMovement).options(selectinload(CashMovement.register), selectinload(CashMovement.destination_register), selectinload(CashMovement.source_order), selectinload(CashMovement.approved_by)).filter(CashMovement.id == row.id).first()
     return _serialize_cash_movement(row)
 

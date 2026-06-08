@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -134,6 +134,7 @@ class CatalogItem(Base, TimestampMixin):
     service_charge_rate: Mapped[float] = mapped_column(Float, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_available: Mapped[bool] = mapped_column(Boolean, default=True)
+    availability_override: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     accounting_hash: Mapped[str | None] = mapped_column(String(120), nullable=True)
     last_sync_at: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
@@ -142,6 +143,22 @@ class CatalogItem(Base, TimestampMixin):
     __table_args__ = (
         UniqueConstraint('external_sku_id', name='uq_catalog_external_sku'),
     )
+
+
+class RecipeDocument(Base, TimestampMixin):
+    __tablename__ = 'recipe_documents'
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    external_menu_item_id: Mapped[int] = mapped_column(Integer, unique=True, index=True)
+    dish_name_snapshot: Mapped[str] = mapped_column(String(180), index=True)
+    category_name: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    title: Mapped[str] = mapped_column(String(255))
+    original_filename: Mapped[str] = mapped_column(String(255))
+    content_type: Mapped[str] = mapped_column(String(120), default='application/pdf')
+    file_size: Mapped[int] = mapped_column(Integer)
+    pdf_bytes: Mapped[bytes] = mapped_column(LargeBinary)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    uploaded_by_user_id: Mapped[int | None] = mapped_column(ForeignKey('users.id'), nullable=True, index=True)
+    uploaded_by: Mapped['User'] = relationship()
 
 
 class RegisterSession(Base, TimestampMixin):
@@ -189,6 +206,7 @@ class PosOrder(Base, TimestampMixin):
     order_type: Mapped[str] = mapped_column(String(50), default='dine_in', index=True)
     source_channel: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
     guest_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    service_area: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
     table_label: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
     seat_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String(40), default='draft', index=True)
@@ -302,6 +320,8 @@ class RoomChargePosting(Base, TimestampMixin):
     payment_date: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
     bill_to: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
     rejected_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    synced_to_accounting: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    last_sync_at: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
     order: Mapped['PosOrder'] = relationship('PosOrder')
     payment: Mapped['PosOrderPayment | None'] = relationship('PosOrderPayment')
     booking_snapshot: Mapped['InHouseBookingSnapshot | None'] = relationship('InHouseBookingSnapshot')

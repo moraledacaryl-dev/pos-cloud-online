@@ -3,8 +3,10 @@
 import { useState } from 'react';
 import { bootstrap, login, setRefreshToken, setToken } from '../../lib/api';
 
+const SHOW_DEVELOPMENT_BOOTSTRAP = process.env.NEXT_PUBLIC_ENABLE_ADMIN_BOOTSTRAP === 'true';
+
 export default function LoginPage() {
-  const [form, setForm] = useState({ username: 'admin', password: 'admin123' });
+  const [form, setForm] = useState({ username: '', password: '' });
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -32,7 +34,9 @@ export default function LoginPage() {
       const res = await login(form);
       setToken(res.access_token);
       if (res.refresh_token) setRefreshToken(res.refresh_token);
-      window.location.href = '/dashboard';
+      const searchParams = new URLSearchParams(window.location.search);
+      const next = searchParams.get('next') || '/dashboard';
+      window.location.href = next.startsWith('/') && !next.startsWith('//') ? next : '/dashboard';
     } catch (e) {
       setError(e.message || 'Failed to login.');
     } finally {
@@ -58,7 +62,7 @@ export default function LoginPage() {
           </label>
           <div className="row wrap">
             <button type="submit" className="primary" disabled={loading}>{loading ? 'Logging in...' : 'Login'}</button>
-            <button type="button" className="secondary" onClick={handleBootstrap} disabled={loading}>Bootstrap default admin</button>
+            {SHOW_DEVELOPMENT_BOOTSTRAP && <button type="button" className="secondary" onClick={handleBootstrap} disabled={loading}>Bootstrap development admin</button>}
           </div>
           {!!notice && <p className="notice-text">{notice}</p>}
           {!!error && <p className="error-text">{error}</p>}

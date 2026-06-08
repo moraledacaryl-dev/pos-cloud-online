@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { fetchOutbox, fetchSyncStatus, runOutboxSync, retryOutboxEvent, unblockOutboxEvent, archiveOutboxEvent, resolveOutboxEvent } from '../../lib/api';
-import { summarizeOutboxRows } from '../../lib/ui_contracts.mjs';
+import { explainSyncError, summarizeOutboxRows } from '../../lib/ui_contracts.mjs';
+import ActionModal from '../../components/ActionModal';
 
 function formatDateTime(value) {
   if (!value) return '-';
@@ -19,6 +20,7 @@ export default function SyncPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [expandedRows, setExpandedRows] = useState(new Set());
+  const [pendingAction, setPendingAction] = useState(null);
 
   async function loadRows({ silent = false } = {}) {
     if (!silent) setLoading(true);
@@ -83,7 +85,6 @@ export default function SyncPage() {
   }
 
   async function handleUnblock(eventId) {
-    if (!confirm('Unblock this event? It will be marked as pending for retry.')) return;
     setError('');
     setNotice('');
     try {
@@ -99,9 +100,7 @@ export default function SyncPage() {
     }
   }
 
-  async function handleArchive(eventId) {
-    const reason = prompt('Reason for archiving (optional):', 'Manual archive');
-    if (reason === null) return; // cancelled
+  async function handleArchive(eventId, reason) {
     setError('');
     setNotice('');
     try {
@@ -117,9 +116,7 @@ export default function SyncPage() {
     }
   }
 
-  async function handleResolve(eventId) {
-    const resolution = prompt('Resolution note (optional):', 'Manually resolved');
-    if (resolution === null) return; // cancelled
+  async function handleResolve(eventId, resolution) {
     setError('');
     setNotice('');
     try {
@@ -166,6 +163,13 @@ export default function SyncPage() {
       else next.add(id);
       return next;
     });
+  }
+
+  async function confirmPendingAction(value) {
+    if (!pendingAction) return;
+    if (pendingAction.kind === 'unblock') return handleUnblock(pendingAction.eventId);
+    if (pendingAction.kind === 'archive') return handleArchive(pendingAction.eventId, value || 'Manual archive');
+    return handleResolve(pendingAction.eventId, value || 'Manually resolved');
   }
 
   const workerBadge = health?.sync_worker?.is_stale ? 'warn' : 'success';
@@ -260,8 +264,10 @@ export default function SyncPage() {
           <table className="table" style={{ marginTop: 10 }}>
             <thead><tr><th>ID</th><th>Type</th><th>Aggregate</th><th>Status</th><th>Retries</th><th>Last attempt</th><th>Error</th><th>Details</th><th>Actions</th></tr></thead>
             <tbody>
-              {filteredRows.map((row) => (
-                <>
+              {filteredRows.map((row) => {
+                const explanation = explainSyncError(row);
+                return (
+                <Fragment key={row.id}>
                   <tr key={row.id}>
                     <td>{row.id}</td>
                     <td>{row.event_type}</td>
@@ -269,7 +275,7 @@ export default function SyncPage() {
                     <td><span className={`badge ${row.status === 'failed' ? 'danger' : row.status === 'blocked' ? 'warn' : row.status === 'resolved' ? 'success' : row.status === 'archived' ? 'info' : 'info'}`}>{row.status}</span></td>
                     <td>{row.retry_count}</td>
                     <td>{formatDateTime(row.last_attempt_at || row.next_retry_at)}</td>
-                    <td><div className="small muted">{row.last_error ? row.last_error.substring(0, 50) + (row.last_error.length > 50 ? '...' : '') : '-'}</div></td>
+                    <td><div className="small muted">{row.last_error ? explanation.summary : '-'}</div></td>
                     <td><button type="button" className="small secondary" onClick={() => toggleExpanded(row.id)}>{expandedRows.has(row.id) ? 'Hide' : 'Show'}</button></td>
                     <td>
                       <div className="row wrap" style={{ gap: 4 }}>
@@ -277,13 +283,13 @@ export default function SyncPage() {
                           <button type="button" className="small secondary" onClick={() => handleRetry(row.id)}>Retry</button>
                         )}
                         {String(row.status || '').toLowerCase() === 'blocked' && (
-                          <button type="button" className="small warn" onClick={() => handleUnblock(row.id)}>Unblock</button>
+                          <button type="button" className="small warn" onClick={() => setPendingAction({ kind: 'unblock', eventId: row.id })}>Unblock</button>
                         )}
                         {['failed', 'blocked'].includes(String(row.status || '').toLowerCase()) && (
-                          <button type="button" className="small danger" onClick={() => handleArchive(row.id)}>Archive</button>
+                          <button type="button" className="small danger" onClick={() => setPendingAction({ kind: 'archive', eventId: row.id })}>Archive</button>
                         )}
                         {['failed', 'blocked'].includes(String(row.status || '').toLowerCase()) && (
-                          <button type="button" className="small success" onClick={() => handleResolve(row.id)}>Resolve</button>
+                          <button type="button" className="small success" onClick={() => setPendingAction({ kind: 'resolve', eventId: row.id })}>Resolve</button>
                         )}
                       </div>
                     </td>
@@ -292,20 +298,35 @@ export default function SyncPage() {
                     <tr key={`details-${row.id}`}>
                       <td colSpan="9" style={{ padding: '8px 16px', background: 'var(--color-bg-secondary)' }}>
                         <div className="stack-tight">
-                          <div><strong>Full Error:</strong> {row.last_error || 'None'}</div>
+                          <div><strong>What this event is:</strong> {row.event_type} for {row.aggregate_type} #{row.aggregate_id}</div>
+                          <div><strong>Why it failed:</strong> {explanation.summary}</div>
+                          <div><strong>Recommended action:</strong> {explanation.action}</div>
+                          <div><strong>Raw Error:</strong> {row.last_error || 'None'}</div>
                           <div><strong>Idempotency Key:</strong> {row.idempotency_key || 'None'}</div>
                           <div><strong>Payload:</strong> <pre style={{ fontSize: 10, margin: 0 }}>{JSON.stringify(row.payload || {}, null, 2)}</pre></div>
                         </div>
                       </td>
                     </tr>
                   )}
-                </>
-              ))}
+                </Fragment>
+              );})}
               {!filteredRows.length && <tr><td colSpan="9" className="muted">No rows in the current view.</td></tr>}
             </tbody>
           </table>
         </div>
       </section>
+      <ActionModal
+        open={!!pendingAction}
+        title={pendingAction?.kind === 'unblock' ? `Unblock event ${pendingAction?.eventId}?` : pendingAction?.kind === 'archive' ? `Archive event ${pendingAction?.eventId}?` : `Resolve event ${pendingAction?.eventId}?`}
+        description={pendingAction?.kind === 'unblock' ? 'The event will return to pending and become eligible for retry.' : 'Record a short note so the recovery decision remains clear later.'}
+        fieldLabel={pendingAction?.kind === 'resolve' ? 'Resolution note' : 'Reason'}
+        defaultValue={pendingAction?.kind === 'archive' ? 'Manual archive' : pendingAction?.kind === 'resolve' ? 'Manually resolved' : ''}
+        required={pendingAction?.kind !== 'unblock'}
+        confirmLabel={pendingAction?.kind === 'unblock' ? 'Unblock event' : pendingAction?.kind === 'archive' ? 'Archive event' : 'Resolve event'}
+        tone={pendingAction?.kind === 'resolve' ? 'normal' : 'danger'}
+        onClose={() => setPendingAction(null)}
+        onConfirm={confirmPendingAction}
+      />
     </div>
   );
 }

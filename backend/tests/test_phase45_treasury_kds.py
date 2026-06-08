@@ -2,8 +2,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.db.database import Base
-from app.models.entities import CatalogItem, CashMovement, Outlet, Register, SyncOutboxEvent
+from app.models.entities import CatalogItem, CashMovement, Outlet, Register, SyncOutboxEvent, User
 from app.schemas.common import CashMovementCreate, KitchenLineStatusPayload, OrderCreate, RegisterSessionClose, RegisterSessionOpen
+from app.services.auth_service import hash_password
 from app.services.pos_service import close_register_session, create_cash_movement, create_order, list_kitchen_lines, open_register_session, update_kitchen_line_status
 
 
@@ -28,9 +29,18 @@ def seed_registers(db):
     return main, side, item
 
 
+def seed_manager(db):
+    user = User(username='manager', full_name='Manager', hashed_password=hash_password('secret123'), role='manager', is_active=True)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
 def test_transfer_semantics_store_destination_and_emit_transfer_event():
     db = make_session()
     main, side, _item = seed_registers(db)
+    manager = seed_manager(db)
     session = open_register_session(db, RegisterSessionOpen(register_id=main.id, business_date='2026-04-20', shift_name='AM', opening_float=1000))
 
     movement = create_cash_movement(
@@ -43,9 +53,9 @@ def test_transfer_semantics_store_destination_and_emit_transfer_event():
             amount=250,
             destination_register_id=side.id,
             note='Move float',
-            approved_by_user_id=999,
+            approved_by_user_id=manager.id,
         ),
-        approved_by_user_id=999,
+        approved_by_user_id=manager.id,
     )
 
     row = db.get(CashMovement, movement['id'])

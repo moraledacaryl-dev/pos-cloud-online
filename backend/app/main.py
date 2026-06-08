@@ -91,10 +91,20 @@ def healthz():
     return {'ok': True, 'environment': settings.environment}
 
 
+@app.get('/api/healthz')
+def api_healthz():
+    return healthz()
+
+
 @app.get('/healthz/details')
 async def healthz_details():
     with SessionLocal() as db:
         return await build_health_report(db, engine)
+
+
+@app.get('/api/healthz/details')
+async def api_healthz_details():
+    return await healthz_details()
 
 
 app.include_router(api_router, prefix=settings.api_prefix)
