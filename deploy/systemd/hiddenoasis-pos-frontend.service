@@ -7,8 +7,9 @@ Type=simple
 User=hiddenoasis
 Group=hiddenoasis
 WorkingDirectory=/opt/pos-cloud-online/frontend
+Environment=NODE_ENV=production
 EnvironmentFile=/etc/hiddenoasis/pos-frontend.env
-ExecStart=/usr/bin/npm run start
+ExecStart=/usr/bin/npm run start -- -H 127.0.0.1 -p 3100
 Restart=always
 RestartSec=5
 NoNewPrivileges=true
