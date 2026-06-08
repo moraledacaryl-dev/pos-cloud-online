@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { createCatalogItem, deleteCatalogItem, fetchCatalogItems, syncCatalogFromAccounting, updateCatalogItem } from '../../lib/api';
+import ActionModal from '../../components/ActionModal';
 
 function money(value) {
   return `₱${Number(value || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -16,6 +17,9 @@ export default function CatalogPage() {
   const [form, setForm] = useState(blank);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [showLocalEditor, setShowLocalEditor] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState(null);
 
   async function loadItems() {
     try {
@@ -31,6 +35,7 @@ export default function CatalogPage() {
   async function handleSubmit(event) {
     event.preventDefault();
     setError(''); setNotice('');
+    setBusy(true);
     try {
       const payload = { ...form, price: Number(form.price || 0) };
       if (form.id) await updateCatalogItem(form.id, payload);
@@ -39,15 +44,18 @@ export default function CatalogPage() {
       setForm(blank);
       await loadItems();
     } catch (e) { setError(e.message || 'Failed to save catalog item.'); }
+    finally { setBusy(false); }
   }
 
   async function handleSync() {
     setError(''); setNotice('');
+    setBusy(true);
     try {
       const res = await syncCatalogFromAccounting();
       setNotice(`Imported ${res.imported_rows} catalog rows from accounting.`);
       await loadItems();
     } catch (e) { setError(e.message || 'Failed to sync catalog.'); }
+    finally { setBusy(false); }
   }
 
   function editItem(row) {
@@ -62,17 +70,29 @@ export default function CatalogPage() {
     }).catch((e) => setError(e.message || 'Failed to update availability.'));
   }
 
+  async function deleteFallbackItem() {
+    if (!pendingDelete) return;
+    try {
+      await deleteCatalogItem(pendingDelete.id);
+      setNotice(`Deleted local-only fallback ${pendingDelete.display_name || pendingDelete.menu_item_name}.`);
+      await loadItems();
+    } catch (e) {
+      setError(e.message || 'Failed to delete catalog item.');
+      throw e;
+    }
+  }
+
   return (
     <div className="stack">
       <section className="section">
         <div className="toolbar">
           <div>
             <h1>Catalog</h1>
-            <p className="muted">Local POS catalog with pricing, availability, and accounting-synced menu structure.</p>
-            <p className="small muted" style={{ marginTop: 4 }}>Accounting owns the master menu categories and item structure. This page is for local POS visibility, manual overrides, and catalog edits that do not duplicate accounting-managed menu categories.</p>
+            <p className="muted">Synced sellable items with local availability controls.</p>
+            <p className="small muted" style={{ marginTop: 4 }}>Accounting owns menu items, categories, pricing, recipes, and SKUs. Use this page to sync the catalog and mark items sold out or available. Local-only items are an exceptional fallback.</p>
           </div>
           <div className="row wrap">
-            <button className="primary" onClick={handleSync}>Sync from Accounting</button>
+            <button className="primary" onClick={handleSync} disabled={busy}>{busy ? 'Working...' : 'Sync from Accounting'}</button>
             <select value={availabilityFilter} onChange={(e) => setAvailabilityFilter(e.target.value)}>
               <option value="all">All items</option>
               <option value="available">Available only</option>
@@ -86,7 +106,12 @@ export default function CatalogPage() {
       </section>
 
       <section className="section">
-        <h2>{form.id ? 'Edit Catalog Item' : 'Manual Catalog Item'}</h2>
+        <div className="toolbar">
+          <div><h2>Local-only fallback items</h2><p className="small muted">Use only when an urgent sellable item cannot yet be created in Accounting. Sync-managed items cannot be edited here.</p></div>
+          <button type="button" className="secondary" onClick={() => setShowLocalEditor((open) => !open)}>{showLocalEditor ? 'Hide fallback editor' : 'Add local-only fallback'}</button>
+        </div>
+        {(showLocalEditor || form.id) && <>
+        <h3 style={{ marginTop: 14 }}>{form.id ? 'Edit Local-only Item' : 'New Local-only Item'}</h3>
         <form className="form-grid-3" style={{ marginTop: 12 }} onSubmit={handleSubmit}>
           <label className="field">Menu Item Name<input value={form.menu_item_name} onChange={(e) => setForm((prev) => ({ ...prev, menu_item_name: e.target.value }))} /></label>
           <label className="field">Display Name<input value={form.display_name} onChange={(e) => setForm((prev) => ({ ...prev, display_name: e.target.value }))} /></label>
@@ -98,8 +123,9 @@ export default function CatalogPage() {
           <label className="field">Price<input type="number" step="0.01" value={form.price} onChange={(e) => setForm((prev) => ({ ...prev, price: e.target.value }))} /></label>
           <label className="field">Available<select value={String(!!form.is_available)} onChange={(e) => setForm((prev) => ({ ...prev, is_available: e.target.value === 'true' }))}><option value="true">Yes</option><option value="false">No</option></select></label>
           <label className="field" style={{ gridColumn: '1 / -1' }}>Notes<input value={form.notes} onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))} /></label>
-          <div className="row wrap"><button type="submit" className="primary">{form.id ? 'Update Item' : 'Save Item'}</button>{form.id && <button type="button" className="secondary" onClick={() => setForm(blank)}>Cancel Edit</button>}</div>
+          <div className="row wrap"><button type="submit" className="primary" disabled={busy}>{busy ? 'Saving...' : form.id ? 'Update Item' : 'Save Local-only Item'}</button>{form.id && <button type="button" className="secondary" onClick={() => setForm(blank)}>Cancel Edit</button>}</div>
         </form>
+        </>}
       </section>
 
       {Object.entries(grouped).map(([group, rows]) => (
@@ -109,13 +135,22 @@ export default function CatalogPage() {
             <thead><tr><th>Display</th><th>SKU / Variant</th><th>Station</th><th>Price</th><th>External IDs</th><th>Status</th><th></th></tr></thead>
             <tbody>
               {rows.map((row) => (
-                <tr key={row.id}><td>{row.display_name}</td><td>{row.sku_code || '-'}</td><td>{row.prep_station || '-'}</td><td>{money(row.price)}</td><td>{row.external_menu_item_id || '-'} / {row.external_sku_id || '-'}</td><td><span className={`badge ${row.is_available ? 'success' : 'warn'}`}>{row.is_available ? 'available' : 'sold out'}</span></td><td><div className="row wrap"><button type="button" className="secondary" onClick={() => editItem(row)}>Edit</button><button type="button" className={row.is_available ? 'secondary' : 'primary'} onClick={() => toggleAvailability(row)}>{row.is_available ? 'Mark Sold Out' : 'Restore to POS'}</button>{!row.external_menu_item_id && !row.external_sku_id && <button type="button" className="secondary" onClick={() => deleteCatalogItem(row.id).then(loadItems)}>Delete</button>}</div></td></tr>
+                <tr key={row.id}><td>{row.display_name}</td><td>{row.sku_code || '-'}</td><td>{row.prep_station || '-'}</td><td>{money(row.price)}</td><td>{row.external_menu_item_id || '-'} / {row.external_sku_id || '-'}</td><td><span className={`badge ${row.is_available ? 'success' : 'warn'}`}>{row.is_available ? 'available' : 'sold out'}</span></td><td><div className="row wrap">{!row.external_menu_item_id && !row.external_sku_id && <button type="button" className="secondary" onClick={() => editItem(row)}>Edit fallback</button>}<button type="button" className={row.is_available ? 'secondary' : 'primary'} onClick={() => toggleAvailability(row)}>{row.is_available ? 'Mark Sold Out' : 'Restore to POS'}</button>{!row.external_menu_item_id && !row.external_sku_id && <button type="button" className="danger" onClick={() => setPendingDelete(row)}>Delete fallback</button>}</div></td></tr>
               ))}
             </tbody>
           </table>
         </section>
       ))}
       {!visibleItems.length && <section className="section"><p className="muted">No catalog items match this filter.</p></section>}
+      <ActionModal
+        open={!!pendingDelete}
+        title={`Delete ${pendingDelete?.display_name || pendingDelete?.menu_item_name || 'local-only item'}?`}
+        description="This deletes only the POS fallback item. Accounting-managed menu items cannot be deleted here."
+        showField={false}
+        confirmLabel="Delete fallback"
+        onClose={() => setPendingDelete(null)}
+        onConfirm={deleteFallbackItem}
+      />
     </div>
   );
 }

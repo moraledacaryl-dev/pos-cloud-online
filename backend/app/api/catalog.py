@@ -45,6 +45,6 @@ def remove_item(item_id: int, db: Session = Depends(get_db), user=Depends(requir
 @router.post('/sync-from-accounting')
 async def sync_from_accounting(db: Session = Depends(get_db), user=Depends(require_permissions('catalog.manage', 'sync.manage'))):
     try:
-        return await sync_catalog_from_accounting(db)
+        return await sync_catalog_from_accounting(db, force=True)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

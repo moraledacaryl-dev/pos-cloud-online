@@ -1,7 +1,20 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getSystemSettings, seedDefaults, updateSystemSettings, fetchAccountingHealth } from '../../lib/api';
+import { fetchAccountingHealth, getSystemSettings, seedDefaults, updateSystemSettings } from '../../lib/api';
+
+const PATH_FIELDS = [
+  ['integration_token_path', 'Integration Token Path', '/auth/integration/token'],
+  ['healthcheck_path', 'Accounting Health Path', '/healthz'],
+  ['current_erp_sales_path', 'Sales Path', ''],
+  ['current_erp_cashflow_path', 'Cashflow Path', ''],
+  ['current_erp_reconciliation_path', 'Reconciliation Path', ''],
+  ['current_erp_transfers_path', 'Transfers Path', ''],
+  ['current_erp_financial_accounts_path', 'Financial Accounts Path', ''],
+  ['current_erp_receivables_path', 'Receivables Path', ''],
+  ['catalog_items_path', 'Catalog Items Path', ''],
+  ['catalog_skus_path', 'Catalog SKUs Path', ''],
+];
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState({ accounting_sync: {}, ui_preferences: {} });
@@ -9,44 +22,68 @@ export default function SettingsPage() {
   const [error, setError] = useState('');
   const [healthStatus, setHealthStatus] = useState('');
   const [healthError, setHealthError] = useState('');
+  const [healthDetails, setHealthDetails] = useState(null);
+  const [busy, setBusy] = useState('');
 
   async function loadSettings() {
     try {
       const data = await getSystemSettings();
       setSettings(data || { accounting_sync: {}, ui_preferences: {} });
-    } catch (e) { setError(e.message || 'Failed to load settings.'); }
+    } catch (e) {
+      setError(e.message || 'Failed to load settings.');
+    }
   }
 
   useEffect(() => { loadSettings().catch(console.error); }, []);
 
+  function setSyncField(key, value) {
+    setSettings((prev) => ({ ...prev, accounting_sync: { ...prev.accounting_sync, [key]: value } }));
+  }
+
   async function handleSave(event) {
     event.preventDefault();
-    setError(''); setNotice('');
+    setError(''); setNotice(''); setBusy('save');
     try {
-      await updateSystemSettings(settings);
-      setNotice('Settings saved.');
+      await updateSystemSettings({ ...settings, accounting_sync: { ...(settings.accounting_sync || {}), mode: 'current_erp' } });
+      setNotice('Settings saved. Stored secrets remain masked.');
       await loadSettings();
-    } catch (e) { setError(e.message || 'Failed to save settings.'); }
+    } catch (e) {
+      setError(e.message || 'Failed to save settings.');
+    } finally {
+      setBusy('');
+    }
   }
 
   async function handleSeed() {
-    setError(''); setNotice('');
+    setError(''); setNotice(''); setBusy('seed');
     try {
       await seedDefaults();
       setNotice('Default outlet, register, and sync settings ensured.');
       await loadSettings();
-    } catch (e) { setError(e.message || 'Failed to seed defaults.'); }
+    } catch (e) {
+      setError(e.message || 'Failed to seed defaults.');
+    } finally {
+      setBusy('');
+    }
   }
 
   async function handleTestConnection() {
-    setHealthStatus('');
-    setHealthError('');
+    setHealthStatus(''); setHealthError(''); setHealthDetails(null); setBusy('health');
     try {
       const data = await fetchAccountingHealth();
-      const visibleAccounts = Number.isFinite(Number(data.financial_account_count)) ? `${data.financial_account_count} accounts visible` : 'account count not reported';
-      setHealthStatus(`Accounting connection OK: ${visibleAccounts}.`);
+      const rows = Array.isArray(data?.rows) ? data.rows : [];
+      const healthyCount = Number.isFinite(Number(data?.healthy_count)) ? Number(data.healthy_count) : rows.filter((row) => row.healthy).length;
+      const totalCount = Number.isFinite(Number(data?.total_count)) ? Number(data.total_count) : rows.length;
+      const failedRows = rows.filter((row) => !row.healthy);
+      const checkedAt = new Date().toLocaleString();
+      setHealthDetails({ ...data, rows, healthy_count: healthyCount, total_count: totalCount, failed_rows: failedRows, checked_at: checkedAt });
+      const mappingText = totalCount ? `${healthyCount}/${totalCount} register mappings healthy` : 'no register mappings checked';
+      const issueText = failedRows.length ? ` ${failedRows.length} mapping needs attention.` : ' All checked mappings are healthy.';
+      setHealthStatus(`Accounting API reachable and token accepted: ${mappingText}.${issueText}`);
     } catch (e) {
       setHealthError(e.message || 'Accounting connection test failed.');
+    } finally {
+      setBusy('');
     }
   }
 
@@ -58,11 +95,11 @@ export default function SettingsPage() {
         <div className="toolbar">
           <div>
             <h1>Settings</h1>
-            <p className="muted">Use current ERP mode now, and shift to integration facade mode later without changing your POS operations.</p>
+            <p className="muted">Connect this POS to the Accounting ERP receiver.</p>
           </div>
           <div className="row wrap" style={{ gap: 10 }}>
-            <button className="secondary" onClick={handleSeed}>Ensure defaults</button>
-            <button className="secondary" onClick={handleTestConnection}>Test accounting connection</button>
+            <button className="secondary" onClick={handleSeed} disabled={!!busy}>{busy === 'seed' ? 'Ensuring...' : 'Ensure defaults'}</button>
+            <button className="secondary" onClick={handleTestConnection} disabled={!!busy}>{busy === 'health' ? 'Testing...' : 'Test accounting connection'}</button>
           </div>
         </div>
         {!!notice && <p className="notice-text" style={{ marginTop: 8 }}>{notice}</p>}
@@ -73,22 +110,44 @@ export default function SettingsPage() {
         <h2>Accounting Sync</h2>
         {!!healthStatus && <p className="success-text" style={{ marginTop: 8 }}>{healthStatus}</p>}
         {!!healthError && <p className="error-text" style={{ marginTop: 8 }}>{healthError}</p>}
-        <p className="muted">Set the accounting backend base to the live Accounting API, e.g. <code>https://hiddenoasis.app/api</code>. Use the integration secret so POS can renew the accounting token automatically. Menu items, categories and master catalog structure are owned by accounting; POS consumes them for sales and local payments.</p>
+        {healthDetails && (
+          <div className="card-grid" style={{ marginTop: 12 }}>
+            <div className="card"><div className="muted">Last checked</div><strong>{healthDetails.checked_at}</strong></div>
+            <div className="card"><div className="muted">Checked mappings</div><strong>{healthDetails.total_count}</strong></div>
+            <div className="card"><div className="muted">Healthy mappings</div><strong>{healthDetails.healthy_count}</strong></div>
+            <div className="card"><div className="muted">Needs attention</div><strong>{healthDetails.failed_rows.length}</strong></div>
+            {!!healthDetails.failed_rows.length && (
+              <div className="card wide">
+                <strong>Missing or failed mappings</strong>
+                <ul className="compact-list">
+                  {healthDetails.failed_rows.map((row) => (
+                    <li key={row.register_id || row.register_code}>
+                      {row.register_name || row.register_code || `Register ${row.register_id}`} needs a valid Accounting financial account.
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+        <p className="muted">Accounting owns menu items, categories, pricing, recipes, and SKUs. POS consumes that catalog for sales and keeps only operational availability overrides. Saved secrets are never displayed again.</p>
         <form className="form-grid" style={{ marginTop: 12 }} onSubmit={handleSave}>
-          <label className="field">Mode<select value={sync.mode || 'current_erp'} onChange={(e) => setSettings((prev) => ({ ...prev, accounting_sync: { ...prev.accounting_sync, mode: e.target.value } }))}><option value="current_erp">current_erp</option><option value="future_facade">future_facade</option></select></label>
-          <label className="field">Accounting API Base<input value={sync.api_base || ''} onChange={(e) => setSettings((prev) => ({ ...prev, accounting_sync: { ...prev.accounting_sync, api_base: e.target.value } }))} /></label>
-          <label className="field">Accounting API Token<input value={sync.api_token || ''} onChange={(e) => setSettings((prev) => ({ ...prev, accounting_sync: { ...prev.accounting_sync, api_token: e.target.value } }))} /></label>
-          <label className="field">Integration Secret<input type="password" value={sync.integration_secret || ''} onChange={(e) => setSettings((prev) => ({ ...prev, accounting_sync: { ...prev.accounting_sync, integration_secret: e.target.value } }))} /></label>
-          <label className="field">Integration Token Path<input value={sync.integration_token_path || ''} onChange={(e) => setSettings((prev) => ({ ...prev, accounting_sync: { ...prev.accounting_sync, integration_token_path: e.target.value } }))} placeholder="/auth/integration/token" /></label>
-          <label className="field">Sales Path<input value={sync.current_erp_sales_path || ''} onChange={(e) => setSettings((prev) => ({ ...prev, accounting_sync: { ...prev.accounting_sync, current_erp_sales_path: e.target.value } }))} /></label>
-          <label className="field">Cashflow Path<input value={sync.current_erp_cashflow_path || ''} onChange={(e) => setSettings((prev) => ({ ...prev, accounting_sync: { ...prev.accounting_sync, current_erp_cashflow_path: e.target.value } }))} /></label>
-          <label className="field">Reconciliation Path<input value={sync.current_erp_reconciliation_path || ''} onChange={(e) => setSettings((prev) => ({ ...prev, accounting_sync: { ...prev.accounting_sync, current_erp_reconciliation_path: e.target.value } }))} /></label>
-          <label className="field">Transfers Path<input value={sync.current_erp_transfers_path || ''} onChange={(e) => setSettings((prev) => ({ ...prev, accounting_sync: { ...prev.accounting_sync, current_erp_transfers_path: e.target.value } }))} /></label>
-          <label className="field">Financial Accounts Path<input value={sync.current_erp_financial_accounts_path || ''} onChange={(e) => setSettings((prev) => ({ ...prev, accounting_sync: { ...prev.accounting_sync, current_erp_financial_accounts_path: e.target.value } }))} /></label>
-          <label className="field">Receivables Path<input value={sync.current_erp_receivables_path || ''} onChange={(e) => setSettings((prev) => ({ ...prev, accounting_sync: { ...prev.accounting_sync, current_erp_receivables_path: e.target.value } }))} /></label>
-          <label className="field">Catalog Items Path<input value={sync.catalog_items_path || ''} onChange={(e) => setSettings((prev) => ({ ...prev, accounting_sync: { ...prev.accounting_sync, catalog_items_path: e.target.value } }))} /></label>
-          <label className="field">Catalog SKUs Path<input value={sync.catalog_skus_path || ''} onChange={(e) => setSettings((prev) => ({ ...prev, accounting_sync: { ...prev.accounting_sync, catalog_skus_path: e.target.value } }))} /></label>
-          <div className="row wrap"><button type="submit" className="primary">Save Settings</button></div>
+          <label className="field">Mode<select value="current_erp" disabled><option value="current_erp">current_erp</option></select></label>
+          <label className="field">Accounting API Base<input value={sync.api_base || ''} onChange={(e) => setSyncField('api_base', e.target.value)} placeholder="https://hiddenoasis.app/api" /></label>
+          <label className="field">Integration Secret<input type="password" value={sync.integration_secret || ''} onChange={(e) => setSyncField('integration_secret', e.target.value)} placeholder={sync.integration_secret_configured ? 'Saved - enter a new secret only to replace it' : 'Enter integration secret'} /></label>
+
+          <details className="advanced-settings">
+            <summary>Advanced connection paths</summary>
+            <p className="small muted" style={{ marginTop: 8 }}>Leave these at their defaults unless the Accounting API routes have changed.</p>
+            <div className="form-grid" style={{ marginTop: 12 }}>
+              <label className="field">Accounting API Token<input type="password" value={sync.api_token || ''} onChange={(e) => setSyncField('api_token', e.target.value)} placeholder={sync.api_token_configured ? 'Saved - enter a new token only to replace it' : 'Optional fallback token'} /></label>
+              {PATH_FIELDS.map(([key, label, placeholder]) => (
+                <label className="field" key={key}>{label}<input value={sync[key] || ''} onChange={(e) => setSyncField(key, e.target.value)} placeholder={placeholder} /></label>
+              ))}
+            </div>
+          </details>
+
+          <div className="row wrap"><button type="submit" className="primary" disabled={!!busy}>{busy === 'save' ? 'Saving...' : 'Save Settings'}</button></div>
         </form>
       </section>
     </div>

@@ -2,9 +2,13 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { closeRegisterSession, fetchRegisterSessions, fetchRegisters, openRegisterSession, reopenRegisterSession } from '../../lib/api';
+import ActionModal from '../../components/ActionModal';
 
 function todayISO() {
-  return new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${now.getFullYear()}-${month}-${day}`;
 }
 
 function money(value) {
@@ -21,6 +25,7 @@ export default function SessionsPage() {
   const [closeForm, setCloseForm] = useState({});
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
+  const [reopenSessionId, setReopenSessionId] = useState(null);
 
   async function loadAll() {
     try {
@@ -44,6 +49,7 @@ export default function SessionsPage() {
       return [row.session_code, row.register_name, row.business_date, row.shift_name, row.status, row.variance_note].some((value) => String(value || '').toLowerCase().includes(q));
     });
   }, [sessions, filters]);
+  const selectedOpenRegister = useMemo(() => registers.find((row) => String(row.id) === String(form.register_id)) || null, [registers, form.register_id]);
 
   const sessionSummary = useMemo(() => ({
     open: sessions.filter((row) => row.status === 'open').length,
@@ -99,12 +105,9 @@ export default function SessionsPage() {
     } catch (e) { setError(e.message || 'Failed to close session.'); }
   }
 
-  async function handleReopen(sessionId) {
-    const reason = window.prompt('Reason for reopening this session?');
-    if (!reason) return;
-    const note = window.prompt('Optional manager note for this reopen?') || '';
+  async function handleReopen(sessionId, reason) {
     try {
-      await reopenRegisterSession(sessionId, { reason, note });
+      await reopenRegisterSession(sessionId, { reason, note: '' });
       setNotice(`Reopened session ${sessionId}.`);
       await loadAll();
     } catch (e) { setError(e.message || 'Failed to reopen session.'); }
@@ -134,7 +137,8 @@ export default function SessionsPage() {
           <label className="field">Shift<input value={form.shift_name} onChange={(e) => setForm((prev) => ({ ...prev, shift_name: e.target.value }))} /></label>
           <label className="field">Opening Float<input type="number" step="0.01" value={form.opening_float} onChange={(e) => setForm((prev) => ({ ...prev, opening_float: e.target.value }))} /></label>
           <label className="field" style={{ gridColumn: '1 / -1' }}>Opening Note<textarea value={form.opening_note} onChange={(e) => setForm((prev) => ({ ...prev, opening_note: e.target.value }))} /></label>
-          <div className="row"><button className="primary" type="submit">Open Session</button></div>
+          {selectedOpenRegister && !selectedOpenRegister.accounting_financial_account_id && <div className="card warn" style={{ gridColumn: '1 / -1' }}><strong>Manager setup required</strong><div className="small">This register is missing its Accounting drawer mapping. Map it in Registers before opening a shift.</div></div>}
+          <div className="row"><button className="primary" type="submit" disabled={!selectedOpenRegister?.accounting_financial_account_id}>Open Session</button></div>
         </form>
       </section>
 
@@ -156,6 +160,8 @@ export default function SessionsPage() {
           <tbody>
             {filteredSessions.map((row) => {
               const state = closeForm[row.id] || {};
+              const register = registers.find((item) => item.id === row.register_id);
+              const hasDrawerMapping = !!(row.register_accounting_financial_account_id || register?.accounting_financial_account_id);
               return (
                 <tr key={row.id}>
                   <td>{row.session_code}<div className="small muted">{row.business_date} · {row.shift_name || '-'}</div><div className="small muted">{row.close_mode || '-'}{row.blind_close ? ' · blind' : ''}</div></td>
@@ -168,7 +174,8 @@ export default function SessionsPage() {
                   <td>
                     {row.status === 'open' ? (
                       <div className="stack-tight">
-                        <div className="row wrap"><button className="secondary" onClick={() => ensureCloseState(row.id)}>Prepare Count</button></div>
+                        {!hasDrawerMapping && <div className="card warn"><strong>Cannot close yet</strong><div className="small">Ask a manager to map {row.register_name} to its Accounting drawer first.</div></div>}
+                        <div className="row wrap"><button className="secondary" disabled={!hasDrawerMapping} onClick={() => ensureCloseState(row.id)}>Prepare Count</button></div>
                         {closeForm[row.id] && (
                           <div className="stack-tight" style={{ minWidth: 300 }}>
                             <input type="number" step="0.01" placeholder="Counted cash" value={state.closing_actual_cash || ''} onChange={(e) => setCloseForm((prev) => ({ ...prev, [row.id]: { ...prev[row.id], closing_actual_cash: Number(e.target.value || 0) } }))} />
@@ -188,13 +195,13 @@ export default function SessionsPage() {
                                 {DENOMS.map((amount) => <label key={amount} className="field" style={{ width: 82 }}>{amount}<input type="number" min="0" placeholder="0" onChange={(e) => updateDenom(row.id, String(amount), e.target.value)} /></label>)}
                               </div>
                             </div>
-                            <button className="secondary" onClick={() => handleClose(row.id)}>Close</button>
+                            <button className="secondary" disabled={!hasDrawerMapping} onClick={() => handleClose(row.id)}>Close</button>
                           </div>
                         )}
                       </div>
                     ) : (
                       <div className="stack-tight">
-                        <button className="secondary" onClick={() => handleReopen(row.id)}>Reopen</button>
+                        <button className="secondary" onClick={() => setReopenSessionId(row.id)}>Reopen</button>
                       </div>
                     )}
                   </td>
@@ -205,6 +212,16 @@ export default function SessionsPage() {
           </tbody>
         </table>
       </section>
+      <ActionModal
+        open={!!reopenSessionId}
+        title={`Reopen session ${reopenSessionId || ''}?`}
+        description="Reopening a closed drawer changes the shift audit trail. Record why correction work is needed."
+        fieldLabel="Reopen reason"
+        required
+        confirmLabel="Reopen session"
+        onClose={() => setReopenSessionId(null)}
+        onConfirm={(reason) => handleReopen(reopenSessionId, reason)}
+      />
     </div>
   );
 }

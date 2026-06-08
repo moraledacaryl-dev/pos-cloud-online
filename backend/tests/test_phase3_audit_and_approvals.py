@@ -61,7 +61,7 @@ def test_room_charge_phase3_audit_and_dispute_approval():
     actions = {row.action for row in db.query(AuditLog).all()}
     assert 'room_charge.created' in actions
     assert 'room_charge.booking_selected' in actions
-    assert 'room_charge.posted_to_beds24' in actions
+    assert 'room_charge.marked_posted_manually' in actions
     assert 'room_charge.settlement_updated' in actions
     assert 'room_charge.dispute_resolved' in actions
     assert db.query(ManagerApproval).filter(ManagerApproval.approval_type == 'room_charge_dispute').count() == 1

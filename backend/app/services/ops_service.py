@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
-from sqlalchemy import func, text
+from sqlalchemy import and_, func, or_, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
@@ -51,11 +52,22 @@ def get_outbox_metrics(db: Session) -> dict:
     failed = int(grouped.get('failed', 0) or grouped.get('error', 0))
     synced = int(grouped.get('synced', 0))
     retrying = db.query(SyncOutboxEvent).filter(SyncOutboxEvent.retry_count > 0, SyncOutboxEvent.status != 'synced').count()
-    due_now = db.query(SyncOutboxEvent).filter(SyncOutboxEvent.status == 'pending').count()
+    current_time = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0).isoformat()
+    due_now = db.query(SyncOutboxEvent).filter(
+        or_(
+            SyncOutboxEvent.status == 'pending',
+            and_(
+                SyncOutboxEvent.status == 'failed',
+                or_(SyncOutboxEvent.next_retry_at.is_(None), SyncOutboxEvent.next_retry_at <= current_time),
+            ),
+        )
+    ).count()
+    blocked = int(grouped.get('blocked', 0))
     return {
         'total': pending + failed + synced,
         'pending': pending,
         'failed': failed,
+        'blocked': blocked,
         'synced': synced,
         'retrying': int(retrying),
         'due_now': int(due_now),
@@ -78,7 +90,7 @@ async def get_accounting_api_status(db: Session) -> dict:
     if not base:
         return {'ok': False, 'configured': False, 'status': 'not_configured'}
     health_path = (config.get('healthcheck_path') or '/healthz').strip()
-    url = base.rstrip('/') + '/' + health_path.lstrip('/')
+    url = _accounting_health_url(base, health_path)
     try:
         async with httpx.AsyncClient(timeout=settings.health_timeout_seconds) as client:
             response = await client.get(url)
@@ -97,6 +109,11 @@ async def get_accounting_api_status(db: Session) -> dict:
             'reachable': False,
             'error': str(exc),
         }
+
+
+def _accounting_health_url(base: str, health_path: str) -> str:
+    parsed = urlsplit(base)
+    return urlunsplit((parsed.scheme, parsed.netloc, '/' + health_path.lstrip('/'), '', '')) if health_path.startswith('/') else base.rstrip('/') + '/' + health_path
 
 
 async def build_health_report(db: Session, engine: Engine) -> dict:

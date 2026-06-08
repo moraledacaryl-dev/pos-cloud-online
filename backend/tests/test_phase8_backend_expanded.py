@@ -5,9 +5,9 @@ from sqlalchemy.orm import sessionmaker
 
 from app.db.database import Base
 from app.models.entities import CatalogItem, ManagerApproval, Outlet, Register, RoomChargePosting, SyncOutboxEvent, User
-from app.schemas.common import CashMovementCreate, InHouseBookingSnapshotCreate, OrderCreate, OrderPayPayload, OrderPaymentCreate, RefundCreate, RegisterSessionClose, RegisterSessionOpen, RegisterSessionReopen, RoomChargePostingStatusUpdate
+from app.schemas.common import CashMovementCreate, CatalogItemUpdate, InHouseBookingSnapshotCreate, OrderCreate, OrderPayPayload, OrderPaymentCreate, RefundCreate, RegisterSessionClose, RegisterSessionOpen, RegisterSessionReopen, RoomChargePostingStatusUpdate
 from app.services.auth_service import hash_password
-from app.services.pos_service import close_register_session, create_cash_movement, create_in_house_booking_snapshot, create_order, create_refund, list_room_charge_postings, open_register_session, pay_order, reopen_register_session, update_room_charge_posting_status, save_setting_json
+from app.services.pos_service import close_register_session, create_cash_movement, create_in_house_booking_snapshot, create_order, create_refund, list_room_charge_postings, open_register_session, pay_order, reopen_register_session, update_catalog_item, update_room_charge_posting_status, save_setting_json
 from app.services.sync_service import sync_catalog_from_accounting
 
 
@@ -74,6 +74,12 @@ def test_sync_catalog_from_accounting_imports_items_with_and_without_skus(monkey
     assert variant_item.category_name == 'Beverages'
     assert variant_item.module_slug == 'restaurant'
     assert variant_item.prep_station == 'kitchen'
+
+    update_catalog_item(db, simple_item.id, CatalogItemUpdate(is_available=False))
+    asyncio.run(sync_catalog_from_accounting(db))
+    db.refresh(simple_item)
+    assert simple_item.is_available is False
+    assert simple_item.availability_override is False
 
 
 def make_session():

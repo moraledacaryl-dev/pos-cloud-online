@@ -13,6 +13,8 @@ DEFAULT_PERMISSION_DEFS = [
     ('orders.void', 'Void Orders', 'POS'),
     ('catalog.view', 'View Catalog', 'Setup'),
     ('catalog.manage', 'Manage Catalog', 'Setup'),
+    ('recipes.view', 'View Recipe Library', 'Operations'),
+    ('recipes.manage', 'Manage Recipe PDFs', 'Setup'),
     ('registers.view', 'View Registers', 'Setup'),
     ('registers.manage', 'Manage Registers', 'Setup'),
     ('sessions.manage', 'Open and Close Sessions', 'Operations'),
@@ -42,13 +44,15 @@ ROLE_PERMISSION_PRESETS = {
     'owner': {key for key, _label, _group in DEFAULT_PERMISSION_DEFS},
     'manager': {
         'dashboard.view', 'pos.use', 'orders.manage', 'orders.void', 'catalog.view', 'catalog.manage',
+        'recipes.view', 'recipes.manage',
         'registers.view', 'registers.manage', 'sessions.manage', 'cash.manage', 'kitchen.view', 'room_charges.view', 'room_charges.manage',
         'sync.view', 'sync.manage', 'settings.manage', 'reports.view', 'audit.view', 'approvals.view', 'approvals.manage',
     },
     'cashier': {
         'dashboard.view', 'pos.use', 'orders.manage', 'catalog.view', 'registers.view', 'sessions.manage', 'cash.manage', 'room_charges.view', 'room_charges.manage',
+        'recipes.view',
     },
-    'kitchen': {'dashboard.view', 'kitchen.view', 'catalog.view'},
+    'kitchen': {'dashboard.view', 'kitchen.view', 'catalog.view', 'recipes.view'},
 }
 
 

@@ -6,13 +6,15 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
     "test:smoke": "node -e \"console.log('frontend smoke ok')\"",
-    "test:ui": "node --test frontend/tests/**/*.test.mjs"
+    "test:ui": "node --test tests/phase8_frontend.test.mjs tests/phase9_frontend.test.mjs"
   },
   "dependencies": {
-    "next": "14.2.15",
+    "next": "^15.5.18",
     "react": "18.3.1",
     "react-dom": "18.3.1"
+  },
+  "overrides": {
+    "postcss": "8.5.10"
   }
 }

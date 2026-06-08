@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 import httpx
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.core.settings import settings
-from app.models.entities import CashMovement, CatalogItem, PosOrder, Register, RegisterSession, SyncOutboxEvent
+from app.models.entities import CashMovement, CatalogItem, InHouseBookingSnapshot, PosOrder, Register, RegisterSession, RoomChargePosting, SyncOutboxEvent
 from app.services.pos_service import normalize_kds_station, now_iso, save_setting_json, setting_json
 
 
@@ -31,6 +32,25 @@ def _load_payload(row: SyncOutboxEvent) -> dict:
         return {}
 
 
+def _serialize_outbox_event(row: SyncOutboxEvent) -> dict:
+    return {
+        'id': row.id,
+        'event_uuid': row.event_uuid,
+        'aggregate_type': row.aggregate_type,
+        'aggregate_id': row.aggregate_id,
+        'event_type': row.event_type,
+        'idempotency_key': row.idempotency_key,
+        'payload_json': row.payload_json,
+        'status': row.status,
+        'retry_count': row.retry_count,
+        'next_retry_at': row.next_retry_at,
+        'last_attempt_at': row.last_attempt_at,
+        'last_error': row.last_error,
+        'synced_at': row.synced_at,
+        'created_at': row.created_at.isoformat() if row.created_at else None,
+    }
+
+
 def _catalog_prep_station(menu: dict, sku: dict | None = None) -> str:
     sku = sku or {}
     return normalize_kds_station(
@@ -45,7 +65,25 @@ def _catalog_prep_station(menu: dict, sku: dict | None = None) -> str:
 
 def get_sync_config(db: Session) -> dict:
     cfg = setting_json(db, 'accounting_sync', default={})
-    return cfg if isinstance(cfg, dict) else {}
+    cfg = cfg if isinstance(cfg, dict) else {}
+    mode = str(cfg.get('mode') or 'current_erp').strip().lower()
+    if mode != 'current_erp':
+        raise ValueError('Only current_erp accounting sync is supported. Change the POS sync mode before running sync.')
+    return {**cfg, 'mode': 'current_erp'}
+
+
+def _parse_date(value: Any) -> date | None:
+    if not value:
+        return None
+    try:
+        return datetime.strptime(str(value)[:10], '%Y-%m-%d').date()
+    except Exception:
+        return None
+
+
+def _default_room_charge_lookup_window(days_back: int = 1, days_forward: int = 21) -> tuple[str, str]:
+    today = datetime.now(timezone(timedelta(hours=8))).date()
+    return (today - timedelta(days=max(int(days_back or 0), 0))).isoformat(), (today + timedelta(days=max(int(days_forward or 0), 0))).isoformat()
 
 
 async def _ensure_accounting_token(db: Session, config: dict) -> dict:
@@ -84,6 +122,138 @@ async def fetch_accounting_financial_accounts(db: Session) -> list[dict]:
     return rows if isinstance(rows, list) else []
 
 
+async def sync_in_house_bookings_from_accounting(
+    db: Session,
+    *,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    days_back: int = 1,
+    days_forward: int = 21,
+    force: bool = False,
+) -> dict:
+    meta = setting_json(db, 'room_charge_booking_sync', default={}) or {}
+    last_sync_at = meta.get('last_sync_at')
+    if not force and last_sync_at:
+        try:
+            last_sync = datetime.fromisoformat(str(last_sync_at).replace('Z', '+00:00'))
+            if last_sync.tzinfo is None:
+                last_sync = last_sync.replace(tzinfo=timezone.utc)
+            if (datetime.now(timezone.utc) - last_sync).total_seconds() < 900:
+                return {'ok': True, 'skipped': True, 'reason': 'recently_synced', **meta}
+        except Exception:
+            pass
+
+    default_start, default_end = _default_room_charge_lookup_window(days_back=days_back, days_forward=days_forward)
+    start = _parse_date(start_date or default_start)
+    end = _parse_date(end_date or default_end)
+    if not start or not end:
+        raise ValueError('Valid start_date and end_date are required.')
+    if end < start:
+        raise ValueError('end_date cannot be before start_date.')
+
+    config = get_sync_config(db)
+    base = (config.get('api_base') or '').strip()
+    if not base:
+        raise ValueError('Accounting API base URL is not configured.')
+    config = await _ensure_accounting_token(db, config)
+    path = config.get('accounting_bookings_calendar_path') or '/reservations/bookings/calendar'
+    async with httpx.AsyncClient(timeout=settings.http_timeout_seconds, headers=_client_headers(config), follow_redirects=True) as client:
+        res = await client.get(_join(base, path), params={'start_date': start.isoformat(), 'end_date': end.isoformat()})
+        if res.status_code >= 400:
+            detail = res.text[:400]
+            raise ValueError(f'Failed to fetch Accounting booking calendar: {detail}')
+        bookings = res.json() or []
+    if not isinstance(bookings, list):
+        bookings = []
+
+    created = updated = skipped = deactivated = 0
+    seen_keys: set[tuple[str, str]] = set()
+    inactive_statuses = {'cancelled', 'canceled', 'no_show', 'noshow'}
+    for booking in bookings:
+        check_in = _parse_date(booking.get('check_in'))
+        check_out = _parse_date(booking.get('check_out'))
+        if not check_in or not check_out:
+            skipped += 1
+            continue
+        first = max(check_in, start)
+        last = min(check_out, end)
+        room_display_name = str(booking.get('room_display_name') or booking.get('room_name') or '').strip()
+        room_code = str(booking.get('room_no') or '').strip()
+        room_number = room_display_name or room_code
+        guest_name = str(booking.get('guest_full_name') or booking.get('guest_name') or 'Guest').strip()
+        if not room_number:
+            skipped += 1
+            continue
+        external_id = str(booking.get('external_booking_id') or '').strip()
+        source_key = external_id or f"accounting:{booking.get('id')}"
+        status = str(booking.get('status') or 'confirmed').strip() or 'confirmed'
+        is_active = status.lower() not in inactive_statuses
+        current = first
+        while current <= last:
+            stay_date = current.isoformat()
+            seen_keys.add((stay_date, source_key))
+            row = (
+                db.query(InHouseBookingSnapshot)
+                .filter(
+                    InHouseBookingSnapshot.stay_date == stay_date,
+                    InHouseBookingSnapshot.beds24_booking_id == source_key,
+                    InHouseBookingSnapshot.source == 'accounting_booking_sync',
+                )
+                .first()
+            )
+            if row:
+                updated += 1
+            else:
+                row = InHouseBookingSnapshot(stay_date=stay_date, beds24_booking_id=source_key, source='accounting_booking_sync')
+                created += 1
+            row.room_number = room_number
+            row.guest_name = guest_name
+            row.guest_label = guest_name
+            row.arrival_date = check_in.isoformat()
+            row.departure_date = check_out.isoformat()
+            row.booking_status = status
+            row.is_active = is_active
+            note_parts = [
+                f"Accounting booking {booking.get('id') or ''}",
+                f"channel {booking.get('channel_display_name') or booking.get('channel') or ''}",
+            ]
+            if room_code and room_display_name and room_code != room_display_name:
+                note_parts.append(f"room code {room_code}")
+            row.notes = '; '.join(part.strip() for part in note_parts if part.strip())
+            db.add(row)
+            current += timedelta(days=1)
+
+    rows = (
+        db.query(InHouseBookingSnapshot)
+        .filter(InHouseBookingSnapshot.source == 'accounting_booking_sync')
+        .filter(InHouseBookingSnapshot.stay_date >= start.isoformat())
+        .filter(InHouseBookingSnapshot.stay_date <= end.isoformat())
+        .all()
+    )
+    for row in rows:
+        key = (row.stay_date, row.beds24_booking_id or '')
+        if key not in seen_keys and row.is_active:
+            row.is_active = False
+            db.add(row)
+            deactivated += 1
+    summary = {
+        'ok': True,
+        'skipped': False,
+        'source': 'accounting_booking_sync',
+        'start_date': start.isoformat(),
+        'end_date': end.isoformat(),
+        'fetched': len(bookings),
+        'created': created,
+        'updated': updated,
+        'deactivated': deactivated,
+        'ignored': skipped,
+        'last_sync_at': datetime.now(timezone.utc).isoformat(),
+    }
+    save_setting_json(db, 'room_charge_booking_sync', summary, username='sync_service')
+    db.commit()
+    return summary
+
+
 async def validate_account_mapping(db: Session, account_id: int | None = None, account_code: str | None = None) -> dict:
     rows = await fetch_accounting_financial_accounts(db)
     match = None
@@ -97,7 +267,18 @@ async def validate_account_mapping(db: Session, account_id: int | None = None, a
     return {'ok': bool(match), 'account': match, 'count': len(rows)}
 
 
-async def sync_catalog_from_accounting(db: Session) -> dict:
+async def sync_catalog_from_accounting(db: Session, *, force: bool = True) -> dict:
+    meta = setting_json(db, 'catalog_sync', default={}) or {}
+    last_sync_at = meta.get('last_sync_at')
+    if not force and last_sync_at:
+        try:
+            last_sync = datetime.fromisoformat(str(last_sync_at).replace('Z', '+00:00'))
+            if last_sync.tzinfo is None:
+                last_sync = last_sync.replace(tzinfo=timezone.utc)
+            if (datetime.now(timezone.utc) - last_sync).total_seconds() < 900:
+                return {'ok': True, 'skipped': True, 'reason': 'recently_synced', **meta}
+        except Exception:
+            pass
     config = get_sync_config(db)
     base = (config.get('api_base') or '').strip()
     if not base:
@@ -156,7 +337,7 @@ async def sync_catalog_from_accounting(db: Session) -> dict:
             'tax_rate': 0,
             'service_charge_rate': 0,
             'is_active': bool(sku.get('is_active', True)) and bool(menu.get('is_active', True)),
-            'is_available': bool(sku.get('is_active', True)) and bool(menu.get('is_active', True)),
+            'is_available': row.availability_override if row and row.availability_override is not None else (bool(sku.get('is_active', True)) and bool(menu.get('is_active', True))),
             'sort_order': 0,
             'accounting_hash': accounting_hash,
             'last_sync_at': now_iso(),
@@ -191,7 +372,7 @@ async def sync_catalog_from_accounting(db: Session) -> dict:
             'tax_rate': 0,
             'service_charge_rate': 0,
             'is_active': bool(menu.get('is_active', True)),
-            'is_available': bool(menu.get('is_active', True)),
+            'is_available': row.availability_override if row and row.availability_override is not None else bool(menu.get('is_active', True)),
             'sort_order': 0,
             'accounting_hash': accounting_hash,
             'last_sync_at': now_iso(),
@@ -219,8 +400,10 @@ async def sync_catalog_from_accounting(db: Session) -> dict:
             row.is_available = False
             db.add(row)
 
+    summary = {'ok': True, 'imported_rows': touched, 'menu_items_seen': len(menu_by_id), 'skus_seen': len(seen_external_skus), 'last_sync_at': now_iso()}
+    save_setting_json(db, 'catalog_sync', summary, username='sync_service')
     db.commit()
-    return {'ok': True, 'imported_rows': touched, 'menu_items_seen': len(menu_by_id), 'skus_seen': len(seen_external_skus)}
+    return summary
 
 
 async def _current_erp_transaction_exists(client: httpx.AsyncClient, base: str, path: str, reference_no: str) -> bool:
@@ -264,10 +447,6 @@ async def _current_erp_reconciliation_exists(client: httpx.AsyncClient, base: st
 
 
 async def _push_cash_movement(client: httpx.AsyncClient, base: str, config: dict, payload: dict):
-    mode = (config.get('mode') or 'current_erp').strip().lower()
-    if mode == 'future_facade':
-        path = config.get('future_facade_cash_path') or '/integrations/pos/cash-events'
-        return await client.post(_join(base, path), json=payload)
     path = config.get('current_erp_cashflow_path') or '/cashflow/transactions'
     exists_path = config.get('current_erp_transactions_lookup_path') or path
     reference_no = payload.get('reference_no') or payload.get('cash_event_uuid')
@@ -325,20 +504,8 @@ async def _push_payment_collection(client: httpx.AsyncClient, base: str, config:
     if not tender:
         return None
     if tender == 'room_charge':
-        path = config.get('current_erp_receivables_path') or '/receivables'
-        receivable_payload = {
-            'source_type': 'pos_order',
-            'source_id': payload.get('order_id'),
-            'counterparty_name': payload.get('guest_name') or f"Room Charge {payload.get('order_no')}",
-            'receivable_type': 'guest_balance',
-            'transaction_date': payload.get('business_date'),
-            'gross_amount': payment.get('amount_applied') or 0,
-            'amount_collected': 0,
-            'status': 'open',
-            'notes': json.dumps({'source': 'dedicated_pos_cloud', 'order_no': payload.get('order_no'), 'table_label': payload.get('table_label')}, ensure_ascii=False),
-            'bir_include': False,
-        }
-        return await client.post(_join(base, path), json=receivable_payload)
+        # Dedicated room_charge.request_created events own folio receivables.
+        return None
 
     path = config.get('current_erp_cashflow_path') or '/cashflow/transactions'
     exists_path = config.get('current_erp_transactions_lookup_path') or path
@@ -376,20 +543,10 @@ async def _push_payment_refund(client: httpx.AsyncClient, base: str, config: dic
     if not tender:
         return None
     if tender == 'room_charge':
-        path = config.get('current_erp_receivables_path') or '/receivables'
-        receivable_payload = {
-            'source_type': 'pos_refund',
-            'source_id': payment.get('id'),
-            'counterparty_name': payload.get('guest_name') or f"Room Charge Refund {payload.get('order_no')}",
-            'receivable_type': 'guest_balance',
-            'transaction_date': payload.get('created_at') or payload.get('business_date'),
-            'gross_amount': -(payment.get('amount') or 0),  # Negative for refund
-            'amount_collected': 0,
-            'status': 'open',
-            'notes': json.dumps({'source': 'dedicated_pos_cloud', 'refund_no': payload.get('refund_no'), 'order_no': payload.get('order_no')}, ensure_ascii=False),
-            'bir_include': False,
-        }
-        return await client.post(_join(base, path), json=receivable_payload)
+        # Room-charge reversals are owned by room_charge.request_created events.
+        # Sending payment.refunded as a negative pos_refund receivable violates
+        # Accounting's receivable reversal contract.
+        return None
     path = config.get('current_erp_cashflow_path') or '/cashflow/transactions'
     exists_path = config.get('current_erp_transactions_lookup_path') or path
     reference_no = payment.get('reference_no') or f"{payload.get('refund_no') or payload.get('order_no')}:refund:{tender}"
@@ -426,7 +583,7 @@ async def _push_room_charge_request(client: httpx.AsyncClient, base: str, config
         return None
     path = config.get('current_erp_receivables_path') or '/receivables'
     receivable_payload = {
-        'source_type': 'pos_room_charge',
+        'source_type': 'pos_room_charge_reversal' if (posting.get('charge_amount') or 0) < 0 else 'pos_room_charge',
         'source_id': posting.get('id'),
         'counterparty_name': posting.get('guest_label') or f"Room {posting.get('room_number')}",
         'receivable_type': 'guest_balance',
@@ -442,15 +599,15 @@ async def _push_room_charge_request(client: httpx.AsyncClient, base: str, config
             'posting_uuid': posting.get('posting_uuid'),
         }, ensure_ascii=False),
         'bir_include': False,
+        'external_source': 'dedicated_pos_cloud',
+        'external_id': f"room-charge:{posting.get('posting_uuid') or posting.get('id')}",
+        'reverses_source_type': payload.get('reverses_source_type'),
+        'reverses_source_id': payload.get('reverses_source_id'),
     }
     return await client.post(_join(base, path), json=receivable_payload)
 
 
 async def _push_order(client: httpx.AsyncClient, base: str, config: dict, payload: dict):
-    mode = (config.get('mode') or 'current_erp').strip().lower()
-    if mode == 'future_facade':
-        path = config.get('future_facade_sales_path') or '/integrations/pos/sales/finalize'
-        return await client.post(_join(base, path), json=payload)
     path = config.get('current_erp_sales_path') or '/menu/sales'
     existing = await _find_current_erp_sale(client, base, path, payload.get('order_no'))
     if existing:
@@ -513,10 +670,8 @@ async def _push_order_void(client: httpx.AsyncClient, base: str, config: dict, p
 
 
 async def _push_reconciliation(client: httpx.AsyncClient, base: str, config: dict, payload: dict):
-    mode = (config.get('mode') or 'current_erp').strip().lower()
-    if mode == 'future_facade':
-        path = config.get('future_facade_reconciliation_path') or '/integrations/pos/reconciliations'
-        return await client.post(_join(base, path), json=payload)
+    if not payload.get('register_accounting_financial_account_id'):
+        raise ValueError('Register drawer is not mapped to an Accounting financial account. Map the register before retrying this reconciliation.')
     path = config.get('current_erp_reconciliation_path') or '/reconciliations'
     exists_path = config.get('current_erp_reconciliations_lookup_path') or path
     if await _current_erp_reconciliation_exists(client, base, exists_path, payload.get('register_accounting_financial_account_id'), payload.get('session_code'), payload.get('business_date')):
@@ -542,7 +697,16 @@ async def run_outbox_sync(db: Session, limit: int = 25) -> dict:
     if not base:
         raise ValueError('Accounting API base URL is not configured.')
     config = await _ensure_accounting_token(db, config)
-    query = db.query(SyncOutboxEvent).filter(SyncOutboxEvent.status.in_(['pending', 'failed'])).order_by(SyncOutboxEvent.id.asc())
+    current_time = now_iso()
+    query = db.query(SyncOutboxEvent).filter(
+        or_(
+            SyncOutboxEvent.status == 'pending',
+            and_(
+                SyncOutboxEvent.status == 'failed',
+                or_(SyncOutboxEvent.next_retry_at.is_(None), SyncOutboxEvent.next_retry_at <= current_time),
+            ),
+        )
+    ).order_by(SyncOutboxEvent.id.asc())
     rows = query.limit(max(int(limit or 25), 1)).all()
     synced = 0
     failed = 0
@@ -580,6 +744,8 @@ async def run_outbox_sync(db: Session, limit: int = 25) -> dict:
                 if res is None or res.status_code < 400:
                     row.status = 'synced'
                     row.synced_at = now_iso()
+                    row.retry_count = 0
+                    row.next_retry_at = None
                     row.last_error = None
                     synced += 1
                 else:
@@ -604,12 +770,6 @@ async def run_outbox_sync(db: Session, limit: int = 25) -> dict:
                         order.synced_to_accounting = True
                         order.last_sync_at = now_iso()
                         db.add(order)
-                elif row.event_type == 'room_charge.request_created' and row.status == 'synced':
-                    posting = db.get(RoomChargePosting, int(row.aggregate_id))
-                    if posting:
-                        posting.synced_to_accounting = True
-                        posting.last_sync_at = now_iso()
-                        db.add(posting)
                 elif row.event_type == 'room_charge.request_created' and row.status == 'synced':
                     posting = db.get(RoomChargePosting, int(row.aggregate_id))
                     if posting:
@@ -663,6 +823,8 @@ async def retry_outbox_event(db: Session, event_id: int) -> dict:
                 res = await _push_payment_collection(client, base, config, payload)
             elif row.event_type == 'payment.refunded' and config.get('sync_cash_movements', True):
                 res = await _push_payment_refund(client, base, config, payload)
+            elif row.event_type == 'room_charge.request_created' and config.get('sync_room_charges', True):
+                res = await _push_room_charge_request(client, base, config, payload)
             elif row.event_type == 'order.finalized' and config.get('sync_orders', True):
                 res = await _push_order(client, base, config, payload)
             elif row.event_type == 'order.voided' and config.get('sync_orders', True):
@@ -680,6 +842,8 @@ async def retry_outbox_event(db: Session, event_id: int) -> dict:
             if res is None or res.status_code < 400:
                 row.status = 'synced'
                 row.synced_at = now_iso()
+                row.retry_count = 0
+                row.next_retry_at = None
                 row.last_error = None
                 synced += 1
             else:
@@ -704,6 +868,12 @@ async def retry_outbox_event(db: Session, event_id: int) -> dict:
                     order.synced_to_accounting = True
                     order.last_sync_at = now_iso()
                     db.add(order)
+            elif row.event_type == 'room_charge.request_created' and row.status == 'synced':
+                posting = db.get(RoomChargePosting, int(row.aggregate_id))
+                if posting:
+                    posting.synced_to_accounting = True
+                    posting.last_sync_at = now_iso()
+                    db.add(posting)
             db.add(row)
             db.commit()
             return {'ok': True, 'synced': synced, 'failed': failed, 'blocked': blocked}
@@ -734,7 +904,7 @@ async def unblock_outbox_event(db: Session, event_id: int) -> dict:
         raise ValueError('Event is not blocked or failed')
     
     row.status = 'pending'
-    row.next_retry_at = _now_text()
+    row.next_retry_at = now_iso()
     row.last_attempt_at = None
     row.last_error = None
     db.commit()

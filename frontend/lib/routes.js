@@ -111,6 +111,14 @@ export const ROUTE_ITEMS = [
     group: 'Operations',
   },
   {
+    href: '/recipes',
+    label: 'Recipes',
+    title: 'Recipe Library',
+    subtitle: 'Open staff recipe PDFs linked to Accounting dishes',
+    permissionsAny: ['recipes.view'],
+    group: 'Operations',
+  },
+  {
     href: '/sync',
     label: 'Sync Queue',
     title: 'Sync Queue',
@@ -189,6 +197,14 @@ export function routeCanAccess(user, pathname) {
   
   // Check permissions
   return route.permissionsAny.some((permission) => canAccess(user, permission));
+}
+
+export function defaultRouteForUser(user) {
+  if (canAccess(user, 'pos.use')) return '/pos';
+  if (canAccess(user, 'kitchen.view')) return '/kitchen';
+  if (canAccess(user, 'dashboard.view')) return '/dashboard';
+  const first = ROUTE_ITEMS.find((item) => !item.hidden && item.permissionsAny?.some((permission) => canAccess(user, permission)));
+  return first?.href || '/login';
 }
 
 export function visibleRouteGroups(user) {

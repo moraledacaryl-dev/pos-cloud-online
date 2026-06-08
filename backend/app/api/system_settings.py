@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_any_permissions, require_permissions
@@ -7,6 +7,15 @@ from app.schemas.common import SystemSettingsUpdate
 from app.services.pos_service import save_setting_json, setting_json
 
 router = APIRouter()
+SENSITIVE_SYNC_FIELDS = {'api_token', 'integration_secret'}
+
+
+def public_accounting_sync(settings: dict | None) -> dict:
+    public = dict(settings or {})
+    for field in SENSITIVE_SYNC_FIELDS:
+        value = public.pop(field, '')
+        public[f'{field}_configured'] = bool(value)
+    return public
 
 DEFAULT_TABLE_LAYOUT = {
     'areas': ['Lobby', 'Terrace', 'Garden', 'Gazebo', 'Above Kitchen', 'Pool', 'Room Service', 'Takeout'],
@@ -35,7 +44,7 @@ DEFAULT_TABLE_LAYOUT = {
 @router.get('/')
 def get_settings(db: Session = Depends(get_db), user=Depends(require_permissions('settings.manage'))):
     return {
-        'accounting_sync': setting_json(db, 'accounting_sync', default={}),
+        'accounting_sync': public_accounting_sync(setting_json(db, 'accounting_sync', default={})),
         'ui_preferences': setting_json(db, 'ui_preferences', default={}),
     }
 
@@ -44,12 +53,25 @@ def get_settings(db: Session = Depends(get_db), user=Depends(require_permissions
 def update_settings(payload: SystemSettingsUpdate, db: Session = Depends(get_db), current_user=Depends(require_permissions('settings.manage'))):
     data = payload.model_dump(exclude_unset=True)
     if 'accounting_sync' in data:
-        save_setting_json(db, 'accounting_sync', data['accounting_sync'] or {}, username=getattr(current_user, 'username', None))
+        accounting_sync = data['accounting_sync'] or {}
+        stored_sync = setting_json(db, 'accounting_sync', default={}) or {}
+        mode = str(accounting_sync.get('mode') or 'current_erp').strip().lower()
+        if mode != 'current_erp':
+            raise HTTPException(status_code=400, detail='Only current_erp accounting sync is supported. The integration facade is not available yet.')
+        next_sync = {**stored_sync, **accounting_sync, 'mode': 'current_erp'}
+        for field in SENSITIVE_SYNC_FIELDS:
+            next_sync.pop(f'{field}_configured', None)
+            if not accounting_sync.get(field):
+                if stored_sync.get(field):
+                    next_sync[field] = stored_sync[field]
+                else:
+                    next_sync.pop(field, None)
+        save_setting_json(db, 'accounting_sync', next_sync, username=getattr(current_user, 'username', None))
     if 'ui_preferences' in data:
         save_setting_json(db, 'ui_preferences', data['ui_preferences'] or {}, username=getattr(current_user, 'username', None))
     return {
         'ok': True,
-        'accounting_sync': setting_json(db, 'accounting_sync', default={}),
+        'accounting_sync': public_accounting_sync(setting_json(db, 'accounting_sync', default={})),
         'ui_preferences': setting_json(db, 'ui_preferences', default={}),
     }
 

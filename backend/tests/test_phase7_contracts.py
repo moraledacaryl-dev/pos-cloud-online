@@ -1,6 +1,7 @@
 import asyncio
 import json
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -113,6 +114,24 @@ def test_refund_contract_maps_to_outgoing_cashflow_payload():
     assert body['external_id'].startswith('refund-payment:')
 
 
+def test_room_charge_payment_refund_contract_is_skipped():
+    payload = {
+        'refund_no': 'RF-ROOM-1',
+        'order_no': 'POS-ROOM-1',
+        'guest_name': 'Room Guest',
+        'business_date': '2026-04-20',
+        'payment': {
+            'id': 991,
+            'tender_type': 'room_charge',
+            'amount': 100,
+        },
+    }
+    client = FakeClient()
+    res = asyncio.run(_push_payment_refund(client, 'https://acct.test', {}, payload))
+    assert res is None
+    assert client.posts == []
+
+
 def test_void_contract_posts_reversal_only_when_sale_exists():
     client = FakeClient({('https://acct.test/menu/sales', None): [{'id': 77, 'order_no': 'ORD-1', 'status': 'posted'}]})
     payload = {'order_no': 'ORD-1', 'business_date': '2026-04-20', 'reason': 'Customer cancelled'}
@@ -163,7 +182,7 @@ def test_room_charge_pending_posted_settled_and_rejected_contract_path():
     posting = db.query(RoomChargePosting).first()
     posted = update_room_charge_posting_status(db, posting.id, RoomChargePostingStatusUpdate(posting_status='posted_to_beds24', beds24_posting_reference='INV-201'), user_id=manager.id)
     settled = update_room_charge_posting_status(db, posting.id, RoomChargePostingStatusUpdate(posting_status='settled_at_frontdesk', later_payment_status='settled', payment_date='2026-04-21'), user_id=manager.id)
-    rejected = update_room_charge_posting_status(db, posting.id, RoomChargePostingStatusUpdate(posting_status='rejected', rejected_reason='Front desk found wrong guest'), user_id=manager.id)
     assert posted['posting_status'] == 'posted_to_beds24'
     assert settled['payment_date'] == '2026-04-21'
-    assert rejected['rejected_reason'] == 'Front desk found wrong guest'
+    with pytest.raises(ValueError, match='Cannot change room charge'):
+        update_room_charge_posting_status(db, posting.id, RoomChargePostingStatusUpdate(posting_status='rejected', rejected_reason='Front desk found wrong guest'), user_id=manager.id)
