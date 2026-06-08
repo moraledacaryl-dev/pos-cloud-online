@@ -16,6 +16,22 @@ This document is the stable contract for the POS package in this repository. It 
 - **reject**: receiver returns 4xx because the payload is invalid.
 - **retryable_failure**: receiver returns 5xx or the network fails; the POS keeps or retries the outbox event.
 
+## Daily operations context
+
+`GET /api/reports/daily-ops-context?date=YYYY-MM-DD`
+
+Purpose: provide Staff/Payroll and Operations with read-only operational context for a business date. The response contains totals and counts only; it does not expose payroll, HR data, guest names, customer PII, or receipt-level customer details.
+
+Response fields:
+
+- `totals.sales`, `totals.orders`, `totals.refunds`, `totals.voids`
+- `totals.cash`, `totals.gcash`, `totals.card`, `totals.bank_transfers`, `totals.room_charges`
+- `counts.open_orders`, `counts.held_orders`, `counts.unpaid_orders`, `counts.pending_room_charges`, `counts.active_sessions`
+- `drawer_variance`, `first_order_at`, `last_order_at`, `peak_hour`
+- `warnings[]`
+
+Warnings may include `drawer_variance.alert`, `room_charge.pending_frontdesk_post`, and `unpaid_orders.warning`. POS users may later be mapped to `employee_code` using safe fields only: display name, role, and active/inactive status.
+
 ## 1. Sale sync
 **Outbox event:** `order.finalized`
 
