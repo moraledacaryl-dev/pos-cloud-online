@@ -1,0 +1,7 @@
+{
+  "app_key": "pos",
+  "app_name": "POS Cloud",
+  "app_description": "Orders, sales, tenders, refunds, voids, room charges, drawer sessions, and POS operational context.",
+  "production_url": "https://pos.hiddenoasis.app",
+  "health_endpoint": "/healthz"
+}

@@ -16,6 +16,24 @@ This document is the stable contract for the POS package in this repository. It 
 - **reject**: receiver returns 4xx because the payload is invalid.
 - **retryable_failure**: receiver returns 5xx or the network fails; the POS keeps or retries the outbox event.
 
+## Daily operations context
+
+`GET /api/reports/daily-ops-context?date=YYYY-MM-DD`
+
+Purpose: provide Staff/Payroll and Operations with read-only operational context for a business date. The response contains totals and counts only; it does not expose payroll, HR data, guest names, customer PII, or receipt-level customer details.
+
+Response fields:
+
+- Flat fields: `business_date`, `generated_at`, `gross_sales`, `net_sales`, `order_count`, `refund_count`, `void_count`
+- Tender fields: `cash_sales`, `gcash_sales`, `card_sales`, `bank_transfer_sales`, `room_charge_total`
+- Status counts: `open_order_count`, `held_order_count`, `unpaid_order_count`, `pending_room_charge_count`, `active_session_count`
+- Timing and variance: `drawer_variance_total`, `first_order_time`, `last_order_time`, `peak_hour`
+- Compatibility groups: `totals.*` and `counts.*`
+- `warnings[]`
+- Optional `integration_event` envelope with `external_source=dedicated_pos_cloud`, `external_id=daily-sales-context:{business_date}`, `event_type=daily_sales_context`, `schema_version=2026-06-v1`, and `payload` equal to the context body.
+
+Warnings may include `drawer_variance.alert`, `room_charge.pending_frontdesk_post`, and `unpaid_orders.warning`. POS users may later be mapped to `employee_code` using safe fields only: display name, role, and active/inactive status.
+
 ## 1. Sale sync
 **Outbox event:** `order.finalized`
 

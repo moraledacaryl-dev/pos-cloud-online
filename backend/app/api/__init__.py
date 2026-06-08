@@ -10,6 +10,7 @@ from app.api.customer_display import router as customer_display_router
 from app.api.kitchen import router as kitchen_router
 from app.api.orders import router as orders_router
 from app.api.recipes import router as recipes_router
+from app.api.reports import router as reports_router
 from app.api.room_charges import router as room_charges_router
 from app.api.registers import router as registers_router
 from app.api.seed import router as seed_router
@@ -26,6 +27,7 @@ api_router.include_router(registers_router, prefix='/registers', tags=['register
 api_router.include_router(sessions_router, prefix='/register-sessions', tags=['register-sessions'])
 api_router.include_router(orders_router, prefix='/orders', tags=['orders'])
 api_router.include_router(recipes_router, prefix='/recipes', tags=['recipes'])
+api_router.include_router(reports_router, prefix='/reports', tags=['reports'])
 api_router.include_router(room_charges_router, prefix='/room-charges', tags=['room-charges'])
 api_router.include_router(cash_router, prefix='/cash-movements', tags=['cash-movements'])
 api_router.include_router(kitchen_router, prefix='/kitchen', tags=['kitchen'])
