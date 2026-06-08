@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - 'cleanup/**'
+      - 'recovery/**'
+
+permissions:
+  contents: read
+
+jobs:
+  backend-tests:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      ENVIRONMENT: test
+      DATABASE_URL: sqlite:///./ci-pos.db
+      SECRET_KEY: ci-secret-key-do-not-use
+      ACCESS_TOKEN_SECRET: ci-access-token-secret
+      REFRESH_TOKEN_SECRET: ci-refresh-token-secret
+      STARTUP_REQUIRE_MIGRATIONS: 'false'
+      RATE_LIMIT_ENABLED: 'false'
+      RATE_LIMIT_BACKEND: memory
+      ACCOUNTING_API_BASE: https://hiddenoasis.app/api
+      ACCOUNTING_API_TOKEN: ci-placeholder-token
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+
+      - name: Run backend tests
+        run: python -m pytest tests
+
+  frontend:
+    name: Frontend build and tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run frontend contract tests
+        run: npm run test:ui
+
+      - name: Build frontend
+        run: npm run build
