@@ -4,7 +4,6 @@ from collections import Counter, defaultdict
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -70,13 +69,36 @@ def build_daily_ops_context(db: Session, business_date: str) -> dict:
 
     first_order = min((order.created_at for order in orders if order.created_at), default=None)
     last_order = max((order.created_at for order in orders if order.created_at), default=None)
+    gross_sales = _money(sum(_money(order.total_amount) for order in orders))
+    net_sales = _money(sum(_money(order.total_amount) for order in orders if order not in voids) - refund_total)
+    room_charge_total = _money(sum(_money(row.charge_amount) for row in room_charges))
+    generated_at = datetime.utcnow().replace(microsecond=0).isoformat()
 
-    return {
+    context = {
         'event_type': 'daily_sales_context',
         'external_source': 'dedicated_pos_cloud',
         'business_date': business_date,
+        'generated_at': generated_at,
+        'gross_sales': gross_sales,
+        'net_sales': net_sales,
+        'order_count': len(orders),
+        'refund_count': len(refunds),
+        'void_count': len(voids),
+        'cash_sales': _money(tender_totals.get('cash')),
+        'gcash_sales': _money(tender_totals.get('gcash')),
+        'card_sales': _money(tender_totals.get('card') + tender_totals.get('credit_card') + tender_totals.get('debit_card')),
+        'bank_transfer_sales': bank_transfer_total,
+        'room_charge_total': room_charge_total,
+        'open_order_count': len(open_orders),
+        'held_order_count': len(held_orders),
+        'unpaid_order_count': len(unpaid_orders),
+        'pending_room_charge_count': len(pending_room_charges),
+        'drawer_variance_total': drawer_variance,
+        'active_session_count': len([session for session in sessions if session.status == 'open']),
+        'first_order_time': first_order.isoformat() if first_order else None,
+        'last_order_time': last_order.isoformat() if last_order else None,
         'totals': {
-            'sales': _money(sum(_money(order.total_amount) for order in orders if order not in voids)),
+            'sales': net_sales,
             'orders': len(orders),
             'refunds': refund_total,
             'voids': len(voids),
@@ -84,7 +106,7 @@ def build_daily_ops_context(db: Session, business_date: str) -> dict:
             'gcash': _money(tender_totals.get('gcash')),
             'card': _money(tender_totals.get('card') + tender_totals.get('credit_card') + tender_totals.get('debit_card')),
             'bank_transfers': bank_transfer_total,
-            'room_charges': _money(sum(_money(row.charge_amount) for row in room_charges)),
+            'room_charges': room_charge_total,
         },
         'counts': {
             'open_orders': len(open_orders),
@@ -100,6 +122,21 @@ def build_daily_ops_context(db: Session, business_date: str) -> dict:
         'warnings': warnings,
         'privacy_note': 'Operational totals only. No payroll, HR data, guest names, or customer PII are returned.',
     }
+    context['integration_event'] = {
+        'external_source': 'dedicated_pos_cloud',
+        'external_id': f'daily-sales-context:{business_date}',
+        'event_type': 'daily_sales_context',
+        'source_record_type': 'POS Daily Operations Context',
+        'source_record_id': business_date,
+        'generated_at': generated_at,
+        'schema_version': '2026-06-v1',
+        'status': 'For Review',
+        'payload': {
+            key: value for key, value in context.items()
+            if key not in {'integration_event'}
+        },
+    }
+    return context
 
 
 @router.get('/daily-ops-context')

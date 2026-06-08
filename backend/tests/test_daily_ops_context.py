@@ -57,10 +57,17 @@ def test_daily_ops_context_aggregates_without_pii():
 
     context = build_daily_ops_context(db, '2026-06-08')
     assert context['totals']['sales'] == 230
+    assert context['gross_sales'] == 230
+    assert context['net_sales'] == 230
+    assert context['order_count'] == 2
     assert context['totals']['cash'] == 100
     assert context['totals']['gcash'] == 50
     assert context['totals']['room_charges'] == 25
+    assert context['room_charge_total'] == 25
+    assert context['pending_room_charge_count'] == 1
     assert context['counts']['unpaid_orders'] == 1
     assert context['counts']['pending_room_charges'] == 1
     assert context['drawer_variance'] == -20
+    assert context['integration_event']['external_id'] == 'daily-sales-context:2026-06-08'
+    assert context['integration_event']['schema_version'] == '2026-06-v1'
     assert 'Private Guest' not in str(context)

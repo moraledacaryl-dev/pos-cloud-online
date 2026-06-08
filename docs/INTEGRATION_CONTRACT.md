@@ -24,11 +24,13 @@ Purpose: provide Staff/Payroll and Operations with read-only operational context
 
 Response fields:
 
-- `totals.sales`, `totals.orders`, `totals.refunds`, `totals.voids`
-- `totals.cash`, `totals.gcash`, `totals.card`, `totals.bank_transfers`, `totals.room_charges`
-- `counts.open_orders`, `counts.held_orders`, `counts.unpaid_orders`, `counts.pending_room_charges`, `counts.active_sessions`
-- `drawer_variance`, `first_order_at`, `last_order_at`, `peak_hour`
+- Flat fields: `business_date`, `generated_at`, `gross_sales`, `net_sales`, `order_count`, `refund_count`, `void_count`
+- Tender fields: `cash_sales`, `gcash_sales`, `card_sales`, `bank_transfer_sales`, `room_charge_total`
+- Status counts: `open_order_count`, `held_order_count`, `unpaid_order_count`, `pending_room_charge_count`, `active_session_count`
+- Timing and variance: `drawer_variance_total`, `first_order_time`, `last_order_time`, `peak_hour`
+- Compatibility groups: `totals.*` and `counts.*`
 - `warnings[]`
+- Optional `integration_event` envelope with `external_source=dedicated_pos_cloud`, `external_id=daily-sales-context:{business_date}`, `event_type=daily_sales_context`, `schema_version=2026-06-v1`, and `payload` equal to the context body.
 
 Warnings may include `drawer_variance.alert`, `room_charge.pending_frontdesk_post`, and `unpaid_orders.warning`. POS users may later be mapped to `employee_code` using safe fields only: display name, role, and active/inactive status.
 
