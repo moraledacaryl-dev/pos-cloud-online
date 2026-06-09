@@ -1,18 +1,19 @@
 # Test Results
 
-Date: 2026-06-08
+Date: 2026-06-09
 
 ## POS
 
-- Command: `pytest backend/tests/test_daily_ops_context.py backend/tests/test_phase7_contracts.py`
-  - Result: not run
-  - Reason: `pytest` is not installed in the shell (`zsh: command not found: pytest`)
-  - Classification: environment/dependency gap
-- Command: `python3 -B -c "... ast.parse ..."` for `backend/app/api/reports.py` and `backend/tests/test_daily_ops_context.py`
+- Command: `PYTHONPYCACHEPREFIX=/tmp/pycache-pos python3 -m compileall backend/app/core/settings.py backend/app/api/reports.py backend/tests/test_daily_ops_context.py`
   - Result: passed
-- Command: `node --version`
+  - Details: daily operations context route, settings, and tests compile after integration-key hardening.
+- Command: `PYTHONPYCACHEPREFIX=/tmp/pycache-pos python3 -m pytest backend/tests/test_daily_ops_context.py`
   - Result: not run
-  - Reason: `node` is not installed in the shell
-  - Classification: environment/dependency gap
+  - Reason: this local shell has no `pytest` module.
+  - Classification: environment/dependency gap, not a code failure.
+- Command: `node --version` / frontend build
+  - Result: not run
+  - Reason: this local shell has no `node`/`npm`.
+  - Classification: environment/dependency gap.
 
-Next action: install backend test dependencies and Node, then run POS pytest, `npm run build`, `npm run test:smoke`, and `npm run test:ui`.
+Next action: install backend/frontend dependencies in the POS environment, then run POS pytest, `npm run build`, `npm run test:smoke`, and `npm run test:ui`.

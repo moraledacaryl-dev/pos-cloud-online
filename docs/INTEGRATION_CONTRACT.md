@@ -22,6 +22,8 @@ This document is the stable contract for the POS package in this repository. It 
 
 Purpose: provide Staff/Payroll and Operations with read-only operational context for a business date. The response contains totals and counts only; it does not expose payroll, HR data, guest names, customer PII, or receipt-level customer details.
 
+Production access requires `X-Integration-Api-Key` when `INTEGRATION_API_KEY` is configured. If production still has a placeholder key, the endpoint rejects requests until a real shared key is installed.
+
 Response fields:
 
 - Flat fields: `business_date`, `generated_at`, `gross_sales`, `net_sales`, `order_count`, `refund_count`, `void_count`

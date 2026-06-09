@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from datetime import datetime
+from hmac import compare_digest
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from app.core.settings import looks_like_placeholder_secret, settings
 from app.db.database import get_db
 from app.models.entities import CashMovement, PosOrder, PosOrderPayment, Refund, RegisterSession, RoomChargePosting
 
@@ -26,6 +28,16 @@ def _hour(value) -> str | None:
         return f'{parsed.hour:02d}:00'
     except ValueError:
         return None
+
+
+def require_integration_key(x_integration_api_key: str | None = Header(default=None, alias='X-Integration-Api-Key')):
+    secret = (settings.integration_api_key or '').strip()
+    if looks_like_placeholder_secret(secret):
+        if settings.is_production:
+            raise HTTPException(status_code=503, detail='Integration API key is not configured')
+        return
+    if not x_integration_api_key or not compare_digest(str(x_integration_api_key), secret):
+        raise HTTPException(status_code=401, detail='Invalid integration API key')
 
 
 def build_daily_ops_context(db: Session, business_date: str) -> dict:
@@ -140,5 +152,9 @@ def build_daily_ops_context(db: Session, business_date: str) -> dict:
 
 
 @router.get('/daily-ops-context')
-async def daily_ops_context(date: str = Query(..., pattern=r'^\d{4}-\d{2}-\d{2}$'), db: Session = Depends(get_db)):
+async def daily_ops_context(
+    date: str = Query(..., pattern=r'^\d{4}-\d{2}-\d{2}$'),
+    db: Session = Depends(get_db),
+    _=Depends(require_integration_key),
+):
     return build_daily_ops_context(db, date)

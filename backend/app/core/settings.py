@@ -62,6 +62,7 @@ class Settings(BaseSettings):
     trusted_proxy_depth: int = 0
     accounting_api_base: str = 'https://hiddenoasis.app/api'
     accounting_integration_secret: str = ''
+    integration_api_key: str = ''
     accounting_integration_token_path: str = '/auth/integration/token'
     trust_proxy_headers: bool = False
     model_config = SettingsConfigDict(env_file=str(BACKEND_ROOT / '.env'), extra='ignore')
@@ -91,6 +92,8 @@ class Settings(BaseSettings):
             warnings.append('SECRET_KEY is unset or still using a placeholder value.')
         if looks_like_placeholder_secret(self.accounting_integration_secret):
             warnings.append('ACCOUNTING_INTEGRATION_SECRET is unset or still using a placeholder value.')
+        if looks_like_placeholder_secret(self.integration_api_key):
+            warnings.append('INTEGRATION_API_KEY is unset or still using a placeholder value.')
         if self.is_production and self.bootstrap_enabled:
             warnings.append('Default admin bootstrap must be disabled in production.')
         return warnings
