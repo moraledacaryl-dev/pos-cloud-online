@@ -55,6 +55,9 @@ from app.services.permission_service import get_user_permission_keys
 
 logger = logging.getLogger(__name__)
 
+LEGACY_ACCOUNTING_ROOT_API = 'https://hiddenoasis.app/api'
+ACCOUNTING_SUBDOMAIN_API = 'https://accounting.hiddenoasis.app/api'
+
 TENDER_TYPES = ['cash', 'gcash', 'card', 'bank_transfer', 'room_charge', 'mixed']
 IMMEDIATE_SETTLEMENT_TENDERS = {'cash', 'gcash', 'card', 'bank_transfer'}
 FOLIO_PENDING_TENDERS = {'room_charge'}
@@ -449,6 +452,27 @@ def save_setting_json(db: Session, key: str, value, username: str | None = None)
     return row
 
 
+def repair_accounting_sync_api_base(db: Session) -> bool:
+    row = db.query(SystemSetting).filter(SystemSetting.key == 'accounting_sync').first()
+    if not row or LEGACY_ACCOUNTING_ROOT_API not in (row.value_json or ''):
+        return False
+    try:
+        value = json.loads(row.value_json or '{}')
+    except Exception:
+        value = None
+    if isinstance(value, dict):
+        if value.get('api_base') != LEGACY_ACCOUNTING_ROOT_API:
+            return False
+        value['api_base'] = ACCOUNTING_SUBDOMAIN_API
+        row.value_json = json.dumps(value, ensure_ascii=False)
+    else:
+        row.value_json = (row.value_json or '').replace(LEGACY_ACCOUNTING_ROOT_API, ACCOUNTING_SUBDOMAIN_API)
+    row.updated_by = 'startup-repair'
+    db.add(row)
+    db.commit()
+    return True
+
+
 def ensure_default_outlet_registers(db: Session):
     if not db.query(Outlet).count():
         outlet = Outlet(code='RESTAURANT', name='Restaurant / Cafe', business_unit='F&B', is_active=True)
@@ -490,6 +514,8 @@ def ensure_default_outlet_registers(db: Session):
     }
     if not db.query(SystemSetting).filter(SystemSetting.key == 'accounting_sync').first():
         save_setting_json(db, 'accounting_sync', default_sync, username='system')
+    else:
+        repair_accounting_sync_api_base(db)
     if not db.query(SystemSetting).filter(SystemSetting.key == 'ui_preferences').first():
         save_setting_json(db, 'ui_preferences', {'currency': 'PHP'}, username='system')
 

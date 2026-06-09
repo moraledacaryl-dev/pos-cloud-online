@@ -24,5 +24,7 @@ Server path:
 The online POS defaults to connecting to:
 
 ```text
-https://hiddenoasis.app/api
+https://accounting.hiddenoasis.app/api
 ```
+
+The root `https://hiddenoasis.app` is reserved for the future launcher and must not be used as the Accounting API base.

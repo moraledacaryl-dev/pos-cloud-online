@@ -6,12 +6,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.api.customer_display import get_snapshot, update_snapshot
-from app.core.settings import looks_like_placeholder_secret
+from app.core.settings import DEFAULT_ACCOUNTING_API_BASE, Settings, looks_like_placeholder_secret
 from app.db.database import Base
-from app.models.entities import Outlet, Register, SyncOutboxEvent, User
+from app.models.entities import Outlet, Register, SyncOutboxEvent, SystemSetting, User
 from app.schemas.common import RegisterSessionClose, RegisterSessionOpen
 from app.services.ops_service import _accounting_health_url, get_outbox_metrics, get_security_readiness
-from app.services.pos_service import close_register_session, open_register_session, save_setting_json
+from app.services.pos_service import close_register_session, ensure_default_outlet_registers, open_register_session, repair_accounting_sync_api_base, save_setting_json, setting_json
 from app.services.sync_service import run_outbox_sync
 
 
@@ -39,6 +39,117 @@ def seed_register(db, *, mapped=True):
     db.commit()
     db.refresh(register)
     return register
+
+
+class FakeResponse:
+    status_code = 200
+    text = '[]'
+
+    def __init__(self, payload=None):
+        self._payload = payload if payload is not None else []
+
+    def json(self):
+        return self._payload
+
+
+class CaptureAsyncClient:
+    posts = []
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def get(self, url, params=None):
+        return FakeResponse([])
+
+    async def post(self, url, json=None):
+        self.__class__.posts.append((url, json))
+        return FakeResponse({'ok': True})
+
+
+def test_accounting_api_base_default_is_accounting_subdomain():
+    assert DEFAULT_ACCOUNTING_API_BASE == 'https://accounting.hiddenoasis.app/api'
+    assert Settings(_env_file=None).accounting_api_base == 'https://accounting.hiddenoasis.app/api'
+    assert Settings(_env_file=None).accounting_api_base != 'https://hiddenoasis.app/api'
+
+
+def test_accounting_api_base_env_override(monkeypatch):
+    monkeypatch.setenv('ACCOUNTING_API_BASE', 'https://accounting.example.test/api')
+    assert Settings(_env_file=None).accounting_api_base == 'https://accounting.example.test/api'
+
+
+def test_accounting_sync_startup_repair_updates_legacy_root_url():
+    db = make_session()
+    save_setting_json(db, 'accounting_sync', {'api_base': 'https://hiddenoasis.app/api', 'sync_orders': True}, username='test')
+
+    changed = repair_accounting_sync_api_base(db)
+
+    assert changed is True
+    cfg = setting_json(db, 'accounting_sync')
+    assert cfg['api_base'] == 'https://accounting.hiddenoasis.app/api'
+    assert 'https://hiddenoasis.app/api' not in db.query(SystemSetting).filter(SystemSetting.key == 'accounting_sync').one().value_json
+
+
+def test_accounting_sync_startup_repair_is_idempotent():
+    db = make_session()
+    save_setting_json(db, 'accounting_sync', {'api_base': 'https://hiddenoasis.app/api'}, username='test')
+
+    assert repair_accounting_sync_api_base(db) is True
+    first = db.query(SystemSetting).filter(SystemSetting.key == 'accounting_sync').one().value_json
+    assert repair_accounting_sync_api_base(db) is False
+    second = db.query(SystemSetting).filter(SystemSetting.key == 'accounting_sync').one().value_json
+
+    assert second == first
+
+
+def test_accounting_sync_startup_repair_handles_text_value_json():
+    db = make_session()
+    row = SystemSetting(key='accounting_sync', value_json='api_base=https://hiddenoasis.app/api', updated_by='test')
+    db.add(row)
+    db.commit()
+
+    assert repair_accounting_sync_api_base(db) is True
+    repaired = db.query(SystemSetting).filter(SystemSetting.key == 'accounting_sync').one().value_json
+    assert repaired == 'api_base=https://accounting.hiddenoasis.app/api'
+
+
+def test_default_seed_uses_accounting_subdomain_and_repairs_existing_legacy_sync():
+    db = make_session()
+    ensure_default_outlet_registers(db)
+    assert setting_json(db, 'accounting_sync')['api_base'] == 'https://accounting.hiddenoasis.app/api'
+
+    save_setting_json(db, 'accounting_sync', {'api_base': 'https://hiddenoasis.app/api'}, username='test')
+    ensure_default_outlet_registers(db)
+    assert setting_json(db, 'accounting_sync')['api_base'] == 'https://accounting.hiddenoasis.app/api'
+
+
+def test_sync_worker_uses_configured_accounting_api_base(monkeypatch):
+    db = make_session()
+    save_setting_json(db, 'accounting_sync', {'api_base': 'https://accounting.configured.test/api', 'sync_cash_movements': True}, username='test')
+    event = SyncOutboxEvent(
+        event_uuid='event-configured-base',
+        aggregate_type='cash_movement',
+        aggregate_id='999',
+        event_type='cash_movement.created',
+        idempotency_key='cash_movement.created:999',
+        payload_json='{"event_date":"2026-06-09","direction":"in","amount":125,"reference_no":"CM-999","cash_event_uuid":"cm-999","accounting_financial_account_id":1,"id":999}',
+        status='pending',
+    )
+    db.add(event)
+    db.commit()
+    CaptureAsyncClient.posts = []
+    monkeypatch.setattr('app.services.sync_service.httpx.AsyncClient', CaptureAsyncClient)
+
+    result = asyncio.run(run_outbox_sync(db, limit=10))
+
+    assert result['synced'] == 1
+    assert CaptureAsyncClient.posts
+    assert CaptureAsyncClient.posts[0][0] == 'https://accounting.configured.test/api/cashflow/transactions'
 
 
 def test_unmapped_register_cannot_open_or_close_a_shift():
@@ -85,8 +196,8 @@ def test_worker_skips_failed_event_until_retry_time_is_due():
 
 
 def test_accounting_health_path_uses_origin_not_api_prefix():
-    assert _accounting_health_url('https://hiddenoasis.app/api', '/healthz') == 'https://hiddenoasis.app/healthz'
-    assert _accounting_health_url('https://hiddenoasis.app/api', 'healthz') == 'https://hiddenoasis.app/api/healthz'
+    assert _accounting_health_url('https://accounting.hiddenoasis.app/api', '/healthz') == 'https://accounting.hiddenoasis.app/healthz'
+    assert _accounting_health_url('https://accounting.hiddenoasis.app/api', 'healthz') == 'https://accounting.hiddenoasis.app/api/healthz'
 
 
 def test_placeholder_secrets_are_reported_for_deployment_readiness():

@@ -51,7 +51,7 @@ ENVIRONMENT=production
 DATABASE_URL=postgresql+psycopg://hiddenoasis_pos_app:REAL_POS_DB_PASSWORD@127.0.0.1:5432/hiddenoasis_pos_live
 ALLOW_DEFAULT_ADMIN_BOOTSTRAP=false
 CORS_ORIGINS=https://pos.hiddenoasis.app
-ACCOUNTING_API_BASE=https://hiddenoasis.app/api
+ACCOUNTING_API_BASE=https://accounting.hiddenoasis.app/api
 ACCOUNTING_INTEGRATION_SECRET=same value as Accounting INTEGRATION_SECRET
 NEXT_PUBLIC_API_BASE=/api
 ```
@@ -68,11 +68,11 @@ POS is not frontend-only.
 Minimum POS smoke checks:
 
 1. Confirm `https://pos.hiddenoasis.app/healthz` returns `ok`.
-2. Confirm `https://hiddenoasis.app/healthz` returns `ok`.
+2. Confirm `https://accounting.hiddenoasis.app/healthz` returns `ok`.
 3. Run `alembic upgrade head` before restarting the POS backend.
 4. Log in at `https://pos.hiddenoasis.app`.
 5. Confirm the persistent POS sync banner is green.
-6. Confirm POS Settings use `https://hiddenoasis.app/api` with health path `/healthz`.
+6. Confirm POS Settings use `https://accounting.hiddenoasis.app/api` with health path `/healthz`.
 7. Test Accounting connection.
 8. Open Registers and verify every active drawer has a numeric Accounting drawer ID.
 9. Sync catalog.
@@ -93,4 +93,17 @@ Staff handbook:
 
 ```text
 https://hiddenoasis.app/guides/HIDDEN_OASIS_STAFF_READY_GUIDE.md
+```
+
+Root-domain note:
+
+```text
+https://hiddenoasis.app is reserved for the future static launcher. POS must
+not use https://hiddenoasis.app/api as Accounting. If a live PostgreSQL
+system_settings row still contains the old root API, startup repair updates
+the row automatically. Manual repair, if ever needed:
+
+UPDATE system_settings
+SET value_json = replace(value_json, 'https://hiddenoasis.app/api', 'https://accounting.hiddenoasis.app/api')
+WHERE key = 'accounting_sync';
 ```

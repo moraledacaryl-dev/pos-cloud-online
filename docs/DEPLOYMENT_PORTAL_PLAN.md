@@ -13,6 +13,8 @@ Use `hiddenoasis.app` as the production root domain. The root should eventually 
 
 Each app keeps its own login, permissions, and database. There is no SSO, no shared session, and no shared permission store.
 
+POS Accounting sync must use `ACCOUNTING_API_BASE=https://accounting.hiddenoasis.app/api`. Do not use `https://hiddenoasis.app/api` as Accounting; `hiddenoasis.app` is reserved for the future static launcher.
+
 ## Launcher
 
 Use static HTML or a minimal static Next.js export with four clear cards: Accounting Program, POS Cloud, Operations Command Center, and Staff & Payroll. Serve it with Nginx/CDN edge caching. The launcher must perform no server-side app API calls and should load in under one second.
@@ -26,6 +28,7 @@ Use subdomains for the cleanest routing and least app complexity. Nginx should r
 - `PUBLIC_APP_URL`
 - `APP_BASE_PATH`
 - `ACCOUNTING_API_BASE_URL`
+- `ACCOUNTING_API_BASE`
 - `POS_API_BASE_URL`
 - `OPERATIONS_API_BASE_URL`
 - `STAFF_PAYROLL_API_BASE_URL`

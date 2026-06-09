@@ -32,7 +32,9 @@ Primary deployment guide:
 POS connects to Accounting at:
 
 ```text
-https://hiddenoasis.app/api
+https://accounting.hiddenoasis.app/api
 ```
+
+`https://hiddenoasis.app` is reserved for the future static launcher. POS must not depend on `https://hiddenoasis.app/api` for Accounting sync.
 
 The POS keeps its own live database for sessions, orders, payments, kitchen routing, and sync state. Accounting remains the source of truth for catalog, categories, variants, financial accounts, receivables, and reporting.

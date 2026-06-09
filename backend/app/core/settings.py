@@ -5,6 +5,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SQLITE_PATH = BACKEND_ROOT / 'pos.db'
+DEFAULT_ACCOUNTING_API_BASE = 'https://accounting.hiddenoasis.app/api'
 PLACEHOLDER_SECRET_MARKERS = (
     'change-me',
     'changeme',
@@ -60,7 +61,7 @@ class Settings(BaseSettings):
     sync_worker_batch_size: int = 25
     sync_worker_stale_seconds: int = 120
     trusted_proxy_depth: int = 0
-    accounting_api_base: str = 'https://hiddenoasis.app/api'
+    accounting_api_base: str = DEFAULT_ACCOUNTING_API_BASE
     accounting_integration_secret: str = ''
     integration_api_key: str = ''
     accounting_integration_token_path: str = '/auth/integration/token'

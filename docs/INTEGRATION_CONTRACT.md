@@ -8,6 +8,7 @@ This document is the stable contract for the POS package in this repository. It 
 - Amounts are decimal numbers in Philippine Peso.
 - Dates use `YYYY-MM-DD`.
 - Timestamps use ISO-8601 UTC text.
+- Accounting API base is `https://accounting.hiddenoasis.app/api` in production. POS must not depend on `https://hiddenoasis.app/api`; root is reserved for the future static launcher.
 - Room-charge posting to Beds24 is currently a manual front-desk workflow. The POS contract for those events is an internal record contract unless a future transport is added.
 
 ## Receiver outcome vocabulary

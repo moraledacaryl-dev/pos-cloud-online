@@ -133,7 +133,7 @@ export default function SettingsPage() {
         <p className="muted">Accounting owns menu items, categories, pricing, recipes, and SKUs. POS consumes that catalog for sales and keeps only operational availability overrides. Saved secrets are never displayed again.</p>
         <form className="form-grid" style={{ marginTop: 12 }} onSubmit={handleSave}>
           <label className="field">Mode<select value="current_erp" disabled><option value="current_erp">current_erp</option></select></label>
-          <label className="field">Accounting API Base<input value={sync.api_base || ''} onChange={(e) => setSyncField('api_base', e.target.value)} placeholder="https://hiddenoasis.app/api" /></label>
+          <label className="field">Accounting API Base<input value={sync.api_base || ''} onChange={(e) => setSyncField('api_base', e.target.value)} placeholder="https://accounting.hiddenoasis.app/api" /></label>
           <label className="field">Integration Secret<input type="password" value={sync.integration_secret || ''} onChange={(e) => setSyncField('integration_secret', e.target.value)} placeholder={sync.integration_secret_configured ? 'Saved - enter a new secret only to replace it' : 'Enter integration secret'} /></label>
 
           <details className="advanced-settings">
