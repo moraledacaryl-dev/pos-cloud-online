@@ -116,21 +116,32 @@ def _accounting_health_url(base: str, health_path: str) -> str:
     return urlunsplit((parsed.scheme, parsed.netloc, '/' + health_path.lstrip('/'), '', '')) if health_path.startswith('/') else base.rstrip('/') + '/' + health_path
 
 
+def get_security_readiness() -> dict:
+    warnings = settings.security_warnings
+    return {
+        'ok': not warnings,
+        'warnings': warnings,
+    }
+
+
 async def build_health_report(db: Session, engine: Engine) -> dict:
     database = get_database_status(db, engine)
     accounting_api = await get_accounting_api_status(db)
     sync_worker = get_sync_worker_status(db)
     outbox = get_outbox_metrics(db)
+    rate_limit = get_rate_limit_status()
+    security = get_security_readiness()
     return {
-        'ok': bool(database.get('ok')) and bool(database.get('migration', {}).get('ok')),
+        'ok': bool(database.get('ok')) and bool(database.get('migration', {}).get('ok')) and security['ok'],
         'environment': settings.environment,
         'database': database,
-        'rate_limit': get_rate_limit_status(),
+        'security': security,
+        'rate_limit': rate_limit,
         'accounting_api': accounting_api,
         'sync_worker': sync_worker,
         'outbox': outbox,
         'integration_reachability': {
             'accounting_api': accounting_api.get('reachable', False),
-            'redis': get_rate_limit_status().get('connected', False),
+            'redis': rate_limit.get('connected', False),
         },
     }

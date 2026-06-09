@@ -5,6 +5,23 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SQLITE_PATH = BACKEND_ROOT / 'pos.db'
+PLACEHOLDER_SECRET_MARKERS = (
+    'change-me',
+    'changeme',
+    'replace',
+    'placeholder',
+    'local',
+    'dev',
+    'default',
+    'example',
+)
+
+
+def looks_like_placeholder_secret(value: str | None) -> bool:
+    normalized = (value or '').strip().lower()
+    if not normalized:
+        return True
+    return any(marker in normalized for marker in PLACEHOLDER_SECRET_MARKERS) or len(normalized) < 16
 
 
 def _default_database_url() -> str:
@@ -66,6 +83,17 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.environment.strip().lower() == 'production'
+
+    @property
+    def security_warnings(self) -> list[str]:
+        warnings: list[str] = []
+        if looks_like_placeholder_secret(self.secret_key):
+            warnings.append('SECRET_KEY is unset or still using a placeholder value.')
+        if looks_like_placeholder_secret(self.accounting_integration_secret):
+            warnings.append('ACCOUNTING_INTEGRATION_SECRET is unset or still using a placeholder value.')
+        if self.is_production and self.bootstrap_enabled:
+            warnings.append('Default admin bootstrap must be disabled in production.')
+        return warnings
 
 
 settings = Settings()

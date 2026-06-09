@@ -6,10 +6,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.api.customer_display import get_snapshot, update_snapshot
+from app.core.settings import looks_like_placeholder_secret
 from app.db.database import Base
 from app.models.entities import Outlet, Register, SyncOutboxEvent, User
 from app.schemas.common import RegisterSessionClose, RegisterSessionOpen
-from app.services.ops_service import _accounting_health_url, get_outbox_metrics
+from app.services.ops_service import _accounting_health_url, get_outbox_metrics, get_security_readiness
 from app.services.pos_service import close_register_session, open_register_session, save_setting_json
 from app.services.sync_service import run_outbox_sync
 
@@ -86,6 +87,16 @@ def test_worker_skips_failed_event_until_retry_time_is_due():
 def test_accounting_health_path_uses_origin_not_api_prefix():
     assert _accounting_health_url('https://hiddenoasis.app/api', '/healthz') == 'https://hiddenoasis.app/healthz'
     assert _accounting_health_url('https://hiddenoasis.app/api', 'healthz') == 'https://hiddenoasis.app/api/healthz'
+
+
+def test_placeholder_secrets_are_reported_for_deployment_readiness():
+    assert looks_like_placeholder_secret('change-me-super-secret')
+    assert looks_like_placeholder_secret('')
+    assert not looks_like_placeholder_secret('hidden-oasis-pos-2026-strong-token')
+
+    readiness = get_security_readiness()
+    assert readiness['ok'] is False
+    assert any('SECRET_KEY' in warning for warning in readiness['warnings'])
 
 
 def test_customer_display_snapshot_is_server_backed_and_sanitized():
