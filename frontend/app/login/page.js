@@ -17,9 +17,9 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const res = await bootstrap();
-      setNotice(`Bootstrap ready. Login with ${res.default_admin} / ${res.default_password}`);
+      setNotice(`Bootstrap ready: ${res.default_admin}`);
     } catch (e) {
-      setError(e.message || 'Failed to bootstrap default admin.');
+      setError(e.message || 'Bootstrap failed.');
     } finally {
       setLoading(false);
     }
@@ -38,35 +38,32 @@ export default function LoginPage() {
       const next = searchParams.get('next') || '/dashboard';
       window.location.href = next.startsWith('/') && !next.startsWith('//') ? next : '/dashboard';
     } catch (e) {
-      setError(e.message || 'Failed to login.');
+      setError(e.message || 'Invalid username or password.');
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <div className="stack" style={{ maxWidth: 520, margin: '0 auto' }}>
-      <section className="section">
-        <h1>POS Cloud</h1>
-        <p className="muted">Fast cashier operations, clean drawer control, and future-safe accounting sync.</p>
-      </section>
-      <section className="section">
+    <div className="stack login-stack">
+      <section className="section login-panel">
+        <div className="login-mark">HO</div>
+        <h1>POS</h1>
         <form className="form-stack" onSubmit={handleSubmit}>
           <label className="field">
             Username
-            <input value={form.username} onChange={(e) => setForm((prev) => ({ ...prev, username: e.target.value }))} />
+            <input autoComplete="username" value={form.username} onChange={(e) => setForm((prev) => ({ ...prev, username: e.target.value }))} />
           </label>
           <label className="field">
             Password
-            <input type="password" value={form.password} onChange={(e) => setForm((prev) => ({ ...prev, password: e.target.value }))} />
+            <input autoComplete="current-password" type="password" value={form.password} onChange={(e) => setForm((prev) => ({ ...prev, password: e.target.value }))} />
           </label>
-          <div className="row wrap">
-            <button type="submit" className="primary" disabled={loading}>{loading ? 'Logging in...' : 'Login'}</button>
-            {SHOW_DEVELOPMENT_BOOTSTRAP && <button type="button" className="secondary" onClick={handleBootstrap} disabled={loading}>Bootstrap development admin</button>}
-          </div>
+          <button type="submit" className="primary" disabled={loading}>{loading ? 'Signing in…' : 'Sign in'}</button>
+          {SHOW_DEVELOPMENT_BOOTSTRAP && <button type="button" className="secondary" onClick={handleBootstrap} disabled={loading}>Bootstrap admin</button>}
           {!!notice && <p className="notice-text">{notice}</p>}
           {!!error && <p className="error-text">{error}</p>}
         </form>
+        <small className="muted">by C.M.</small>
       </section>
     </div>
   );
