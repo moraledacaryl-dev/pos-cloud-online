@@ -7,6 +7,11 @@ import { useCurrentUser } from '../lib/useCurrentUser';
 import { visibleRouteGroups } from '../lib/routes';
 
 const SIDEBAR_KEY = 'pos_sidebar_collapsed_v1';
+const connectedApps = [
+  { label: 'Staff & Payroll', href: process.env.NEXT_PUBLIC_STAFF_PAYROLL_APP_URL },
+  { label: 'Operations', href: process.env.NEXT_PUBLIC_OPERATIONS_APP_URL },
+  { label: 'Accounting', href: process.env.NEXT_PUBLIC_ACCOUNTING_APP_URL },
+].filter((item) => item.href);
 
 function collapsedLabel(label) {
   return label
@@ -65,6 +70,16 @@ export default function Sidebar() {
             })}
           </div>
         ))}
+        {connectedApps.length > 0 && (
+          <div className="nav-group">
+            {!collapsed && <div className="nav-group-label">Connected Apps</div>}
+            {connectedApps.map((item) => (
+              <a key={item.label} href={item.href} rel="noreferrer" title={collapsed ? item.label : undefined}>
+                {collapsed ? collapsedLabel(item.label) : item.label}
+              </a>
+            ))}
+          </div>
+        )}
       </nav>
     </aside>
   );
