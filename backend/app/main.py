@@ -12,6 +12,8 @@ from app.core.migrations import ensure_database_ready
 from app.core.rate_limit import enforce_rate_limit, init_rate_limiter
 from app.core.settings import settings
 from app.db.database import SessionLocal, engine
+from app.services import sync_service
+from app.services.accounting_review_defaults import ensure_accounting_review_routes, review_aware_order_void_push
 from app.services.audit_service import write_audit_log
 from app.services.auth_service import ensure_admin_user
 from app.services.ops_service import build_health_report
@@ -21,6 +23,7 @@ import app.models  # noqa: F401
 
 configure_logging(settings.log_level)
 logger = logging.getLogger(__name__)
+sync_service._push_order_void = review_aware_order_void_push(sync_service._push_order_void)
 
 
 @asynccontextmanager
@@ -32,6 +35,7 @@ async def lifespan(app: FastAPI):
         if settings.bootstrap_enabled:
             ensure_admin_user(db)
         ensure_default_outlet_registers(db)
+        ensure_accounting_review_routes(db)
     yield
 
 
