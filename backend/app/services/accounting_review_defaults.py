@@ -57,6 +57,8 @@ def ensure_accounting_review_routes(db: Session) -> dict:
 
 def review_aware_order_void_push(legacy_push: OrderVoidPush) -> OrderVoidPush:
     """Return an order-void sender that supports both review and legacy Accounting routes."""
+    if getattr(legacy_push, '_accounting_review_aware', False):
+        return legacy_push
 
     async def push(client: httpx.AsyncClient, base: str, config: dict, payload: dict):
         review_path = str(config.get('current_erp_sales_void_path') or '').strip()
@@ -72,4 +74,5 @@ def review_aware_order_void_push(legacy_push: OrderVoidPush) -> OrderVoidPush:
         }
         return await client.post(_join(base, review_path), json=mapped)
 
+    setattr(push, '_accounting_review_aware', True)
     return push
