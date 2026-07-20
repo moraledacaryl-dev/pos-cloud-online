@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_permissions
 from app.db.database import get_db
 from app.schemas.common import OrderCreate, OrderPayPayload, OrderTableMergePayload, OrderTableTransferPayload, OrderUpdate, OrderVoidPayload, RefundCreate
+from app.services.operations_integration import publish_operations_event
 from app.services.pos_service import create_order, create_refund, get_order, list_orders, list_refunds, merge_order_table, pay_order, set_order_status, transfer_order_table, update_order, void_order
 
 router = APIRouter()
@@ -59,9 +60,21 @@ def resume_order(order_id: int, db: Session = Depends(get_db), user=Depends(requ
 
 
 @router.post('/{order_id}/pay')
-def settle_order(order_id: int, payload: OrderPayPayload, db: Session = Depends(get_db), current_user=Depends(require_permissions('orders.manage'))):
+def settle_order(order_id: int, payload: OrderPayPayload, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user=Depends(require_permissions('orders.manage'))):
     try:
-        return pay_order(db, order_id, payload, user_id=getattr(current_user, 'id', None))
+        result = pay_order(db, order_id, payload, user_id=getattr(current_user, 'id', None))
+        background_tasks.add_task(
+            publish_operations_event,
+            'order.finalized',
+            f'order-finalized:{order_id}',
+            title=f'POS order finalized #{order_id}',
+            summary='A POS order was finalized.',
+            payload={'order': result},
+            subject_type='order',
+            subject_id=order_id,
+            external_user_id=getattr(current_user, 'id', None),
+        )
+        return result
     except ValueError as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
@@ -86,9 +99,22 @@ def merge_table(order_id: int, payload: OrderTableMergePayload, db: Session = De
 
 
 @router.post('/{order_id}/void')
-def cancel_order(order_id: int, payload: OrderVoidPayload, db: Session = Depends(get_db), current_user=Depends(require_permissions('orders.void'))):
+def cancel_order(order_id: int, payload: OrderVoidPayload, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user=Depends(require_permissions('orders.void'))):
     try:
-        return void_order(db, order_id, payload.reason, user_id=getattr(current_user, 'id', None), approved_by_user_id=payload.approved_by_user_id)
+        result = void_order(db, order_id, payload.reason, user_id=getattr(current_user, 'id', None), approved_by_user_id=payload.approved_by_user_id)
+        background_tasks.add_task(
+            publish_operations_event,
+            'void.review_needed',
+            f'void-review:{order_id}',
+            title=f'POS void requires review #{order_id}',
+            summary=payload.reason,
+            priority='High',
+            payload={'order': result, 'reason': payload.reason},
+            subject_type='order',
+            subject_id=order_id,
+            external_user_id=getattr(current_user, 'id', None),
+        )
+        return result
     except ValueError as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
@@ -103,9 +129,23 @@ def order_refunds(order_id: int, db: Session = Depends(get_db), user=Depends(req
 
 
 @router.post('/{order_id}/refunds')
-def refund_order(order_id: int, payload: RefundCreate, db: Session = Depends(get_db), current_user=Depends(require_permissions('orders.manage'))):
+def refund_order(order_id: int, payload: RefundCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user=Depends(require_permissions('orders.manage'))):
     try:
-        return create_refund(db, order_id, payload, cashier_user_id=getattr(current_user, 'id', None))
+        result = create_refund(db, order_id, payload, cashier_user_id=getattr(current_user, 'id', None))
+        refund_id = result.get('id') if isinstance(result, dict) else getattr(result, 'id', order_id)
+        background_tasks.add_task(
+            publish_operations_event,
+            'refund.review_needed',
+            f'refund-review:{refund_id}',
+            title=f'POS refund requires review #{refund_id}',
+            summary='A POS refund was created.',
+            priority='High',
+            payload={'refund': result, 'order_id': order_id},
+            subject_type='refund',
+            subject_id=refund_id,
+            external_user_id=getattr(current_user, 'id', None),
+        )
+        return result
     except ValueError as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
