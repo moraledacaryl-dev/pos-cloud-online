@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_permissions
 from app.db.database import get_db
 from app.schemas.common import RegisterSessionClose, RegisterSessionOpen, RegisterSessionReopen
+from app.services.operations_integration import publish_operations_event
 from app.services.pos_service import close_register_session, get_register_session, list_register_sessions, open_register_session, reopen_register_session
 
 router = APIRouter()
@@ -32,9 +33,21 @@ def open_session(payload: RegisterSessionOpen, db: Session = Depends(get_db), cu
 
 
 @router.post('/{session_id}/close')
-def close_session(session_id: int, payload: RegisterSessionClose, db: Session = Depends(get_db), current_user=Depends(require_permissions('sessions.manage'))):
+def close_session(session_id: int, payload: RegisterSessionClose, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user=Depends(require_permissions('sessions.manage'))):
     try:
-        return close_register_session(db, session_id, payload, user_id=getattr(current_user, 'id', None))
+        result = close_register_session(db, session_id, payload, user_id=getattr(current_user, 'id', None))
+        background_tasks.add_task(
+            publish_operations_event,
+            'session.closed',
+            f'session-closed:{session_id}',
+            title=f'POS session closed #{session_id}',
+            summary='A register session was closed.',
+            payload={'session': result},
+            subject_type='register_session',
+            subject_id=session_id,
+            external_user_id=getattr(current_user, 'id', None),
+        )
+        return result
     except ValueError as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
