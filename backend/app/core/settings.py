@@ -65,6 +65,11 @@ class Settings(BaseSettings):
     accounting_integration_secret: str = ''
     integration_api_key: str = ''
     accounting_integration_token_path: str = '/auth/integration/token'
+    operations_integration_enabled: bool = False
+    operations_api_base: str = 'https://operations.hiddenoasis.app/api'
+    operations_integration_key: str = ''
+    operations_source_app: str = 'dedicated_pos_cloud'
+    operations_integration_timeout_seconds: int = 5
     trust_proxy_headers: bool = False
     model_config = SettingsConfigDict(env_file=str(BACKEND_ROOT / '.env'), extra='ignore')
 
@@ -95,6 +100,8 @@ class Settings(BaseSettings):
             warnings.append('ACCOUNTING_INTEGRATION_SECRET is unset or still using a placeholder value.')
         if looks_like_placeholder_secret(self.integration_api_key):
             warnings.append('INTEGRATION_API_KEY is unset or still using a placeholder value.')
+        if self.operations_integration_enabled and looks_like_placeholder_secret(self.operations_integration_key):
+            warnings.append('OPERATIONS_INTEGRATION_KEY is unset or still using a placeholder value.')
         if self.is_production and self.bootstrap_enabled:
             warnings.append('Default admin bootstrap must be disabled in production.')
         return warnings
