@@ -3,11 +3,26 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import require_permissions
 from app.db.database import get_db
+from app.models.entities import PosOrder
 from app.schemas.common import OrderCreate, OrderPayPayload, OrderTableMergePayload, OrderTableTransferPayload, OrderUpdate, OrderVoidPayload, RefundCreate
 from app.services.operations_integration import publish_operations_event
+from app.services.order_state_policy import assert_order_action, policy_snapshot
 from app.services.pos_service import create_order, create_refund, get_order, list_orders, list_refunds, merge_order_table, pay_order, set_order_status, transfer_order_table, update_order, void_order
 
 router = APIRouter()
+
+
+def _assert_order_action(db: Session, order_id: int, action: str) -> PosOrder:
+    row = db.get(PosOrder, int(order_id))
+    if not row:
+        raise ValueError('Order not found.')
+    assert_order_action(row.status, action)
+    return row
+
+
+@router.get('/state-policy')
+def state_policy(user=Depends(require_permissions('pos.use'))):
+    return policy_snapshot()
 
 
 @router.get('/')
@@ -35,6 +50,7 @@ def add_order(payload: OrderCreate, db: Session = Depends(get_db), current_user=
 @router.put('/{order_id}')
 def edit_order(order_id: int, payload: OrderUpdate, db: Session = Depends(get_db), user=Depends(require_permissions('orders.manage'))):
     try:
+        _assert_order_action(db, order_id, 'edit')
         return update_order(db, order_id, payload, user_id=getattr(user, 'id', None))
     except ValueError as e:
         db.rollback()
@@ -44,6 +60,7 @@ def edit_order(order_id: int, payload: OrderUpdate, db: Session = Depends(get_db
 @router.post('/{order_id}/hold')
 def hold_order(order_id: int, db: Session = Depends(get_db), user=Depends(require_permissions('orders.manage'))):
     try:
+        _assert_order_action(db, order_id, 'hold')
         return set_order_status(db, order_id, 'held', user_id=getattr(user, 'id', None))
     except ValueError as e:
         db.rollback()
@@ -53,6 +70,7 @@ def hold_order(order_id: int, db: Session = Depends(get_db), user=Depends(requir
 @router.post('/{order_id}/resume')
 def resume_order(order_id: int, db: Session = Depends(get_db), user=Depends(require_permissions('orders.manage'))):
     try:
+        _assert_order_action(db, order_id, 'resume')
         return set_order_status(db, order_id, 'draft', user_id=getattr(user, 'id', None))
     except ValueError as e:
         db.rollback()
@@ -62,6 +80,7 @@ def resume_order(order_id: int, db: Session = Depends(get_db), user=Depends(requ
 @router.post('/{order_id}/pay')
 def settle_order(order_id: int, payload: OrderPayPayload, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user=Depends(require_permissions('orders.manage'))):
     try:
+        _assert_order_action(db, order_id, 'pay')
         result = pay_order(db, order_id, payload, user_id=getattr(current_user, 'id', None))
         background_tasks.add_task(
             publish_operations_event,
@@ -83,6 +102,7 @@ def settle_order(order_id: int, payload: OrderPayPayload, background_tasks: Back
 @router.post('/{order_id}/transfer-table')
 def transfer_table(order_id: int, payload: OrderTableTransferPayload, db: Session = Depends(get_db), user=Depends(require_permissions('orders.manage'))):
     try:
+        _assert_order_action(db, order_id, 'transfer_table')
         return transfer_order_table(db, order_id, payload.target_table_label, target_service_area=payload.target_service_area, user_id=getattr(user, 'id', None))
     except ValueError as e:
         db.rollback()
@@ -92,6 +112,7 @@ def transfer_table(order_id: int, payload: OrderTableTransferPayload, db: Sessio
 @router.post('/{order_id}/merge-table')
 def merge_table(order_id: int, payload: OrderTableMergePayload, db: Session = Depends(get_db), user=Depends(require_permissions('orders.manage'))):
     try:
+        _assert_order_action(db, order_id, 'merge_table')
         return merge_order_table(db, order_id, payload.target_table_label, target_service_area=payload.target_service_area, user_id=getattr(user, 'id', None))
     except ValueError as e:
         db.rollback()
@@ -101,6 +122,7 @@ def merge_table(order_id: int, payload: OrderTableMergePayload, db: Session = De
 @router.post('/{order_id}/void')
 def cancel_order(order_id: int, payload: OrderVoidPayload, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user=Depends(require_permissions('orders.void'))):
     try:
+        _assert_order_action(db, order_id, 'void')
         result = void_order(db, order_id, payload.reason, user_id=getattr(current_user, 'id', None), approved_by_user_id=payload.approved_by_user_id)
         background_tasks.add_task(
             publish_operations_event,
@@ -131,6 +153,7 @@ def order_refunds(order_id: int, db: Session = Depends(get_db), user=Depends(req
 @router.post('/{order_id}/refunds')
 def refund_order(order_id: int, payload: RefundCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user=Depends(require_permissions('orders.manage'))):
     try:
+        _assert_order_action(db, order_id, 'refund')
         result = create_refund(db, order_id, payload, cashier_user_id=getattr(current_user, 'id', None))
         refund_id = result.get('id') if isinstance(result, dict) else getattr(result, 'id', order_id)
         background_tasks.add_task(
