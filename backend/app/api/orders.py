@@ -7,6 +7,7 @@ from app.models.entities import PosOrder
 from app.schemas.common import OrderCreate, OrderPayPayload, OrderTableMergePayload, OrderTableTransferPayload, OrderUpdate, OrderVoidPayload, RefundCreate
 from app.services.operations_integration import publish_operations_event
 from app.services.order_state_policy import assert_order_action, policy_snapshot
+from app.services.payment_control_policy import validate_payment_control
 from app.services.pos_service import create_order, create_refund, get_order, list_orders, list_refunds, merge_order_table, pay_order, set_order_status, transfer_order_table, update_order, void_order
 
 router = APIRouter()
@@ -81,6 +82,8 @@ def resume_order(order_id: int, db: Session = Depends(get_db), user=Depends(requ
 def settle_order(order_id: int, payload: OrderPayPayload, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user=Depends(require_permissions('orders.manage'))):
     try:
         _assert_order_action(db, order_id, 'pay')
+        order_snapshot = get_order(db, order_id)
+        validate_payment_control(order_snapshot, payload.payments)
         result = pay_order(db, order_id, payload, user_id=getattr(current_user, 'id', None))
         background_tasks.add_task(
             publish_operations_event,
