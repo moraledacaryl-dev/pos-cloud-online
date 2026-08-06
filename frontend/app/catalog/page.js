@@ -1,17 +1,25 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { createCatalogItem, deleteCatalogItem, fetchCatalogItems, syncCatalogFromAccounting, updateCatalogItem } from '../../lib/api';
+import { createCatalogItem, deleteCatalogItem, fetchCatalogItems, request, syncCatalogFromAccounting, updateCatalogItem } from '../../lib/api';
 import ActionModal from '../../components/ActionModal';
 
 function money(value) {
   return `₱${Number(value || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+function formatSyncAge(status) {
+  if (!status?.last_sync_at) return 'Never synchronized';
+  if (status.age_minutes < 60) return `${status.age_minutes} minute${status.age_minutes === 1 ? '' : 's'} ago`;
+  const hours = Math.floor(status.age_minutes / 60);
+  return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+}
+
 const blank = { id: null, menu_item_name: '', display_name: '', sku_code: '', variant_name: '', category_name: '', module_slug: 'restaurant', prep_station: 'kitchen', price: '0', is_active: true, is_available: true, notes: '' };
 
 export default function CatalogPage() {
   const [items, setItems] = useState([]);
+  const [catalogStatus, setCatalogStatus] = useState(null);
   const [q, setQ] = useState('');
   const [availabilityFilter, setAvailabilityFilter] = useState('all');
   const [form, setForm] = useState(blank);
@@ -23,8 +31,12 @@ export default function CatalogPage() {
 
   async function loadItems() {
     try {
-      const rows = await fetchCatalogItems({ q });
+      const [rows, status] = await Promise.all([
+        fetchCatalogItems({ q }),
+        request('/catalog/status'),
+      ]);
       setItems(Array.isArray(rows) ? rows : []);
+      setCatalogStatus(status || null);
     } catch (e) { setError(e.message || 'Failed to load catalog.'); }
   }
 
@@ -40,10 +52,10 @@ export default function CatalogPage() {
       const payload = { ...form, price: Number(form.price || 0) };
       if (form.id) await updateCatalogItem(form.id, payload);
       else await createCatalogItem(payload);
-      setNotice(`Catalog item ${form.id ? 'updated' : 'saved'}.`);
+      setNotice(`Catalog fallback ${form.id ? 'updated' : 'saved'}.`);
       setForm(blank);
       await loadItems();
-    } catch (e) { setError(e.message || 'Failed to save catalog item.'); }
+    } catch (e) { setError(e.message || 'Failed to save catalog fallback.'); }
     finally { setBusy(false); }
   }
 
@@ -52,9 +64,9 @@ export default function CatalogPage() {
     setBusy(true);
     try {
       const res = await syncCatalogFromAccounting();
-      setNotice(`Imported ${res.imported_rows} catalog rows from accounting.`);
+      setNotice(`Refreshed ${res.imported_rows} POS selling rows through the Accounting compatibility API. Inventory remains the catalog business owner.`);
       await loadItems();
-    } catch (e) { setError(e.message || 'Failed to sync catalog.'); }
+    } catch (e) { setError(e.message || 'Failed to refresh the selling catalog.'); }
     finally { setBusy(false); }
   }
 
@@ -77,10 +89,12 @@ export default function CatalogPage() {
       setNotice(`Deleted local-only fallback ${pendingDelete.display_name || pendingDelete.menu_item_name}.`);
       await loadItems();
     } catch (e) {
-      setError(e.message || 'Failed to delete catalog item.');
+      setError(e.message || 'Failed to delete catalog fallback.');
       throw e;
     }
   }
+
+  const statusClass = catalogStatus?.state === 'fresh' ? 'success' : 'warn';
 
   return (
     <div className="stack">
@@ -88,11 +102,16 @@ export default function CatalogPage() {
         <div className="toolbar">
           <div>
             <h1>Catalog</h1>
-            <p className="muted">Synced sellable items with local availability controls.</p>
-            <p className="small muted" style={{ marginTop: 4 }}>Accounting owns menu items, categories, pricing, recipes, and SKUs. Use this page to sync the catalog and mark items sold out or available. Local-only items are an exceptional fallback.</p>
+            <p className="muted">POS selling snapshot with local sold-out controls.</p>
+            <p className="small muted" style={{ marginTop: 4 }}>Inventory & Procurement owns product identity, SKUs, recipes, stock, and master availability. Accounting currently transports the compatible menu feed. POS stores a selling snapshot and may only apply local availability overrides.</p>
+            <div className="row wrap" style={{ marginTop: 8 }}>
+              <span className={`badge ${statusClass}`}>{catalogStatus?.state === 'fresh' ? 'Catalog fresh' : catalogStatus?.state === 'stale' ? 'Catalog stale' : 'Catalog not synced'}</span>
+              <span className="small muted">Last refresh: {formatSyncAge(catalogStatus)}</span>
+              {!!catalogStatus?.imported_rows && <span className="small muted">{catalogStatus.imported_rows} selling rows</span>}
+            </div>
           </div>
           <div className="row wrap">
-            <button className="primary" onClick={handleSync} disabled={busy}>{busy ? 'Working...' : 'Sync from Accounting'}</button>
+            <button className="primary" onClick={handleSync} disabled={busy}>{busy ? 'Working...' : 'Refresh Selling Catalog'}</button>
             <select value={availabilityFilter} onChange={(e) => setAvailabilityFilter(e.target.value)}>
               <option value="all">All items</option>
               <option value="available">Available only</option>
@@ -101,13 +120,15 @@ export default function CatalogPage() {
             <input placeholder="Search catalog" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 220 }} />
           </div>
         </div>
+        {catalogStatus?.state === 'stale' && <p className="error-text" style={{ marginTop: 8 }}>The selling snapshot is more than 24 hours old. Refresh before relying on prices or item availability.</p>}
+        {catalogStatus?.state === 'never_synced' && <p className="error-text" style={{ marginTop: 8 }}>This POS has not completed a catalog refresh. Do not treat local fallback items as master products.</p>}
         {!!notice && <p className="notice-text" style={{ marginTop: 8 }}>{notice}</p>}
         {!!error && <p className="error-text" style={{ marginTop: 8 }}>{error}</p>}
       </section>
 
       <section className="section">
         <div className="toolbar">
-          <div><h2>Local-only fallback items</h2><p className="small muted">Use only when an urgent sellable item cannot yet be created in Accounting. Sync-managed items cannot be edited here.</p></div>
+          <div><h2>Local-only fallback items</h2><p className="small muted">Emergency use only. Create the permanent product in Inventory, then refresh the POS catalog and retire the fallback.</p></div>
           <button type="button" className="secondary" onClick={() => setShowLocalEditor((open) => !open)}>{showLocalEditor ? 'Hide fallback editor' : 'Add local-only fallback'}</button>
         </div>
         {(showLocalEditor || form.id) && <>
@@ -132,7 +153,7 @@ export default function CatalogPage() {
         <section className="section" key={group}>
           <h2>{group}</h2>
           <table className="table" style={{ marginTop: 10 }}>
-            <thead><tr><th>Display</th><th>SKU / Variant</th><th>Station</th><th>Price</th><th>External IDs</th><th>Status</th><th></th></tr></thead>
+            <thead><tr><th>Display</th><th>SKU / Variant</th><th>Station</th><th>Price</th><th>Master IDs</th><th>Status</th><th></th></tr></thead>
             <tbody>
               {rows.map((row) => (
                 <tr key={row.id}><td>{row.display_name}</td><td>{row.sku_code || '-'}</td><td>{row.prep_station || '-'}</td><td>{money(row.price)}</td><td>{row.external_menu_item_id || '-'} / {row.external_sku_id || '-'}</td><td><span className={`badge ${row.is_available ? 'success' : 'warn'}`}>{row.is_available ? 'available' : 'sold out'}</span></td><td><div className="row wrap">{!row.external_menu_item_id && !row.external_sku_id && <button type="button" className="secondary" onClick={() => editItem(row)}>Edit fallback</button>}<button type="button" className={row.is_available ? 'secondary' : 'primary'} onClick={() => toggleAvailability(row)}>{row.is_available ? 'Mark Sold Out' : 'Restore to POS'}</button>{!row.external_menu_item_id && !row.external_sku_id && <button type="button" className="danger" onClick={() => setPendingDelete(row)}>Delete fallback</button>}</div></td></tr>
@@ -145,7 +166,7 @@ export default function CatalogPage() {
       <ActionModal
         open={!!pendingDelete}
         title={`Delete ${pendingDelete?.display_name || pendingDelete?.menu_item_name || 'local-only item'}?`}
-        description="This deletes only the POS fallback item. Accounting-managed menu items cannot be deleted here."
+        description="This deletes only the POS fallback item. Master-managed products cannot be deleted here."
         showField={false}
         confirmLabel="Delete fallback"
         onClose={() => setPendingDelete(null)}
