@@ -1,0 +1,28 @@
+{
+  "contract_version": "1.0.0",
+  "effective_date": "2026-08-06",
+  "canonical_flow": ["staff", "pos", "inventory", "accounting"],
+  "room_charge_flow": ["pos", "pms_front_desk", "accounting"],
+  "exception_consumer": "operations_command_center",
+  "systems_of_record": {
+    "staff": ["employee_identity", "employment_status", "schedules", "attendance", "payroll"],
+    "pos": ["orders", "payments", "receipts", "register_sessions", "drawer_movements", "kitchen_state", "room_charge_requests"],
+    "inventory": ["products", "skus", "categories", "recipes", "physical_stock", "lots", "inventory_consumption", "inventory_valuation"],
+    "accounting": ["tax", "financial_accounts", "journals", "cash_and_bank", "receivables", "financial_reconciliation", "reporting"],
+    "operations_command_center": ["planning", "tasks", "fixes", "approvals", "exceptions"]
+  },
+  "events": {
+    "order.finalized": {"producer": "pos", "primary_consumer": "inventory", "idempotency_key": "order_uuid"},
+    "order.voided": {"producer": "pos", "primary_consumer": "inventory", "secondary_consumer": "accounting", "idempotency_key": "void:{order_uuid}"},
+    "payment.refunded": {"producer": "pos", "primary_consumer": "accounting", "conditional_consumer": "inventory", "idempotency_key": "refund-payment:{payment_id}"},
+    "cash_movement.created": {"producer": "pos", "primary_consumer": "accounting", "idempotency_key": "cash_event_uuid"},
+    "session.closed": {"producer": "pos", "primary_consumer": "accounting", "idempotency_key": "session:{session_id}:closed"},
+    "room_charge.requested": {"producer": "pos", "primary_consumer": "pms_front_desk", "idempotency_key": "posting_uuid"},
+    "pos.exception.raised": {"producer": "pos", "primary_consumer": "operations_command_center", "idempotency_key": "exception_uuid"}
+  },
+  "compatibility_transport": {
+    "current_host": "accounting_api",
+    "is_system_of_record": false,
+    "rule": "Transport location does not change business ownership."
+  }
+}
