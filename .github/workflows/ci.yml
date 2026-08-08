@@ -27,7 +27,7 @@ jobs:
       STARTUP_REQUIRE_MIGRATIONS: 'false'
       RATE_LIMIT_ENABLED: 'false'
       RATE_LIMIT_BACKEND: memory
-      ACCOUNTING_API_BASE: https://hiddenoasis.app/api
+      ACCOUNTING_API_BASE: https://accounting.hiddenoasis.app/api
       ACCOUNTING_API_TOKEN: ci-placeholder-token
     steps:
       - name: Check out repository
