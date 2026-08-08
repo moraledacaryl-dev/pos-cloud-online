@@ -15,6 +15,7 @@ PLACEHOLDER_SECRET_MARKERS = (
     'dev',
     'default',
     'example',
+    'ci-',
 )
 
 
