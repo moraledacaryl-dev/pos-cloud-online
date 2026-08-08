@@ -65,6 +65,10 @@ class Settings(BaseSettings):
     accounting_integration_secret: str = ''
     integration_api_key: str = ''
     accounting_integration_token_path: str = '/auth/integration/token'
+    inventory_integration_enabled: bool = False
+    inventory_api_base: str = 'https://inventory.hiddenoasis.app/api/v1'
+    inventory_integration_token: str = ''
+    inventory_pos_events_path: str = '/integrations/pos/events'
     operations_integration_enabled: bool = False
     operations_api_base: str = 'https://operations.hiddenoasis.app/api'
     operations_integration_key: str = ''
@@ -100,6 +104,8 @@ class Settings(BaseSettings):
             warnings.append('ACCOUNTING_INTEGRATION_SECRET is unset or still using a placeholder value.')
         if looks_like_placeholder_secret(self.integration_api_key):
             warnings.append('INTEGRATION_API_KEY is unset or still using a placeholder value.')
+        if self.inventory_integration_enabled and looks_like_placeholder_secret(self.inventory_integration_token):
+            warnings.append('INVENTORY_INTEGRATION_TOKEN is unset or still using a placeholder value.')
         if self.operations_integration_enabled and looks_like_placeholder_secret(self.operations_integration_key):
             warnings.append('OPERATIONS_INTEGRATION_KEY is unset or still using a placeholder value.')
         if self.is_production and self.bootstrap_enabled:
