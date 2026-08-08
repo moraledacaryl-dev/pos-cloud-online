@@ -26,6 +26,14 @@ def _join(base: str, path: str) -> str:
     return base.rstrip('/') + '/' + path.lstrip('/')
 
 
+def should_reverse_inventory_for_void(order_before_void: dict) -> bool:
+    return str(order_before_void.get('status') or '').strip().lower() in {'paid', 'folio_pending'}
+
+
+def should_reverse_inventory_for_refund(order_after_refund: dict) -> bool:
+    return str(order_after_refund.get('refund_status') or '').strip().lower() == 'fully_refunded'
+
+
 def build_inventory_event(order: dict, event_type: str) -> dict:
     if event_type not in INVENTORY_EVENT_TYPES:
         raise ValueError(f'Unsupported Inventory event type: {event_type}')
