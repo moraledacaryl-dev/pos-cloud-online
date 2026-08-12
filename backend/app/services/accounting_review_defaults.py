@@ -76,3 +76,16 @@ def review_aware_order_void_push(legacy_push: OrderVoidPush) -> OrderVoidPush:
 
     setattr(push, '_accounting_review_aware', True)
     return push
+
+
+def install_accounting_review_transport(sync_service_module) -> None:
+    """Install process-local Accounting transport adapters exactly once.
+
+    Both the API process and the background sync worker call this installer. That
+    prevents a worker-only code path from falling back to the legacy sale lookup
+    when an order.voided event should instead go directly to Accounting's review
+    intake route.
+    """
+    current = sync_service_module._push_order_void
+    wrapped = review_aware_order_void_push(current)
+    sync_service_module._push_order_void = wrapped
