@@ -4,8 +4,7 @@ from pydantic import ValidationError
 from fastapi import HTTPException
 import pytest
 
-from app.api import api_router
-from app.api.staff_integrations import require_staff_integration_key
+from app.api.staff_integrations import require_staff_integration_key, router as staff_integrations_router
 from app.core.settings import settings
 from app.db.database import Base
 from app.models.entities import User
@@ -110,7 +109,7 @@ def test_only_staff_payroll_employee_sync_contract_is_accepted():
 
 
 def test_staff_receiver_route_matches_staff_payroll_contract():
-    assert any(route.path == '/integrations/staff/employees' and 'POST' in route.methods for route in api_router.routes)
+    assert any(route.path == '/employees' and 'POST' in route.methods for route in staff_integrations_router.routes)
 
 
 def test_staff_receiver_auth_is_fail_closed(monkeypatch):
