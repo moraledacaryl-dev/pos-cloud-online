@@ -12,6 +12,7 @@ from app.services.pos_service import (
     update_in_house_booking_snapshot,
     update_room_charge_posting_status,
 )
+from app.services.room_charge_policy import validate_room_charge_status_update
 
 router = APIRouter()
 
@@ -55,6 +56,8 @@ def room_charge_detail(posting_id: int, db: Session = Depends(get_db), user=Depe
 @router.post('/{posting_id}/status')
 def room_charge_status(posting_id: int, payload: RoomChargePostingStatusUpdate, db: Session = Depends(get_db), current_user=Depends(require_any_permissions('room_charges.manage', 'orders.manage'))):
     try:
+        current = get_room_charge_posting(db, posting_id)
+        validate_room_charge_status_update(current, payload)
         return update_room_charge_posting_status(db, posting_id, payload, user_id=getattr(current_user, 'id', None), approved_by_user_id=payload.approved_by_user_id)
     except ValueError as e:
         db.rollback()
