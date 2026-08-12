@@ -5,6 +5,7 @@ from app.api.deps import require_permissions
 from app.db.database import get_db
 from app.models.entities import PosOrder
 from app.schemas.common import OrderCreate, OrderPayPayload, OrderTableMergePayload, OrderTableTransferPayload, OrderUpdate, OrderVoidPayload, RefundCreate
+from app.services.inventory_integration import enqueue_inventory_event, should_reverse_inventory_for_refund, should_reverse_inventory_for_void
 from app.services.operations_integration import publish_operations_event
 from app.services.order_state_policy import assert_order_action, policy_snapshot
 from app.services.payment_control_policy import validate_payment_control
@@ -85,6 +86,7 @@ def settle_order(order_id: int, payload: OrderPayPayload, background_tasks: Back
         order_snapshot = get_order(db, order_id)
         validate_payment_control(order_snapshot, payload.payments)
         result = pay_order(db, order_id, payload, user_id=getattr(current_user, 'id', None))
+        enqueue_inventory_event(db, result, 'sale_completed')
         background_tasks.add_task(
             publish_operations_event,
             'order.finalized',
@@ -126,7 +128,10 @@ def merge_table(order_id: int, payload: OrderTableMergePayload, db: Session = De
 def cancel_order(order_id: int, payload: OrderVoidPayload, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user=Depends(require_permissions('orders.void'))):
     try:
         _assert_order_action(db, order_id, 'void')
+        pre_void = get_order(db, order_id)
         result = void_order(db, order_id, payload.reason, user_id=getattr(current_user, 'id', None), approved_by_user_id=payload.approved_by_user_id)
+        if should_reverse_inventory_for_void(pre_void):
+            enqueue_inventory_event(db, result, 'sale_voided')
         background_tasks.add_task(
             publish_operations_event,
             'void.review_needed',
@@ -158,6 +163,9 @@ def refund_order(order_id: int, payload: RefundCreate, background_tasks: Backgro
     try:
         _assert_order_action(db, order_id, 'refund')
         result = create_refund(db, order_id, payload, cashier_user_id=getattr(current_user, 'id', None))
+        order_after_refund = get_order(db, order_id)
+        if should_reverse_inventory_for_refund(order_after_refund):
+            enqueue_inventory_event(db, order_after_refund, 'sale_refunded')
         refund_id = result.get('id') if isinstance(result, dict) else getattr(result, 'id', order_id)
         background_tasks.add_task(
             publish_operations_event,

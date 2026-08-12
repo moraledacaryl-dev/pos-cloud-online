@@ -3,6 +3,7 @@ import logging
 
 from app.core.settings import settings
 from app.db.database import SessionLocal
+from app.services.inventory_integration import run_inventory_outbox_sync
 from app.services.sync_service import record_sync_worker_heartbeat, run_outbox_sync, sync_catalog_from_accounting, sync_in_house_bookings_from_accounting
 
 logging.basicConfig(level=logging.INFO)
@@ -23,7 +24,9 @@ async def loop_forever():
                 except Exception as exc:
                     catalog_result = {'ok': False, 'error': str(exc)}
                     logger.warning('catalog sync failed: %s', exc)
+                inventory_result = await run_inventory_outbox_sync(db, limit=settings.sync_worker_batch_size)
                 result = await run_outbox_sync(db, limit=settings.sync_worker_batch_size)
+                result['inventory'] = inventory_result
                 result['room_charge_bookings'] = booking_result
                 result['catalog'] = catalog_result
                 record_sync_worker_heartbeat(db, status='ok', result=result)

@@ -84,6 +84,7 @@ def build_daily_ops_context(db: Session, business_date: str) -> dict:
     gross_sales = _money(sum(_money(order.total_amount) for order in orders))
     net_sales = _money(sum(_money(order.total_amount) for order in orders if order not in voids) - refund_total)
     room_charge_total = _money(sum(_money(row.charge_amount) for row in room_charges))
+    card_sales = _money(tender_totals.get('card', 0) + tender_totals.get('credit_card', 0) + tender_totals.get('debit_card', 0))
     generated_at = datetime.utcnow().replace(microsecond=0).isoformat()
 
     context = {
@@ -98,7 +99,7 @@ def build_daily_ops_context(db: Session, business_date: str) -> dict:
         'void_count': len(voids),
         'cash_sales': _money(tender_totals.get('cash')),
         'gcash_sales': _money(tender_totals.get('gcash')),
-        'card_sales': _money(tender_totals.get('card') + tender_totals.get('credit_card') + tender_totals.get('debit_card')),
+        'card_sales': card_sales,
         'bank_transfer_sales': bank_transfer_total,
         'room_charge_total': room_charge_total,
         'open_order_count': len(open_orders),
@@ -116,7 +117,7 @@ def build_daily_ops_context(db: Session, business_date: str) -> dict:
             'voids': len(voids),
             'cash': _money(tender_totals.get('cash')),
             'gcash': _money(tender_totals.get('gcash')),
-            'card': _money(tender_totals.get('card') + tender_totals.get('credit_card') + tender_totals.get('debit_card')),
+            'card': card_sales,
             'bank_transfers': bank_transfer_total,
             'room_charges': room_charge_total,
         },
