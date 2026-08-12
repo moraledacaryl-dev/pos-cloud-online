@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.api import api_router
 from app.core.logging_config import configure_logging, log_json, set_request_id
@@ -92,6 +93,7 @@ def root():
 
 @app.get('/healthz')
 def healthz():
+    """Liveness only: process is up and can answer HTTP."""
     return {'ok': True, 'environment': settings.environment}
 
 
@@ -109,6 +111,34 @@ async def healthz_details():
 @app.get('/api/healthz/details')
 async def api_healthz_details():
     return await healthz_details()
+
+
+@app.get('/readyz')
+async def readyz():
+    """Core POS readiness. Integration degradation does not stop local selling."""
+    with SessionLocal() as db:
+        report = await build_health_report(db, engine)
+    status_code = 200 if report.get('sales_ready') else 503
+    return JSONResponse(status_code=status_code, content=report)
+
+
+@app.get('/api/readyz')
+async def api_readyz():
+    return await readyz()
+
+
+@app.get('/readyz/integrations')
+async def integration_readyz():
+    """Strict downstream readiness for monitoring sync worker/outbox health."""
+    with SessionLocal() as db:
+        report = await build_health_report(db, engine)
+    status_code = 200 if report.get('ok') else 503
+    return JSONResponse(status_code=status_code, content=report)
+
+
+@app.get('/api/readyz/integrations')
+async def api_integration_readyz():
+    return await integration_readyz()
 
 
 app.include_router(api_router, prefix=settings.api_prefix)
