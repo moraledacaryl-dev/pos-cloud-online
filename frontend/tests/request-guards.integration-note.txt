@@ -1,0 +1,1 @@
+Pass 8 request guard coverage is executed by npm run test:ui via tests/request-guards.test.mjs.
