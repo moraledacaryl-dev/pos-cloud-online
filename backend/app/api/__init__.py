@@ -15,6 +15,7 @@ from app.api.room_charges import router as room_charges_router
 from app.api.registers import router as registers_router
 from app.api.seed import router as seed_router
 from app.api.sessions import router as sessions_router
+from app.api.staff_integrations import router as staff_integrations_router
 from app.api.sync import router as sync_router
 from app.api.system_settings import router as system_settings_router
 
@@ -31,6 +32,7 @@ api_router.include_router(reports_router, prefix='/reports', tags=['reports'])
 api_router.include_router(room_charges_router, prefix='/room-charges', tags=['room-charges'])
 api_router.include_router(cash_router, prefix='/cash-movements', tags=['cash-movements'])
 api_router.include_router(kitchen_router, prefix='/kitchen', tags=['kitchen'])
+api_router.include_router(staff_integrations_router, prefix='/integrations/staff', tags=['staff-integration'])
 api_router.include_router(sync_router, prefix='/sync', tags=['sync'])
 api_router.include_router(system_settings_router, prefix='/system-settings', tags=['system-settings'])
 api_router.include_router(seed_router, prefix='/seed', tags=['seed'])
