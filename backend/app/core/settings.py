@@ -75,6 +75,8 @@ class Settings(BaseSettings):
     operations_integration_key: str = ''
     operations_source_app: str = 'dedicated_pos_cloud'
     operations_integration_timeout_seconds: int = 5
+    staff_integration_enabled: bool = False
+    staff_integration_key: str = ''
     trust_proxy_headers: bool = False
     model_config = SettingsConfigDict(env_file=str(BACKEND_ROOT / '.env'), extra='ignore')
 
@@ -109,6 +111,8 @@ class Settings(BaseSettings):
             warnings.append('INVENTORY_INTEGRATION_TOKEN is unset or still using a placeholder value.')
         if self.operations_integration_enabled and looks_like_placeholder_secret(self.operations_integration_key):
             warnings.append('OPERATIONS_INTEGRATION_KEY is unset or still using a placeholder value.')
+        if self.staff_integration_enabled and looks_like_placeholder_secret(self.staff_integration_key):
+            warnings.append('STAFF_INTEGRATION_KEY is unset or still using a placeholder value.')
         if self.is_production and self.bootstrap_enabled:
             warnings.append('Default admin bootstrap must be disabled in production.')
         return warnings
