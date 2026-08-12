@@ -1,4 +1,7 @@
+import { createInFlightMutationRegistry, mutationRequestKey } from './requestGuards.mjs';
+
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE || '/api').replace(/\/+$/, '');
+const mutationRegistry = createInFlightMutationRegistry();
 
 function getToken() {
   if (typeof window === 'undefined') return '';
@@ -44,7 +47,7 @@ async function rawRequest(path, init = {}) {
   return { res, data };
 }
 
-async function request(path, init = {}, retrying = false) {
+async function requestOnce(path, init = {}, retrying = false) {
   const { res, data } = await rawRequest(path, init);
   if (res.status === 401 && !retrying && !String(path).startsWith('/auth/')) {
     const refresh = getRefreshToken();
@@ -64,6 +67,24 @@ async function request(path, init = {}, retrying = false) {
   }
   if (!res.ok) throw new Error(data?.detail || 'Request failed');
   return data;
+}
+
+async function request(path, init = {}, retrying = false) {
+  if (retrying) return requestOnce(path, init, true);
+
+  const key = mutationRequestKey(path, init);
+  if (!key) return requestOnce(path, init, false);
+
+  const existing = mutationRegistry.get(key);
+  if (existing) return existing;
+
+  const pending = requestOnce(path, init, false);
+  mutationRegistry.set(key, pending);
+  try {
+    return await pending;
+  } finally {
+    mutationRegistry.clear(key, pending);
+  }
 }
 
 async function blobRequest(path, retrying = false) {
@@ -164,7 +185,6 @@ export const seedDefaults = () => request('/seed/defaults', { method: 'POST' });
 
 export const refreshSession = (payload) => request('/auth/refresh', { method: 'POST', body: JSON.stringify(payload) });
 export const logoutSession = (payload) => request('/auth/logout', { method: 'POST', body: JSON.stringify(payload) });
-
 
 export const fetchRoomCharges = (params = {}) => request(`/room-charges${qs(params)}`);
 export const fetchRoomCharge = (id) => request(`/room-charges/${id}`);
