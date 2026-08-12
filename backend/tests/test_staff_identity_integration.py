@@ -1,8 +1,12 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from pydantic import ValidationError
+from fastapi import HTTPException
 import pytest
 
+from app.api import api_router
+from app.api.staff_integrations import require_staff_integration_key
+from app.core.settings import settings
 from app.db.database import Base
 from app.models.entities import User
 from app.models.staff_identity import PosUserStaffLink, StaffIdentity
@@ -103,3 +107,21 @@ def test_only_staff_payroll_employee_sync_contract_is_accepted():
     wrong_event = envelope().model_copy(update={'event_type': 'employee.salary_changed'})
     with pytest.raises(ValueError, match='Unsupported Staff integration event type'):
         sync_staff_employees(db, wrong_event)
+
+
+def test_staff_receiver_route_matches_staff_payroll_contract():
+    assert any(route.path == '/integrations/staff/employees' and 'POST' in route.methods for route in api_router.routes)
+
+
+def test_staff_receiver_auth_is_fail_closed(monkeypatch):
+    monkeypatch.setattr(settings, 'staff_integration_enabled', False)
+    with pytest.raises(HTTPException) as disabled:
+        require_staff_integration_key('strong-shared-staff-pos-secret')
+    assert disabled.value.status_code == 503
+
+    monkeypatch.setattr(settings, 'staff_integration_enabled', True)
+    monkeypatch.setattr(settings, 'staff_integration_key', 'strong-shared-staff-pos-secret')
+    with pytest.raises(HTTPException) as invalid:
+        require_staff_integration_key('wrong-secret-value')
+    assert invalid.value.status_code == 401
+    assert require_staff_integration_key('strong-shared-staff-pos-secret') is None
