@@ -13,28 +13,36 @@ from app.core.rate_limit import get_rate_limit_status
 from app.core.settings import settings
 from app.models.entities import SyncOutboxEvent
 from app.services.pos_service import setting_json
+from app.services.reliability_policy import evaluate_operational_readiness
 from app.services.sync_service import get_sync_config
 
 
-def _parse_iso(value: str | None):
+def _parse_iso(value):
     if not value:
         return None
+    if isinstance(value, datetime):
+        return value
     try:
         return datetime.fromisoformat(str(value).replace('Z', '+00:00'))
     except Exception:
         return None
 
 
+def _age_seconds(value) -> int | None:
+    parsed = _parse_iso(value)
+    if parsed is None:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return max(0, int((datetime.now(timezone.utc) - parsed).total_seconds()))
+
+
 def get_sync_worker_status(db: Session) -> dict:
     heartbeat = setting_json(db, 'sync_worker_heartbeat', default={}) or {}
     last_seen_at = heartbeat.get('last_seen_at')
-    parsed = _parse_iso(last_seen_at)
-    age_seconds = None
-    is_stale = True
-    if parsed is not None:
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        age_seconds = max(0, int((datetime.now(timezone.utc) - parsed).total_seconds()))
+    age_seconds = _age_seconds(last_seen_at)
+    is_stale = age_seconds is None
+    if age_seconds is not None:
         is_stale = age_seconds > int(settings.sync_worker_stale_seconds or max(120, settings.sync_worker_poll_seconds * 3))
     return {
         'last_seen_at': last_seen_at,
@@ -49,7 +57,8 @@ def get_sync_worker_status(db: Session) -> dict:
 def get_outbox_metrics(db: Session) -> dict:
     grouped = dict(db.query(SyncOutboxEvent.status, func.count(SyncOutboxEvent.id)).group_by(SyncOutboxEvent.status).all())
     pending = int(grouped.get('pending', 0))
-    failed = int(grouped.get('failed', 0) or grouped.get('error', 0))
+    failed = int(grouped.get('failed', 0)) + int(grouped.get('error', 0))
+    blocked = int(grouped.get('blocked', 0))
     synced = int(grouped.get('synced', 0))
     retrying = db.query(SyncOutboxEvent).filter(SyncOutboxEvent.retry_count > 0, SyncOutboxEvent.status != 'synced').count()
     current_time = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0).isoformat()
@@ -57,20 +66,37 @@ def get_outbox_metrics(db: Session) -> dict:
         or_(
             SyncOutboxEvent.status == 'pending',
             and_(
-                SyncOutboxEvent.status == 'failed',
+                SyncOutboxEvent.status.in_(['failed', 'error']),
                 or_(SyncOutboxEvent.next_retry_at.is_(None), SyncOutboxEvent.next_retry_at <= current_time),
             ),
         )
     ).count()
-    blocked = int(grouped.get('blocked', 0))
+
+    unresolved_statuses = ['pending', 'failed', 'error', 'blocked']
+    oldest = (
+        db.query(SyncOutboxEvent)
+        .filter(SyncOutboxEvent.status.in_(unresolved_statuses))
+        .order_by(SyncOutboxEvent.created_at.asc(), SyncOutboxEvent.id.asc())
+        .first()
+    )
+    max_retry_count = db.query(func.max(SyncOutboxEvent.retry_count)).filter(SyncOutboxEvent.status.in_(unresolved_statuses)).scalar() or 0
+    oldest_age_seconds = _age_seconds(getattr(oldest, 'created_at', None)) if oldest else None
+
     return {
-        'total': pending + failed + synced,
+        'total': int(sum(int(value or 0) for value in grouped.values())),
         'pending': pending,
         'failed': failed,
         'blocked': blocked,
         'synced': synced,
         'retrying': int(retrying),
         'due_now': int(due_now),
+        'attention_required': failed + blocked,
+        'oldest_unresolved_event_id': getattr(oldest, 'id', None) if oldest else None,
+        'oldest_unresolved_event_uuid': getattr(oldest, 'event_uuid', None) if oldest else None,
+        'oldest_unresolved_status': getattr(oldest, 'status', None) if oldest else None,
+        'oldest_unresolved_age_seconds': oldest_age_seconds,
+        'max_retry_count': int(max_retry_count),
+        'status_counts': {str(key): int(value or 0) for key, value in grouped.items()},
     }
 
 
@@ -131,8 +157,24 @@ async def build_health_report(db: Session, engine: Engine) -> dict:
     outbox = get_outbox_metrics(db)
     rate_limit = get_rate_limit_status()
     security = get_security_readiness()
+
+    readiness = evaluate_operational_readiness(
+        database_ok=bool(database.get('ok')),
+        migrations_ok=bool(database.get('migration', {}).get('ok')) and not bool(database.get('migration', {}).get('requires_upgrade')),
+        security_ok=bool(security.get('ok')),
+        worker_stale=bool(sync_worker.get('is_stale')),
+        failed_events=int(outbox.get('failed', 0)),
+        blocked_events=int(outbox.get('blocked', 0)),
+        accounting_configured=bool(accounting_api.get('configured')),
+        accounting_reachable=bool(accounting_api.get('reachable', False)),
+    )
+
     return {
-        'ok': bool(database.get('ok')) and bool(database.get('migration', {}).get('ok')) and security['ok'],
+        'ok': readiness['ok'],
+        'status': readiness['status'],
+        'sales_ready': readiness['sales_ready'],
+        'integrations_ready': readiness['integrations_ready'],
+        'reasons': readiness['reasons'],
         'environment': settings.environment,
         'database': database,
         'security': security,
