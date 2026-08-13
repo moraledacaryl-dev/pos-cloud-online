@@ -1,39 +1,14 @@
 'use client';
 
 import { useState } from 'react';
-import { bootstrap, login, setRefreshToken, setToken } from '../../lib/api';
+import { bootstrap, login } from '../../lib/api';
 
 const SHOW_DEVELOPMENT_BOOTSTRAP = process.env.NEXT_PUBLIC_ENABLE_ADMIN_BOOTSTRAP === 'true';
 
 const styles = {
-  shell: {
-    minHeight: '100vh',
-    display: 'grid',
-    placeItems: 'center',
-    padding: 24,
-    background: 'radial-gradient(circle at top left, #f8fbf9 0, transparent 32%), radial-gradient(circle at bottom right, #eef2f8 0, transparent 28%), #f6f6f4',
-  },
-  card: {
-    width: 'min(420px, 100%)',
-    display: 'grid',
-    gap: 18,
-    padding: 30,
-    borderRadius: 22,
-    border: '1px solid #e1e6df',
-    background: 'rgba(255,255,255,.9)',
-    boxShadow: '0 24px 70px rgba(26,38,30,.09)',
-  },
-  mark: {
-    width: 48,
-    height: 48,
-    display: 'grid',
-    placeItems: 'center',
-    borderRadius: 15,
-    background: '#243b68',
-    color: '#fff',
-    fontWeight: 720,
-    letterSpacing: '.03em',
-  },
+  shell: { minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 24, background: 'radial-gradient(circle at top left, #f8fbf9 0, transparent 32%), radial-gradient(circle at bottom right, #eef2f8 0, transparent 28%), #f6f6f4' },
+  card: { width: 'min(420px, 100%)', display: 'grid', gap: 18, padding: 30, borderRadius: 22, border: '1px solid #e1e6df', background: 'rgba(255,255,255,.9)', boxShadow: '0 24px 70px rgba(26,38,30,.09)' },
+  mark: { width: 48, height: 48, display: 'grid', placeItems: 'center', borderRadius: 15, background: '#243b68', color: '#fff', fontWeight: 720, letterSpacing: '.03em' },
   title: { margin: 0, fontSize: 34, letterSpacing: '-.04em', lineHeight: 1 },
   form: { display: 'grid', gap: 13 },
   label: { display: 'grid', gap: 6, fontSize: 12, fontWeight: 650, color: '#565b55' },
@@ -52,36 +27,22 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
 
   async function handleBootstrap() {
-    setError('');
-    setNotice('');
-    setLoading(true);
-    try {
-      const res = await bootstrap();
-      setNotice(`Bootstrap ready: ${res.default_admin}`);
-    } catch (e) {
-      setError(e.message || 'Bootstrap failed.');
-    } finally {
-      setLoading(false);
-    }
+    setError(''); setNotice(''); setLoading(true);
+    try { await bootstrap(); setNotice('Development bootstrap completed.'); }
+    catch (e) { setError(e.message || 'Bootstrap failed.'); }
+    finally { setLoading(false); }
   }
 
   async function handleSubmit(event) {
     event.preventDefault();
-    setError('');
-    setNotice('');
-    setLoading(true);
+    setError(''); setNotice(''); setLoading(true);
     try {
-      const res = await login(form);
-      setToken(res.access_token);
-      if (res.refresh_token) setRefreshToken(res.refresh_token);
+      await login(form);
       const searchParams = new URLSearchParams(window.location.search);
       const next = searchParams.get('next') || '/dashboard';
       window.location.href = next.startsWith('/') && !next.startsWith('//') ? next : '/dashboard';
-    } catch (e) {
-      setError(e.message || 'Invalid username or password.');
-    } finally {
-      setLoading(false);
-    }
+    } catch (e) { setError(e.message || 'Invalid username or password.'); }
+    finally { setLoading(false); }
   }
 
   return (

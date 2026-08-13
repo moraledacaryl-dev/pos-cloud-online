@@ -2,7 +2,6 @@
 
 import { useEffect } from 'react';
 import { usePathname } from 'next/navigation';
-import { clearRefreshToken, clearToken } from '../lib/api';
 import { useCurrentUser } from '../lib/useCurrentUser';
 import Header from './Header';
 import RouteGuard from './RouteGuard';
@@ -21,8 +20,6 @@ export default function AppShell({ children }) {
 
   useEffect(() => {
     if (isStandalone || !loaded || user) return;
-    clearToken();
-    clearRefreshToken();
     const next = pathname && pathname !== '/' ? `?next=${encodeURIComponent(pathname)}` : '';
     window.location.replace(`/login${next}`);
   }, [isStandalone, loaded, pathname, user]);

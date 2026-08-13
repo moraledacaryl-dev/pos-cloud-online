@@ -1,16 +1,17 @@
 from datetime import datetime, timezone
 
-from jose import JWTError, jwt
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import OAuth2PasswordBearer
+from jose import jwt
 from sqlalchemy.orm import Session
 
 from app.core.settings import settings
 from app.db.database import get_db
 from app.models.entities import User
+from app.services.browser_auth import browser_access_token
 from app.services.permission_service import get_user_permission_keys
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl='/api/auth/login')
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl='/api/auth/login', auto_error=False)
 
 
 def _parse_iso(value: str | None):
@@ -22,8 +23,11 @@ def _parse_iso(value: str | None):
         return None
 
 
-def get_current_user(db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):
+def get_current_user(request: Request, db: Session = Depends(get_db), bearer_token: str | None = Depends(oauth2_scheme)):
     credentials_exception = HTTPException(status_code=401, detail='Could not validate credentials')
+    token = browser_access_token(request) or str(bearer_token or '').strip()
+    if not token:
+        raise credentials_exception
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=['HS256'])
         username = payload.get('sub')
