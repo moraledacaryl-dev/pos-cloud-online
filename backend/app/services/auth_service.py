@@ -5,7 +5,7 @@ from jose import jwt
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
-from app.core.settings import settings
+from app.core.settings import looks_like_placeholder_secret, settings
 from app.models.entities import RefreshToken, User
 from app.services.permission_service import assign_user_roles, ensure_permissions_seed, list_roles
 
@@ -143,10 +143,19 @@ def authenticate_user(db: Session, username: str, password: str):
 
 
 def ensure_admin_user(db: Session):
+    if not settings.bootstrap_enabled:
+        raise RuntimeError('Development admin bootstrap is disabled.')
+    username = (settings.development_admin_username or '').strip()
+    password = settings.development_admin_password or ''
+    if not username:
+        raise RuntimeError('DEVELOPMENT_ADMIN_USERNAME is required when development bootstrap is enabled.')
+    if looks_like_placeholder_secret(password) or password.lower() == username.lower():
+        raise RuntimeError('DEVELOPMENT_ADMIN_PASSWORD must be an explicit non-placeholder password.')
+
     ensure_permissions_seed(db)
-    admin = db.query(User).filter(User.username == 'admin').first()
+    admin = db.query(User).filter(User.username == username).first()
     if not admin:
-        admin = User(username='admin', full_name='System Admin', hashed_password=hash_password('admin123'), role='owner', is_active=True, session_version=1)
+        admin = User(username=username, full_name='Development Admin', hashed_password=hash_password(password), role='owner', is_active=True, session_version=1)
         db.add(admin)
         db.commit()
         db.refresh(admin)
