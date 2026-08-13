@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { API_BASE, fetchKitchenTickets, getToken, updateKitchenLineStatus } from '../../lib/api';
+import { fetchKitchenTickets, updateKitchenLineStatus } from '../../lib/api';
+import { createKitchenStreamTicket, kitchenStreamUrl } from '../../lib/kdsStream';
 import { badgeClass, kitchenStatusLabel, sourceLabel, statusBadgeClass, useGroupedKitchenTickets } from '../../lib/kitchen';
 import ActionModal from '../../components/ActionModal';
 
@@ -57,14 +58,6 @@ function allDayRows(tickets) {
   return Array.from(map.values()).sort((a, b) => a.station.localeCompare(b.station) || a.item.localeCompare(b.item));
 }
 
-function kitchenStreamUrl(station, token) {
-  const base = API_BASE.startsWith('http') ? API_BASE : `${window.location.origin}${API_BASE}`;
-  const url = new URL(`${base}/kitchen/stream`);
-  if (station) url.searchParams.set('station', station);
-  url.searchParams.set('token', token);
-  return url.toString();
-}
-
 export default function KitchenPage({ initialStation = '', initialView = '' }) {
   const defaults = stationDefaults(initialStation);
   const [station, setStation] = useState(defaults.station);
@@ -111,18 +104,45 @@ export default function KitchenPage({ initialStation = '', initialView = '' }) {
   useEffect(() => { loadTickets().catch(console.error); }, [station, view]);
 
   useEffect(() => {
-    const token = getToken();
-    if (!token) return;
-    const es = new EventSource(kitchenStreamUrl(station, token));
-    streamRef.current = es;
-    es.addEventListener('hello', () => setConnectionState('connected'));
-    const refresh = () => {
-      setConnectionState('connected');
-      loadTickets().catch(() => {});
+    let cancelled = false;
+    let es = null;
+    let reconnectTimer = null;
+
+    const connect = async () => {
+      setConnectionState('connecting');
+      try {
+        const grant = await createKitchenStreamTicket(station);
+        if (cancelled) return;
+        es = new EventSource(kitchenStreamUrl(station, grant.ticket));
+        streamRef.current = es;
+        es.addEventListener('hello', () => setConnectionState('connected'));
+        const refresh = () => {
+          setConnectionState('connected');
+          loadTickets().catch(() => {});
+        };
+        ['ticket_created', 'ticket_updated', 'ticket_status_updated', 'ticket_finalized', 'ticket_line_updated'].forEach((eventName) => es.addEventListener(eventName, refresh));
+        es.addEventListener('stream_expiring', () => {
+          es?.close();
+          if (!cancelled) reconnectTimer = window.setTimeout(() => connect().catch(() => {}), 250);
+        });
+        es.onerror = () => {
+          setConnectionState('disconnected');
+          es?.close();
+          if (!cancelled) reconnectTimer = window.setTimeout(() => connect().catch(() => {}), 1500);
+        };
+      } catch (e) {
+        setConnectionState('disconnected');
+        if (!cancelled) reconnectTimer = window.setTimeout(() => connect().catch(() => {}), 2000);
+      }
     };
-    ['ticket_created', 'ticket_updated', 'ticket_status_updated', 'ticket_finalized', 'ticket_line_updated'].forEach((eventName) => es.addEventListener(eventName, refresh));
-    es.onerror = () => setConnectionState('disconnected');
-    return () => { es.close(); streamRef.current = null; };
+
+    connect().catch(() => {});
+    return () => {
+      cancelled = true;
+      if (reconnectTimer) window.clearTimeout(reconnectTimer);
+      es?.close();
+      streamRef.current = null;
+    };
   }, [station, view]);
 
   useEffect(() => {
