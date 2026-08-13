@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useId, useState } from 'react';
-import { login } from '../lib/api';
 
 export default function ManagerOverrideModal({ open, title = 'Manager Override', subtitle = '', actionLabel = 'Approve', onApprove, onClose }) {
   const titleId = useId();
@@ -34,17 +33,16 @@ export default function ManagerOverrideModal({ open, title = 'Manager Override',
     setError('');
     setLoading(true);
     try {
-      const auth = await login({ username, password });
-      const user = auth?.user || {};
-      const roleCodes = new Set((user.roles || []).map((role) => role.code));
-      const perms = new Set(user.permissions || []);
-      const canOverride = roleCodes.has('owner') || roleCodes.has('manager') || user.role === 'owner' || user.role === 'manager' || perms.has('orders.void') || perms.has('catalog.manage');
-      if (!canOverride) throw new Error('Override requires an owner or manager account.');
-      await onApprove?.(user);
+      if (!username.trim() || !password) throw new Error('Manager username and password are required.');
+      // Credentials are used once by the action-specific approval endpoint. They
+      // are never converted client-side into an approver user ID and are never
+      // stored in localStorage/sessionStorage.
+      await onApprove?.({ id: { manager_username: username.trim(), manager_password: password } });
       onClose?.();
     } catch (e) {
       setError(e.message || 'Override failed.');
     } finally {
+      setPassword('');
       setLoading(false);
     }
   }
@@ -57,11 +55,11 @@ export default function ManagerOverrideModal({ open, title = 'Manager Override',
           <button type="button" className="secondary" onClick={onClose} disabled={loading}>Close</button>
         </div>
         <form className="modal-form stack-tight" onSubmit={handleApprove}>
-          <label className="field">Manager Username<input value={username} onChange={(e) => setUsername(e.target.value)} autoFocus /></label>
-          <label className="field">Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
+          <label className="field">Manager Username<input value={username} onChange={(e) => setUsername(e.target.value)} autoFocus autoComplete="username" /></label>
+          <label className="field">Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" /></label>
           {!!error && <p className="error-text">{error}</p>}
           <div className="row wrap">
-            <button type="submit" className="primary" disabled={loading}>{loading ? 'Checking...' : actionLabel}</button>
+            <button type="submit" className="primary" disabled={loading}>{loading ? 'Authorizing...' : actionLabel}</button>
             <button type="button" className="secondary" onClick={onClose} disabled={loading}>Cancel</button>
           </div>
         </form>
