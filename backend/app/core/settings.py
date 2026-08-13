@@ -44,10 +44,12 @@ class Settings(BaseSettings):
     environment: str = 'development'
     api_prefix: str = '/api'
     database_url: str = _default_database_url()
-    secret_key: str = 'change-me-super-secret'
+    secret_key: str = ''
     access_token_expire_minutes: int = 60
     refresh_token_expire_days: int = 14
-    allow_default_admin_bootstrap: bool = True
+    allow_default_admin_bootstrap: bool = False
+    development_admin_username: str = ''
+    development_admin_password: str = ''
     cors_origins: str = 'http://localhost:3001,http://127.0.0.1:3001'
     http_timeout_seconds: int = 20
     health_timeout_seconds: int = 5
@@ -84,6 +86,10 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=str(BACKEND_ROOT / '.env'), extra='ignore')
 
     @property
+    def environment_name(self) -> str:
+        return self.environment.strip().lower()
+
+    @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(',') if origin.strip()]
 
@@ -93,19 +99,21 @@ class Settings(BaseSettings):
 
     @property
     def bootstrap_enabled(self) -> bool:
-        if not self.allow_default_admin_bootstrap:
-            return False
-        return self.environment.strip().lower() != 'production'
+        return self.environment_name == 'development' and self.allow_default_admin_bootstrap
 
     @property
     def is_production(self) -> bool:
-        return self.environment.strip().lower() == 'production'
+        return self.environment_name == 'production'
+
+    @property
+    def is_strict_environment(self) -> bool:
+        return self.environment_name in {'production', 'staging'}
 
     @property
     def security_warnings(self) -> list[str]:
         warnings: list[str] = []
-        if looks_like_placeholder_secret(self.secret_key):
-            warnings.append('SECRET_KEY is unset or still using a placeholder value.')
+        if looks_like_placeholder_secret(self.secret_key) or len((self.secret_key or '').strip()) < 32:
+            warnings.append('SECRET_KEY must be a non-placeholder signing value of at least 32 characters.')
         if looks_like_placeholder_secret(self.accounting_integration_secret):
             warnings.append('ACCOUNTING_INTEGRATION_SECRET is unset or still using a placeholder value.')
         if looks_like_placeholder_secret(self.integration_api_key):
@@ -116,9 +124,20 @@ class Settings(BaseSettings):
             warnings.append('OPERATIONS_INTEGRATION_KEY is unset or still using a placeholder value.')
         if self.staff_integration_enabled and looks_like_placeholder_secret(self.staff_integration_key):
             warnings.append('STAFF_INTEGRATION_KEY is unset or still using a placeholder value.')
-        if self.is_production and self.bootstrap_enabled:
-            warnings.append('Default admin bootstrap must be disabled in production.')
+        if self.is_strict_environment and self.allow_default_admin_bootstrap:
+            warnings.append('Default admin bootstrap must be disabled in production and staging.')
         return warnings
+
+    @property
+    def runtime_security_errors(self) -> list[str]:
+        if not self.is_strict_environment:
+            return []
+        return list(self.security_warnings)
+
+    def validate_runtime_security(self) -> None:
+        errors = self.runtime_security_errors
+        if errors:
+            raise RuntimeError('Unsafe runtime security configuration: ' + '; '.join(errors))
 
 
 settings = Settings()
