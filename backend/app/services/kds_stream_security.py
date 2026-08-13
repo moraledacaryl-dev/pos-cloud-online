@@ -33,6 +33,23 @@ def _use_memory_store() -> bool:
     return settings.environment.strip().lower() in {'test', 'development'}
 
 
+def get_stream_ticket_store_status() -> dict:
+    """Report the actual backing store used by KDS stream tickets.
+
+    Test/development intentionally use process-local memory. Production/staging
+    require Redis because one-use tickets must survive normal request concurrency
+    without relying on a single Python process. Never infer Redis health from the
+    unrelated rate-limit backend.
+    """
+    if _use_memory_store():
+        return {'backend': 'memory', 'required': False, 'connected': True}
+    try:
+        connected = bool(_redis_client().ping())
+        return {'backend': 'redis', 'required': True, 'connected': connected}
+    except RedisError:
+        return {'backend': 'redis', 'required': True, 'connected': False}
+
+
 def issue_stream_ticket(*, user_id: int, station: str | None, device_id: str | None = None) -> dict:
     ticket = secrets.token_urlsafe(32)
     digest = _ticket_hash(ticket)
