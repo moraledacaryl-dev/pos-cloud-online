@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     environment: str = 'development'
     api_prefix: str = '/api'
     database_url: str = _default_database_url()
-    secret_key: str = 'change-me-super-secret'
+    secret_key: str = ''
     access_token_expire_minutes: int = 60
     refresh_token_expire_days: int = 14
     allow_default_admin_bootstrap: bool = False
