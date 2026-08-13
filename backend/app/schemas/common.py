@@ -139,6 +139,7 @@ class RegisterSessionClose(BaseModel):
 class RegisterSessionReopen(BaseModel):
     reason: str
     approved_by_user_id: int | None = None
+    approval_grant_uuid: str | None = None
     note: str | None = None
 
 
@@ -174,6 +175,7 @@ class OrderPaymentCreate(BaseModel):
 class OrderCreate(BaseModel):
     register_session_id: int
     approved_by_user_id: int | None = None
+    approval_grant_uuid: str | None = None
     order_type: str = 'dine_in'
     source_channel: str | None = None
     guest_name: str | None = None
@@ -186,6 +188,7 @@ class OrderCreate(BaseModel):
 
 class OrderUpdate(BaseModel):
     approved_by_user_id: int | None = None
+    approval_grant_uuid: str | None = None
     order_type: str | None = None
     source_channel: str | None = None
     guest_name: str | None = None
@@ -204,6 +207,7 @@ class OrderPayPayload(BaseModel):
 class OrderVoidPayload(BaseModel):
     reason: str
     approved_by_user_id: int | None = None
+    approval_grant_uuid: str | None = None
 
 
 class OrderTableTransferPayload(BaseModel):
@@ -230,12 +234,14 @@ class RefundCreate(BaseModel):
     reason_text: str | None = None
     note: str | None = None
     approved_by_user_id: int | None = None
+    approval_grant_uuid: str | None = None
     lines: list[RefundLineCreate] = Field(default_factory=list)
 
 
 class CashMovementCreate(BaseModel):
     register_session_id: int
     approved_by_user_id: int | None = None
+    approval_grant_uuid: str | None = None
     direction: str
     movement_type: str
     category: str | None = None
@@ -263,7 +269,6 @@ class SyncRunPayload(BaseModel):
 class SystemSettingsUpdate(BaseModel):
     accounting_sync: dict[str, Any] | None = None
     ui_preferences: dict[str, Any] | None = None
-
 
 
 class RefreshTokenPayload(BaseModel):
@@ -301,6 +306,7 @@ class InHouseBookingSnapshotUpdate(BaseModel):
 class RoomChargePostingStatusUpdate(BaseModel):
     posting_status: str
     approved_by_user_id: int | None = None
+    approval_grant_uuid: str | None = None
     beds24_posting_reference: str | None = None
     note: str | None = None
     dispute_note: str | None = None
