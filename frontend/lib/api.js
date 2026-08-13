@@ -2,31 +2,13 @@ import { createInFlightMutationRegistry, mutationRequestKey } from './requestGua
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE || '/api').replace(/\/+$/, '');
 const mutationRegistry = createInFlightMutationRegistry();
+let refreshPromise = null;
 
-function getToken() {
-  if (typeof window === 'undefined') return '';
-  return localStorage.getItem('pos_token') || '';
-}
-
-function getRefreshToken() {
-  if (typeof window === 'undefined') return '';
-  return localStorage.getItem('pos_refresh_token') || '';
-}
-
-function setToken(token) {
-  if (typeof window !== 'undefined') localStorage.setItem('pos_token', token);
-}
-
-function setRefreshToken(token) {
-  if (typeof window !== 'undefined') localStorage.setItem('pos_refresh_token', token);
-}
-
-function clearToken() {
-  if (typeof window !== 'undefined') localStorage.removeItem('pos_token');
-}
-
-function clearRefreshToken() {
-  if (typeof window !== 'undefined') localStorage.removeItem('pos_refresh_token');
+function readCookie(name) {
+  if (typeof document === 'undefined') return '';
+  const prefix = `${encodeURIComponent(name)}=`;
+  const row = document.cookie.split(';').map((value) => value.trim()).find((value) => value.startsWith(prefix));
+  return row ? decodeURIComponent(row.slice(prefix.length)) : '';
 }
 
 function qs(params = {}, multi = false) {
@@ -35,35 +17,42 @@ function qs(params = {}, multi = false) {
   return filtered.length ? `?${new URLSearchParams(filtered).toString()}` : '';
 }
 
+function isMutation(init = {}) {
+  return ['POST', 'PUT', 'PATCH', 'DELETE'].includes(String(init.method || 'GET').toUpperCase());
+}
+
 async function rawRequest(path, init = {}) {
   const headers = { ...(init.headers || {}) };
-  const token = getToken();
-  if (token) headers.Authorization = `Bearer ${token}`;
+  if (isMutation(init)) {
+    const csrf = readCookie('pos_csrf');
+    if (csrf) headers['X-CSRF-Token'] = csrf;
+  }
   if (!(init.body instanceof FormData) && init.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-  const res = await fetch(`${API_BASE}${normalizedPath}`, { cache: 'no-store', ...init, headers });
+  const res = await fetch(`${API_BASE}${normalizedPath}`, { cache: 'no-store', credentials: 'same-origin', ...init, headers });
   let data = null;
   try { data = await res.json(); } catch { data = null; }
   return { res, data };
 }
 
+async function refreshBrowserSession() {
+  if (!refreshPromise) {
+    refreshPromise = (async () => {
+      const refreshed = await rawRequest('/auth/refresh', { method: 'POST' });
+      if (!refreshed.res.ok) throw new Error(refreshed.data?.detail || 'Session expired');
+      return refreshed.data;
+    })().finally(() => { refreshPromise = null; });
+  }
+  return refreshPromise;
+}
+
 async function requestOnce(path, init = {}, retrying = false) {
   const { res, data } = await rawRequest(path, init);
   if (res.status === 401 && !retrying && !String(path).startsWith('/auth/')) {
-    const refresh = getRefreshToken();
-    if (refresh) {
-      try {
-        const refreshed = await request('/auth/refresh', { method: 'POST', body: JSON.stringify({ refresh_token: refresh }) }, true);
-        if (refreshed?.access_token) setToken(refreshed.access_token);
-        if (refreshed?.refresh_token) setRefreshToken(refreshed.refresh_token);
-        const retried = await rawRequest(path, init);
-        if (!retried.res.ok) throw new Error(retried.data?.detail || 'Request failed');
-        return retried.data;
-      } catch (err) {
-        clearToken(); clearRefreshToken();
-        throw err;
-      }
-    }
+    await refreshBrowserSession();
+    const retried = await rawRequest(path, init);
+    if (!retried.res.ok) throw new Error(retried.data?.detail || 'Request failed');
+    return retried.data;
   }
   if (!res.ok) throw new Error(data?.detail || 'Request failed');
   return data;
@@ -71,36 +60,22 @@ async function requestOnce(path, init = {}, retrying = false) {
 
 async function request(path, init = {}, retrying = false) {
   if (retrying) return requestOnce(path, init, true);
-
   const key = mutationRequestKey(path, init);
   if (!key) return requestOnce(path, init, false);
-
   const existing = mutationRegistry.get(key);
   if (existing) return existing;
-
   const pending = requestOnce(path, init, false);
   mutationRegistry.set(key, pending);
-  try {
-    return await pending;
-  } finally {
-    mutationRegistry.clear(key, pending);
-  }
+  try { return await pending; }
+  finally { mutationRegistry.clear(key, pending); }
 }
 
 async function blobRequest(path, retrying = false) {
-  const headers = {};
-  const token = getToken();
-  if (token) headers.Authorization = `Bearer ${token}`;
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-  const res = await fetch(`${API_BASE}${normalizedPath}`, { cache: 'no-store', headers });
+  const res = await fetch(`${API_BASE}${normalizedPath}`, { cache: 'no-store', credentials: 'same-origin' });
   if (res.status === 401 && !retrying) {
-    const refresh = getRefreshToken();
-    if (refresh) {
-      const refreshed = await request('/auth/refresh', { method: 'POST', body: JSON.stringify({ refresh_token: refresh }) }, true);
-      if (refreshed?.access_token) setToken(refreshed.access_token);
-      if (refreshed?.refresh_token) setRefreshToken(refreshed.refresh_token);
-      return blobRequest(path, true);
-    }
+    await refreshBrowserSession();
+    return blobRequest(path, true);
   }
   if (!res.ok) {
     let data = null;
@@ -135,7 +110,7 @@ async function payloadWithManagerApproval(payload, { approvalType, entityType, e
   return { ...next, approval_grant_uuid: grant.approval_uuid };
 }
 
-export { API_BASE, getToken, getRefreshToken, setToken, setRefreshToken, clearToken, clearRefreshToken, request };
+export { API_BASE, request };
 
 export const bootstrap = () => request('/auth/bootstrap', { method: 'POST' });
 export const login = (payload) => request('/auth/login', { method: 'POST', body: JSON.stringify(payload) });
@@ -227,8 +202,8 @@ export const fetchTableLayout = () => request('/system-settings/table-layout');
 export const updateTableLayout = (payload) => request('/system-settings/table-layout', { method: 'PUT', body: JSON.stringify(payload) });
 export const seedDefaults = () => request('/seed/defaults', { method: 'POST' });
 
-export const refreshSession = (payload) => request('/auth/refresh', { method: 'POST', body: JSON.stringify(payload) });
-export const logoutSession = (payload) => request('/auth/logout', { method: 'POST', body: JSON.stringify(payload) });
+export const refreshSession = () => request('/auth/refresh', { method: 'POST' });
+export const logoutSession = () => request('/auth/logout', { method: 'POST' });
 
 export const fetchRoomCharges = (params = {}) => request(`/room-charges${qs(params)}`);
 export const fetchRoomCharge = (id) => request(`/room-charges/${id}`);
@@ -249,7 +224,7 @@ export const approveApproval = (id, payload = {}) => request(`/approvals/${id}/a
 export const rejectApproval = (id, payload = {}) => request(`/approvals/${id}/reject`, { method: 'POST', body: JSON.stringify(payload) });
 
 export async function fetchCustomerDisplaySnapshot(channel = 'main') {
-  const res = await fetch(`${API_BASE}/customer-display/${encodeURIComponent(channel)}`, { cache: 'no-store' });
+  const res = await fetch(`${API_BASE}/customer-display/${encodeURIComponent(channel)}`, { cache: 'no-store', credentials: 'same-origin' });
   if (!res.ok) throw new Error('Customer display server is unavailable.');
   return res.json();
 }
