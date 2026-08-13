@@ -29,6 +29,9 @@ install_accounting_review_transport(sync_service)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Fail closed before migrations, seeders, integration initialization, or any
+    # other startup work can run in production/staging.
+    settings.validate_runtime_security()
     init_rate_limiter()
     ensure_database_ready(engine)
     with SessionLocal() as db:
