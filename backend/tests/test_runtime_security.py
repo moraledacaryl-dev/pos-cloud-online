@@ -16,9 +16,14 @@ def make_settings(**overrides):
 
 
 def test_safe_defaults_disable_bootstrap_and_do_not_ship_signing_secret():
-    settings = Settings(_env_file=None)
-    assert settings.secret_key == ''
-    assert settings.allow_default_admin_bootstrap is False
+    assert Settings.model_fields['secret_key'].default == ''
+    assert Settings.model_fields['allow_default_admin_bootstrap'].default is False
+    settings = Settings(
+        _env_file=None,
+        environment='development',
+        secret_key='',
+        allow_default_admin_bootstrap=False,
+    )
     assert settings.bootstrap_enabled is False
 
 
@@ -80,6 +85,6 @@ def test_enabled_integrations_require_credentials():
 
 
 def test_development_security_warnings_do_not_fail_startup_validation():
-    settings = Settings(_env_file=None, environment='development')
+    settings = Settings(_env_file=None, environment='development', secret_key='')
     assert settings.security_warnings
     settings.validate_runtime_security()
