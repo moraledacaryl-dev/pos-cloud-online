@@ -3,6 +3,7 @@ import inspect
 
 import httpx
 import pytest
+from redis.exceptions import ConnectionError as RedisConnectionError
 
 from app.api import kitchen
 from app.main import app
@@ -12,6 +13,7 @@ from app.services.kds_stream_security import (
     active_stream_metrics,
     clear_test_stream_tickets,
     consume_stream_ticket,
+    get_stream_ticket_store_status,
     issue_stream_ticket,
     release_stream_slot,
 )
@@ -106,3 +108,20 @@ def test_legacy_access_token_query_parameter_no_longer_authenticates_stream():
         assert any(error.get('loc', [])[-1:] == ['ticket'] for error in body.get('detail', []))
 
     asyncio.run(scenario())
+
+
+def test_ticket_store_readiness_does_not_infer_redis_from_memory_rate_limit(monkeypatch):
+    class UnreachableRedis:
+        def ping(self):
+            raise RedisConnectionError('unreachable')
+
+    monkeypatch.setattr('app.services.kds_stream_security.settings.environment', 'production')
+    monkeypatch.setattr('app.services.kds_stream_security._redis_client', lambda: UnreachableRedis())
+    status = get_stream_ticket_store_status()
+    assert status == {'backend': 'redis', 'required': True, 'connected': False}
+
+
+def test_development_ticket_store_reports_memory_without_claiming_redis(monkeypatch):
+    monkeypatch.setattr('app.services.kds_stream_security.settings.environment', 'development')
+    status = get_stream_ticket_store_status()
+    assert status == {'backend': 'memory', 'required': False, 'connected': True}
