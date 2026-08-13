@@ -6,6 +6,8 @@ from sqlalchemy.orm import sessionmaker
 from app.db.database import Base
 from app.models.entities import CatalogItem, ManagerApproval, Outlet, Register, RoomChargePosting, SyncOutboxEvent, User
 from app.schemas.common import CashMovementCreate, CatalogItemUpdate, InHouseBookingSnapshotCreate, OrderCreate, OrderPayPayload, OrderPaymentCreate, RefundCreate, RegisterSessionClose, RegisterSessionOpen, RegisterSessionReopen, RoomChargePostingStatusUpdate
+from app.services.approval_guard import consume_protected_approval, protected_payload
+from app.services.approval_service import authorize_approval_with_credentials
 from app.services.auth_service import hash_password
 from app.services.pos_service import close_register_session, create_cash_movement, create_in_house_booking_snapshot, create_order, create_refund, list_room_charge_postings, open_register_session, pay_order, reopen_register_session, update_catalog_item, update_room_charge_posting_status, save_setting_json
 from app.services.sync_service import sync_catalog_from_accounting
@@ -101,6 +103,22 @@ def seed(db):
     return manager, cashier, register, item
 
 
+def _authorize(db, requester, payload, *, approval_type, entity_type, entity_id, reason):
+    grant = authorize_approval_with_credentials(
+        db,
+        requester=requester,
+        manager_username='manager',
+        manager_password='secret123',
+        approval_type=approval_type,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        requested_reason=reason,
+        protected_payload=protected_payload(payload),
+    )
+    payload.approval_grant_uuid = grant['approval_uuid']
+    return grant
+
+
 def test_partial_refund_on_split_tender_allocates_back_to_original_tenders():
     db = make_session()
     manager, _cashier, register, item = seed(db)
@@ -117,9 +135,19 @@ def test_manager_override_records_discount_and_reopen_approval_rows():
     db = make_session()
     manager, cashier, register, item = seed(db)
     session = open_register_session(db, RegisterSessionOpen(register_id=register.id, business_date='2026-04-20', shift_name='AM', opening_float=200), user_id=cashier.id)
-    create_order(db, OrderCreate(register_session_id=session['id'], approved_by_user_id=manager.id, lines=[{'catalog_item_id': item.id, 'quantity': 1, 'unit_price': 100, 'discount_amount': 20}]), user_id=cashier.id)
+
+    order_payload = OrderCreate(register_session_id=session['id'], lines=[{'catalog_item_id': item.id, 'quantity': 1, 'unit_price': 100, 'discount_amount': 20}])
+    _authorize(db, cashier, order_payload, approval_type='discount', entity_type='order', entity_id=None, reason='Discounted order creation')
+    with consume_protected_approval(db, requester=cashier, payload=order_payload, approval_type='discount', entity_type='order', entity_id=None, requested_reason='Discounted order creation'):
+        create_order(db, order_payload, user_id=cashier.id)
+
     close_register_session(db, session['id'], RegisterSessionClose(closing_actual_cash=200, sign_off_name='Closer', sign_off_role='Cashier'))
-    reopen_register_session(db, session['id'], RegisterSessionReopen(reason='Wrong close', approved_by_user_id=manager.id, note='Need another sale'), user_id=cashier.id, approved_by_user_id=manager.id)
+
+    reopen_payload = RegisterSessionReopen(reason='Wrong close', note='Need another sale')
+    _authorize(db, cashier, reopen_payload, approval_type='reopen_session', entity_type='register_session', entity_id=session['id'], reason='Wrong close')
+    with consume_protected_approval(db, requester=cashier, payload=reopen_payload, approval_type='reopen_session', entity_type='register_session', entity_id=session['id'], requested_reason='Wrong close') as grant:
+        reopen_register_session(db, session['id'], reopen_payload, user_id=cashier.id, approved_by_user_id=grant['approved_by_user_id'])
+
     approval_types = {row.approval_type for row in db.query(ManagerApproval).all()}
     assert 'discount' in approval_types
     assert 'reopen_session' in approval_types
