@@ -110,6 +110,31 @@ async function blobRequest(path, retrying = false) {
   return res.blob();
 }
 
+async function payloadWithManagerApproval(payload, { approvalType, entityType, entityId = null, reason = null }) {
+  const next = { ...(payload || {}) };
+  const credentials = next.approved_by_user_id;
+  delete next.approved_by_user_id;
+  if (credentials == null) return next;
+  if (typeof credentials !== 'object' || !credentials.manager_username || !credentials.manager_password) {
+    throw new Error('Manager approval must be authenticated. A manager user ID is not an approval.');
+  }
+  const protectedPayload = { ...next };
+  delete protectedPayload.approval_grant_uuid;
+  const grant = await request('/approvals/authorize', {
+    method: 'POST',
+    body: JSON.stringify({
+      manager_username: credentials.manager_username,
+      manager_password: credentials.manager_password,
+      approval_type: approvalType,
+      entity_type: entityType,
+      entity_id: entityId,
+      requested_reason: reason,
+      protected_payload: protectedPayload,
+    }),
+  });
+  return { ...next, approval_grant_uuid: grant.approval_uuid };
+}
+
 export { API_BASE, getToken, getRefreshToken, setToken, setRefreshToken, clearToken, clearRefreshToken, request };
 
 export const bootstrap = () => request('/auth/bootstrap', { method: 'POST' });
@@ -148,23 +173,42 @@ export const fetchRegisterSessions = (params = {}) => request(`/register-session
 export const fetchRegisterSession = (id) => request(`/register-sessions/${id}`);
 export const openRegisterSession = (payload) => request('/register-sessions/open', { method: 'POST', body: JSON.stringify(payload) });
 export const closeRegisterSession = (id, payload) => request(`/register-sessions/${id}/close`, { method: 'POST', body: JSON.stringify(payload) });
-export const reopenRegisterSession = (id, payload) => request(`/register-sessions/${id}/reopen`, { method: 'POST', body: JSON.stringify(payload) });
+export const reopenRegisterSession = async (id, payload) => {
+  const secured = await payloadWithManagerApproval(payload, { approvalType: 'reopen_session', entityType: 'register_session', entityId: id, reason: payload?.reason });
+  return request(`/register-sessions/${id}/reopen`, { method: 'POST', body: JSON.stringify(secured) });
+};
 
 export const fetchOrders = (params = {}) => request(`/orders${qs(params)}`);
 export const fetchOrder = (id) => request(`/orders/${id}`);
-export const createOrder = (payload) => request('/orders', { method: 'POST', body: JSON.stringify(payload) });
-export const updateOrder = (id, payload) => request(`/orders/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+export const createOrder = async (payload) => {
+  const secured = await payloadWithManagerApproval(payload, { approvalType: 'discount', entityType: 'order', entityId: null, reason: 'Discounted order creation' });
+  return request('/orders', { method: 'POST', body: JSON.stringify(secured) });
+};
+export const updateOrder = async (id, payload) => {
+  const secured = await payloadWithManagerApproval(payload, { approvalType: 'discount', entityType: 'order', entityId: id, reason: 'Discounted order update' });
+  return request(`/orders/${id}`, { method: 'PUT', body: JSON.stringify(secured) });
+};
 export const holdOrder = (id) => request(`/orders/${id}/hold`, { method: 'POST' });
 export const resumeOrder = (id) => request(`/orders/${id}/resume`, { method: 'POST' });
 export const transferOrderTable = (id, target) => request(`/orders/${id}/transfer-table`, { method: 'POST', body: JSON.stringify(typeof target === 'object' ? target : { target_table_label: target }) });
 export const mergeOrderTable = (id, target) => request(`/orders/${id}/merge-table`, { method: 'POST', body: JSON.stringify(typeof target === 'object' ? target : { target_table_label: target }) });
 export const payOrder = (id, payload) => request(`/orders/${id}/pay`, { method: 'POST', body: JSON.stringify(payload) });
-export const voidOrder = (id, payload) => request(`/orders/${id}/void`, { method: 'POST', body: JSON.stringify(payload) });
+export const voidOrder = async (id, payload) => {
+  const secured = await payloadWithManagerApproval(payload, { approvalType: 'void', entityType: 'order', entityId: id, reason: payload?.reason });
+  return request(`/orders/${id}/void`, { method: 'POST', body: JSON.stringify(secured) });
+};
 export const fetchRefunds = (id) => request(`/orders/${id}/refunds`);
-export const createRefund = (id, payload) => request(`/orders/${id}/refunds`, { method: 'POST', body: JSON.stringify(payload) });
+export const createRefund = async (id, payload) => {
+  const secured = await payloadWithManagerApproval(payload, { approvalType: 'refund', entityType: 'refund', entityId: id, reason: payload?.reason_text || payload?.reason_code || 'Refund' });
+  return request(`/orders/${id}/refunds`, { method: 'POST', body: JSON.stringify(secured) });
+};
 
 export const fetchCashMovements = (params = {}) => request(`/cash-movements${qs(params)}`);
-export const createCashMovement = (payload) => request('/cash-movements', { method: 'POST', body: JSON.stringify(payload) });
+export const createCashMovement = async (payload) => {
+  const movementType = String(payload?.movement_type || '').trim().toLowerCase();
+  const secured = await payloadWithManagerApproval(payload, { approvalType: movementType === 'paid_out' ? 'cash_paid_out' : 'cash_adjustment', entityType: 'cash_movement', entityId: null, reason: payload?.note || payload?.category || movementType });
+  return request('/cash-movements', { method: 'POST', body: JSON.stringify(secured) });
+};
 
 export const fetchKitchenTickets = (params = {}) => request(`/kitchen/tickets${qs(params, true)}`);
 export const updateKitchenLineStatus = (id, payload) => request(`/kitchen/lines/${id}/status`, { method: 'POST', body: JSON.stringify(payload) });
@@ -188,7 +232,12 @@ export const logoutSession = (payload) => request('/auth/logout', { method: 'POS
 
 export const fetchRoomCharges = (params = {}) => request(`/room-charges${qs(params)}`);
 export const fetchRoomCharge = (id) => request(`/room-charges/${id}`);
-export const updateRoomChargeStatus = (id, payload) => request(`/room-charges/${id}/status`, { method: 'POST', body: JSON.stringify(payload) });
+export const updateRoomChargeStatus = async (id, payload) => {
+  const target = String(payload?.posting_status || '').trim().toLowerCase().replaceAll(' ', '_');
+  const approvalType = target === 'disputed' ? 'room_charge_dispute' : 'room_charge_write_off';
+  const secured = await payloadWithManagerApproval(payload, { approvalType, entityType: 'room_charge', entityId: id, reason: payload?.dispute_note || payload?.note || target });
+  return request(`/room-charges/${id}/status`, { method: 'POST', body: JSON.stringify(secured) });
+};
 export const fetchInHouseBookings = (params = {}) => request(`/room-charges/in-house-bookings${qs(params)}`);
 export const createInHouseBooking = (payload) => request('/room-charges/in-house-bookings', { method: 'POST', body: JSON.stringify(payload) });
 export const updateInHouseBooking = (id, payload) => request(`/room-charges/in-house-bookings/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
