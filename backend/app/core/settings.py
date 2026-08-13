@@ -57,6 +57,9 @@ class Settings(BaseSettings):
     rate_limit_backend: str = 'redis'
     rate_limit_redis_prefix: str = 'dedicated-pos:ratelimit'
     redis_url: str = 'redis://redis:6379/0'
+    kds_stream_ticket_ttl_seconds: int = 30
+    kds_stream_max_per_user: int = 4
+    kds_stream_max_lifetime_seconds: int = 900
     startup_require_migrations: bool = True
     sync_worker_poll_seconds: int = 30
     sync_worker_batch_size: int = 25
