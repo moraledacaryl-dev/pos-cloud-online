@@ -86,6 +86,34 @@ def test_unconfigured_accounting_does_not_create_reachability_reason():
     assert 'accounting_unreachable' not in result['reasons']
 
 
+def test_required_kds_ticket_store_outage_degrades_integrations_not_sales():
+    result = evaluate_operational_readiness(
+        database_ok=True,
+        migrations_ok=True,
+        security_ok=True,
+        worker_stale=False,
+        kds_ticket_store_required=True,
+        kds_ticket_store_reachable=False,
+    )
+    assert result['ok'] is False
+    assert result['sales_ready'] is True
+    assert result['integrations_ready'] is False
+    assert result['status'] == 'degraded'
+    assert 'kds_ticket_store_unavailable' in result['integration_reasons']
+
+
+def test_optional_memory_kds_store_does_not_claim_redis_dependency():
+    result = evaluate_operational_readiness(
+        database_ok=True,
+        migrations_ok=True,
+        security_ok=True,
+        worker_stale=False,
+        kds_ticket_store_required=False,
+        kds_ticket_store_reachable=False,
+    )
+    assert 'kds_ticket_store_unavailable' not in result['reasons']
+
+
 def test_database_or_migration_failure_makes_sales_unready():
     database_failure = evaluate_operational_readiness(
         database_ok=False,
