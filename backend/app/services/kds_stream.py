@@ -4,6 +4,7 @@ import asyncio
 import json
 import time
 from collections import defaultdict
+from collections.abc import Awaitable, Callable
 from typing import AsyncIterator
 
 
@@ -23,7 +24,7 @@ class _Broadcaster:
             listeners = self._listeners.get(channel)
             if listeners and queue in listeners:
                 listeners.remove(queue)
-            if listeners and not listeners:
+            if listeners is not None and not listeners:
                 self._listeners.pop(channel, None)
 
     async def publish(self, channel: str, payload: dict):
@@ -42,6 +43,10 @@ class _Broadcaster:
                         listeners.discard(queue)
                     if not listeners:
                         self._listeners.pop(channel_name, None)
+
+    async def listener_count(self) -> int:
+        async with self._lock:
+            return sum(len(rows) for rows in self._listeners.values())
 
 
 _broadcaster = _Broadcaster()
@@ -62,15 +67,33 @@ async def publish_kds_event(event: str, payload: dict | None = None, *, stations
         await _broadcaster.publish(station, message)
 
 
-async def stream_kds_events(channel: str | None = None, keepalive_seconds: int = 20) -> AsyncIterator[str]:
+async def stream_kds_events(
+    channel: str | None = None,
+    keepalive_seconds: int = 20,
+    *,
+    disconnect_check: Callable[[], Awaitable[bool]] | None = None,
+    max_lifetime_seconds: int = 900,
+) -> AsyncIterator[str]:
     queue = await _broadcaster.subscribe(channel or '*')
+    started = time.monotonic()
     try:
         yield sse_frame({'ok': True, 'channel': channel or '*'}, event='hello')
         while True:
+            if disconnect_check and await disconnect_check():
+                break
+            if max_lifetime_seconds > 0 and (time.monotonic() - started) >= max_lifetime_seconds:
+                yield sse_frame({'reason': 'reconnect'}, event='stream_expiring')
+                break
             try:
                 item = await asyncio.wait_for(queue.get(), timeout=keepalive_seconds)
                 yield sse_frame(item.get('payload') or {}, event=item.get('event') or 'message')
             except asyncio.TimeoutError:
                 yield ': keepalive\n\n'
+    except asyncio.CancelledError:
+        raise
     finally:
         await _broadcaster.unsubscribe(channel or '*', queue)
+
+
+async def broadcaster_metrics() -> dict:
+    return {'listeners': await _broadcaster.listener_count()}
