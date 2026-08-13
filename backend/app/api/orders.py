@@ -5,6 +5,7 @@ from app.api.deps import require_permissions
 from app.db.database import get_db
 from app.models.entities import PosOrder
 from app.schemas.common import OrderCreate, OrderPayPayload, OrderTableMergePayload, OrderTableTransferPayload, OrderUpdate, OrderVoidPayload, RefundCreate
+from app.services.approval_guard import consume_protected_approval, reject_legacy_client_approver
 from app.services.inventory_integration import enqueue_inventory_event, should_reverse_inventory_for_refund, should_reverse_inventory_for_void
 from app.services.operations_integration import publish_operations_event
 from app.services.order_state_policy import assert_order_action, policy_snapshot
@@ -20,6 +21,10 @@ def _assert_order_action(db: Session, order_id: int, action: str) -> PosOrder:
         raise ValueError('Order not found.')
     assert_order_action(row.status, action)
     return row
+
+
+def _has_discount(payload) -> bool:
+    return any(float(getattr(line, 'discount_amount', 0) or 0) > 0.009 for line in (getattr(payload, 'lines', None) or []))
 
 
 @router.get('/state-policy')
@@ -43,6 +48,18 @@ def order_detail(order_id: int, db: Session = Depends(get_db), user=Depends(requ
 @router.post('/')
 def add_order(payload: OrderCreate, db: Session = Depends(get_db), current_user=Depends(require_permissions('orders.manage'))):
     try:
+        reject_legacy_client_approver(payload)
+        if _has_discount(payload):
+            with consume_protected_approval(
+                db,
+                requester=current_user,
+                payload=payload,
+                approval_type='discount',
+                entity_type='order',
+                entity_id=None,
+                requested_reason='Discounted order creation',
+            ):
+                return create_order(db, payload, user_id=getattr(current_user, 'id', None))
         return create_order(db, payload, user_id=getattr(current_user, 'id', None))
     except ValueError as e:
         db.rollback()
@@ -52,7 +69,19 @@ def add_order(payload: OrderCreate, db: Session = Depends(get_db), current_user=
 @router.put('/{order_id}')
 def edit_order(order_id: int, payload: OrderUpdate, db: Session = Depends(get_db), user=Depends(require_permissions('orders.manage'))):
     try:
+        reject_legacy_client_approver(payload)
         _assert_order_action(db, order_id, 'edit')
+        if _has_discount(payload):
+            with consume_protected_approval(
+                db,
+                requester=user,
+                payload=payload,
+                approval_type='discount',
+                entity_type='order',
+                entity_id=order_id,
+                requested_reason='Discounted order update',
+            ):
+                return update_order(db, order_id, payload, user_id=getattr(user, 'id', None))
         return update_order(db, order_id, payload, user_id=getattr(user, 'id', None))
     except ValueError as e:
         db.rollback()
@@ -129,7 +158,16 @@ def cancel_order(order_id: int, payload: OrderVoidPayload, background_tasks: Bac
     try:
         _assert_order_action(db, order_id, 'void')
         pre_void = get_order(db, order_id)
-        result = void_order(db, order_id, payload.reason, user_id=getattr(current_user, 'id', None), approved_by_user_id=payload.approved_by_user_id)
+        with consume_protected_approval(
+            db,
+            requester=current_user,
+            payload=payload,
+            approval_type='void',
+            entity_type='order',
+            entity_id=order_id,
+            requested_reason=payload.reason,
+        ) as grant:
+            result = void_order(db, order_id, payload.reason, user_id=getattr(current_user, 'id', None), approved_by_user_id=grant['approved_by_user_id'])
         if should_reverse_inventory_for_void(pre_void):
             enqueue_inventory_event(db, result, 'sale_voided')
         background_tasks.add_task(
@@ -162,7 +200,16 @@ def order_refunds(order_id: int, db: Session = Depends(get_db), user=Depends(req
 def refund_order(order_id: int, payload: RefundCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user=Depends(require_permissions('orders.manage'))):
     try:
         _assert_order_action(db, order_id, 'refund')
-        result = create_refund(db, order_id, payload, cashier_user_id=getattr(current_user, 'id', None))
+        with consume_protected_approval(
+            db,
+            requester=current_user,
+            payload=payload,
+            approval_type='refund',
+            entity_type='refund',
+            entity_id=order_id,
+            requested_reason=payload.reason_text or payload.reason_code or 'Refund',
+        ):
+            result = create_refund(db, order_id, payload, cashier_user_id=getattr(current_user, 'id', None))
         order_after_refund = get_order(db, order_id)
         if should_reverse_inventory_for_refund(order_after_refund):
             enqueue_inventory_event(db, order_after_refund, 'sale_refunded')
