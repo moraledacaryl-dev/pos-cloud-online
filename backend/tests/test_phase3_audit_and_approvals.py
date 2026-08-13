@@ -3,8 +3,9 @@ from sqlalchemy.orm import sessionmaker
 
 from app.db.database import Base
 from app.models.entities import AuditLog, ManagerApproval, Outlet, Register, User, CatalogItem, RoomChargePosting
-from app.schemas.common import CashMovementCreate, InHouseBookingSnapshotCreate, OrderCreate, OrderPayPayload, OrderPaymentCreate, RegisterSessionOpen, RoomChargePostingStatusUpdate
-from app.services.approval_service import list_manager_approvals
+from app.schemas.common import CashMovementCreate, InHouseBookingSnapshotCreate, OrderCreate, OrderPayPayload, OrderPaymentCreate, OrderVoidPayload, RegisterSessionOpen, RoomChargePostingStatusUpdate
+from app.services.approval_guard import consume_protected_approval, protected_payload
+from app.services.approval_service import authorize_approval_with_credentials, list_manager_approvals
 from app.services.audit_service import list_audit_logs
 from app.services.auth_service import hash_password
 from app.services.pos_service import create_cash_movement, create_in_house_booking_snapshot, create_order, open_register_session, pay_order, update_room_charge_posting_status, void_order
@@ -29,14 +30,45 @@ def seed(db):
     return manager, cashier, register, item
 
 
+def _authorize(db, requester, payload, *, approval_type, entity_type, entity_id, reason):
+    grant = authorize_approval_with_credentials(
+        db,
+        requester=requester,
+        manager_username='manager',
+        manager_password='secret123',
+        approval_type=approval_type,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        requested_reason=reason,
+        protected_payload=protected_payload(payload),
+    )
+    payload.approval_grant_uuid = grant['approval_uuid']
+    return grant
+
+
 def test_phase3_creates_discount_void_and_cash_approval_rows():
     db = make_session()
     manager, cashier, register, item = seed(db)
     session = open_register_session(db, RegisterSessionOpen(register_id=register.id, business_date='2026-04-20', shift_name='AM', opening_float=0), user_id=manager.id)
-    order = create_order(db, OrderCreate(register_session_id=session['id'], approved_by_user_id=manager.id, guest_name='Guest', lines=[{'catalog_item_id': item.id, 'quantity': 1, 'unit_price': 100, 'discount_amount': 20}]), user_id=cashier.id)
+
+    order_payload = OrderCreate(register_session_id=session['id'], guest_name='Guest', lines=[{'catalog_item_id': item.id, 'quantity': 1, 'unit_price': 100, 'discount_amount': 20}])
+    _authorize(db, cashier, order_payload, approval_type='discount', entity_type='order', entity_id=None, reason='Discounted order creation')
+    with consume_protected_approval(db, requester=cashier, payload=order_payload, approval_type='discount', entity_type='order', entity_id=None, requested_reason='Discounted order creation'):
+        order = create_order(db, order_payload, user_id=cashier.id)
+
     pay_order(db, order['id'], OrderPayPayload(payments=[OrderPaymentCreate(tender_type='cash', amount_applied=80, amount_received=100)]), user_id=cashier.id)
-    void_order(db, order['id'], 'Mistake', user_id=cashier.id, approved_by_user_id=manager.id)
-    create_cash_movement(db, CashMovementCreate(register_session_id=session['id'], direction='out', movement_type='paid_out', category='Taxi', amount=50, note='Taxi', approved_by_user_id=manager.id), approved_by_user_id=manager.id)
+
+    void_payload = OrderVoidPayload(reason='Mistake')
+    _authorize(db, cashier, void_payload, approval_type='void', entity_type='order', entity_id=order['id'], reason='Mistake')
+    with consume_protected_approval(db, requester=cashier, payload=void_payload, approval_type='void', entity_type='order', entity_id=order['id'], requested_reason='Mistake') as grant:
+        void_order(db, order['id'], 'Mistake', user_id=cashier.id, approved_by_user_id=grant['approved_by_user_id'])
+
+    cash_payload = CashMovementCreate(register_session_id=session['id'], direction='out', movement_type='paid_out', category='Taxi', amount=50, note='Taxi')
+    _authorize(db, cashier, cash_payload, approval_type='cash_paid_out', entity_type='cash_movement', entity_id=None, reason='Taxi')
+    with consume_protected_approval(db, requester=cashier, payload=cash_payload, approval_type='cash_paid_out', entity_type='cash_movement', entity_id=None, requested_reason='Taxi') as grant:
+        cash_payload.requires_approval = True
+        create_cash_movement(db, cash_payload, approved_by_user_id=grant['approved_by_user_id'])
+
     approval_types = {row['approval_type'] for row in list_manager_approvals(db, limit=50)}
     actions = {row['action'] for row in list_audit_logs(db, limit=100)}
     assert 'discount' in approval_types
