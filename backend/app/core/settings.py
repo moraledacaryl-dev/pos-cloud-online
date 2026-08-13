@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     secret_key: str = 'change-me-super-secret'
     access_token_expire_minutes: int = 60
     refresh_token_expire_days: int = 14
-    allow_default_admin_bootstrap: bool = True
+    allow_default_admin_bootstrap: bool = False
     cors_origins: str = 'http://localhost:3001,http://127.0.0.1:3001'
     http_timeout_seconds: int = 20
     health_timeout_seconds: int = 5
@@ -95,7 +95,7 @@ class Settings(BaseSettings):
     def bootstrap_enabled(self) -> bool:
         if not self.allow_default_admin_bootstrap:
             return False
-        return self.environment.strip().lower() != 'production'
+        return self.environment.strip().lower() == 'development'
 
     @property
     def is_production(self) -> bool:
@@ -116,8 +116,8 @@ class Settings(BaseSettings):
             warnings.append('OPERATIONS_INTEGRATION_KEY is unset or still using a placeholder value.')
         if self.staff_integration_enabled and looks_like_placeholder_secret(self.staff_integration_key):
             warnings.append('STAFF_INTEGRATION_KEY is unset or still using a placeholder value.')
-        if self.is_production and self.bootstrap_enabled:
-            warnings.append('Default admin bootstrap must be disabled in production.')
+        if self.environment.strip().lower() in {'production', 'staging'} and self.allow_default_admin_bootstrap:
+            warnings.append('Default admin bootstrap must be disabled in production and staging.')
         return warnings
 
 
