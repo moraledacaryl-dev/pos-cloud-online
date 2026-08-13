@@ -12,6 +12,7 @@ from app.core.migrations import migration_status
 from app.core.rate_limit import get_rate_limit_status
 from app.core.settings import settings
 from app.models.entities import SyncOutboxEvent
+from app.services.kds_stream_security import get_stream_ticket_store_status
 from app.services.pos_service import setting_json
 from app.services.reliability_policy import evaluate_operational_readiness
 from app.services.sync_service import get_sync_config
@@ -156,6 +157,7 @@ async def build_health_report(db: Session, engine: Engine) -> dict:
     sync_worker = get_sync_worker_status(db)
     outbox = get_outbox_metrics(db)
     rate_limit = get_rate_limit_status()
+    ticket_store = get_stream_ticket_store_status()
     security = get_security_readiness()
 
     readiness = evaluate_operational_readiness(
@@ -167,6 +169,8 @@ async def build_health_report(db: Session, engine: Engine) -> dict:
         blocked_events=int(outbox.get('blocked', 0)),
         accounting_configured=bool(accounting_api.get('configured')),
         accounting_reachable=bool(accounting_api.get('reachable', False)),
+        kds_ticket_store_required=bool(ticket_store.get('required')),
+        kds_ticket_store_reachable=bool(ticket_store.get('connected')),
     )
 
     return {
@@ -179,11 +183,12 @@ async def build_health_report(db: Session, engine: Engine) -> dict:
         'database': database,
         'security': security,
         'rate_limit': rate_limit,
+        'kds_stream_ticket_store': ticket_store,
         'accounting_api': accounting_api,
         'sync_worker': sync_worker,
         'outbox': outbox,
         'integration_reachability': {
             'accounting_api': accounting_api.get('reachable', False),
-            'redis': rate_limit.get('connected', False),
+            'redis': ticket_store.get('connected', False) if ticket_store.get('required') else None,
         },
     }

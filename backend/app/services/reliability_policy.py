@@ -11,13 +11,16 @@ def evaluate_operational_readiness(
     blocked_events: int = 0,
     accounting_configured: bool = False,
     accounting_reachable: bool = True,
+    kds_ticket_store_required: bool = False,
+    kds_ticket_store_reachable: bool = True,
 ) -> dict:
-    """Separate core POS sales readiness from downstream integration health.
+    """Separate core POS sales readiness from downstream/operational dependencies.
 
-    A temporary Accounting/Inventory integration outage must not stop cashiers
-    from selling, but it must be visible as degraded health to operations and
-    monitoring. Core readiness therefore covers database/schema/security only,
-    while integration readiness covers the worker and unresolved outbox state.
+    A temporary Accounting/Inventory/KDS realtime dependency outage must not stop
+    cashiers from recording local sales, but it must be visible as degraded health
+    to operations and monitoring. Core readiness therefore covers database/schema/
+    security, while integration readiness covers worker/outbox/downstream and KDS
+    realtime dependencies.
     """
 
     core_reasons: list[str] = []
@@ -38,6 +41,8 @@ def evaluate_operational_readiness(
         integration_reasons.append('outbox_blocked_events')
     if accounting_configured and not accounting_reachable:
         integration_reasons.append('accounting_unreachable')
+    if kds_ticket_store_required and not kds_ticket_store_reachable:
+        integration_reasons.append('kds_ticket_store_unavailable')
 
     sales_ready = not core_reasons
     integrations_ready = not integration_reasons
