@@ -70,7 +70,10 @@ def _grant_meta(row: ManagerApproval) -> dict:
 
 def _has_grant_columns(db: Session) -> bool:
     try:
-        columns = {column['name'] for column in inspect(db.get_bind()).get_columns('manager_approvals')}
+        # Inspect through the Session's enlisted connection. Inspecting the Engine
+        # directly can check out/return the same SQLite connection and roll back an
+        # in-flight grant row during tests.
+        columns = {column['name'] for column in inspect(db.connection()).get_columns('manager_approvals')}
         return {'payload_digest', 'expires_at_text', 'consumed_at_text'} <= columns
     except Exception:
         return False
@@ -138,6 +141,15 @@ def _serialize(row: ManagerApproval, db: Session | None = None) -> dict:
         'requested_at': row.requested_at_text,
         'decided_at': row.decided_at_text,
     }
+
+
+def _legacy_approval_record(grant: dict) -> dict:
+    """Present a consumed secure grant as a recorded approval to legacy POS audit code.
+
+    The database row remains consumed.  This view exists only because historical
+    `_record_approval` callers use status='approved' as their success sentinel.
+    """
+    return {**grant, 'grant_status': grant.get('status'), 'status': 'approved'}
 
 
 def _load_row(db: Session, *, approval_id: int | None = None, approval_uuid: str | None = None, for_update: bool = False) -> ManagerApproval | None:
@@ -375,16 +387,16 @@ def create_manager_approval(
 ):
     """Compatibility bridge for existing POS service calls.
 
-    Protected HTTP routes consume a scoped grant first and set it in context.  The
+    Protected HTTP routes consume a scoped grant first and set it in context. The
     legacy POS service then calls this function while building its normal audit
-    trail; in that case we return the already-consumed grant instead of creating a
-    second approval.  Arbitrary client-supplied approver IDs are never sufficient.
+    trail; in that case we return an approved compatibility view of the already-
+    consumed grant. Arbitrary cross-user approver IDs are never sufficient.
     """
     active = active_consumed_grant()
     if active:
         if active.get('approval_type') != str(approval_type or '').strip().lower():
             raise ValueError('Consumed approval grant does not match this action.')
-        return active
+        return _legacy_approval_record(active)
 
     if requested_by_user_id and approved_by_user_id and int(requested_by_user_id) == int(approved_by_user_id):
         requester = db.get(User, int(requested_by_user_id))
@@ -411,7 +423,7 @@ def create_manager_approval(
             )
             if commit:
                 db.commit()
-            return consumed
+            return _legacy_approval_record(consumed)
 
     raise ValueError('A server-verified manager approval grant is required.')
 
