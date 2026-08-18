@@ -2,30 +2,32 @@
 
 import { useEffect } from 'react';
 import { usePathname } from 'next/navigation';
-import { clearRefreshToken, clearToken } from '../lib/api';
 import { useCurrentUser } from '../lib/useCurrentUser';
-import { defaultRouteForUser, routeCanAccess } from '../lib/routes';
+import { defaultRouteForUser, getRouteMeta, normalizeRoutePath, routeCanAccess } from '../lib/routes';
 
 export default function RouteGuard({ children }) {
   const pathname = usePathname();
+  const normalized = normalizeRoutePath(pathname);
   const { loaded, user } = useCurrentUser();
-  const isPublic = pathname === '/login' || pathname === '/customer-display';
+  const isLogin = normalized === '/login';
+  const isCustomerDisplay = normalized === '/customer-display';
+  const isPublic = isLogin || isCustomerDisplay;
+  const route = getRouteMeta(normalized);
+  const isKnownProtectedRoute = !!route && !isPublic;
 
   useEffect(() => {
     if (isPublic || !loaded || user) return;
-    clearToken();
-    clearRefreshToken();
-    const next = pathname && pathname !== '/' ? `?next=${encodeURIComponent(pathname)}` : '';
+    const next = normalized && normalized !== '/' ? `?next=${encodeURIComponent(normalized)}` : '';
     window.location.replace(`/login${next}`);
-  }, [isPublic, loaded, pathname, user]);
+  }, [isPublic, loaded, normalized, user]);
 
   useEffect(() => {
-    if (isPublic || !loaded || !user || routeCanAccess(user, pathname)) return;
+    if (!isLogin || !loaded || !user) return;
     const target = defaultRouteForUser(user);
-    if (target && target !== pathname) window.location.replace(target);
-  }, [isPublic, loaded, pathname, user]);
+    if (target && target !== '/login') window.location.replace(target);
+  }, [isLogin, loaded, user]);
 
-  if (!loaded && pathname !== '/login' && pathname !== '/customer-display') {
+  if (!loaded && !isPublic) {
     return (
       <section className="section">
         <h1>Loading Access</h1>
@@ -37,20 +39,31 @@ export default function RouteGuard({ children }) {
   if (!isPublic && loaded && !user) {
     return (
       <section className="section">
-        <h1>Opening Login</h1>
-        <p className="muted">Your POS session is not active.</p>
+        <h1>Authentication Required</h1>
+        <p className="muted">Your POS session is not active. Opening login...</p>
       </section>
     );
   }
 
-  if (pathname === '/login' || routeCanAccess(user, pathname)) {
-    return children;
+  if (isLogin && loaded && user) {
+    return (
+      <section className="section">
+        <h1>Opening Workspace</h1>
+        <p className="muted">Your session is already active.</p>
+      </section>
+    );
   }
 
+  // Unknown routes are deliberately passed through so Next.js can render its
+  // canonical not-found UI instead of misclassifying them as authorization failures.
+  if (!route && !isPublic) return children;
+
+  if (!isKnownProtectedRoute || routeCanAccess(user, normalized)) return children;
+
   return (
-    <section className="section">
+    <section className="section" role="alert" data-route-status="403">
       <h1>Access Restricted</h1>
-      <p className="muted">Your account does not have permission for this page. Opening your allowed workspace...</p>
+      <p className="muted">This page exists, but your account does not have permission to open it.</p>
     </section>
   );
 }
