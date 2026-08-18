@@ -8,7 +8,7 @@ from app.services.audit_service import list_audit_logs
 router = APIRouter()
 
 
-@router.get('/')
+@router.get('')
 def audit_logs(
     actor_user_id: int | None = None,
     action: str | None = None,
