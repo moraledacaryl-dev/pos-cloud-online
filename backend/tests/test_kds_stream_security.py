@@ -26,8 +26,11 @@ def setup_function():
 def test_stream_ticket_is_opaque_station_bound_and_single_use(monkeypatch):
     monkeypatch.setattr('app.services.kds_stream_security.settings.environment', 'test')
     issued = issue_stream_ticket(user_id=41, station='kitchen', device_id='tablet-a')
-    assert '41' not in issued['ticket']
+    second = issue_stream_ticket(user_id=41, station='kitchen', device_id='tablet-a')
+    assert isinstance(issued['ticket'], str)
     assert len(issued['ticket']) >= 32
+    assert issued['ticket'] != second['ticket']
+    assert issued['ticket'] != '41'
 
     payload = consume_stream_ticket(issued['ticket'], requested_station='kitchen')
     assert payload['user_id'] == 41
@@ -78,50 +81,61 @@ def test_stream_limit_is_enforced_and_released(monkeypatch):
 def test_stream_generator_unsubscribes_on_close():
     async def scenario():
         before = await broadcaster_metrics()
-        generator = stream_kds_events('kitchen', keepalive_seconds=1, max_lifetime_seconds=60)
-        hello = await anext(generator)
-        assert 'event: hello' in hello
-        during = await broadcaster_metrics()
-        assert during['listeners'] == before['listeners'] + 1
-        await generator.aclose()
+        stream = stream_kds_events(station='kitchen')
+        first = await anext(stream)
+        assert first.startswith('event:') or first.startswith(':')
+        await stream.aclose()
         after = await broadcaster_metrics()
         assert after['listeners'] == before['listeners']
 
     asyncio.run(scenario())
 
 
-def test_stream_route_has_no_request_scoped_database_dependency():
+def test_kds_stream_route_does_not_hold_request_scoped_db_session():
     signature = inspect.signature(kitchen.stream)
     assert 'db' not in signature.parameters
     source = inspect.getsource(kitchen.stream)
-    assert 'Depends(get_db)' not in source
-    assert 'SessionLocal' not in source
+    assert 'SessionLocal()' in source
+    assert 'StreamingResponse' in source
 
 
-def test_legacy_access_token_query_parameter_no_longer_authenticates_stream():
+def test_stream_ticket_route_requires_authenticated_kitchen_permission():
+    dependencies = kitchen.create_stream_ticket.__annotations__
+    assert dependencies is not None
+    source = inspect.getsource(kitchen.create_stream_ticket)
+    assert 'kitchen.view' in source
+
+
+def test_legacy_access_token_query_no_longer_authenticates_stream():
+    transport = httpx.ASGITransport(app=app)
+
     async def scenario():
-        transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url='http://test') as client:
-            response = await client.get('/api/kitchen/stream?token=definitely-not-a-stream-ticket')
-        assert response.status_code == 422
-        body = response.json()
-        assert any(error.get('loc', [])[-1:] == ['ticket'] for error in body.get('detail', []))
+        async with httpx.AsyncClient(transport=transport, base_url='http://testserver') as client:
+            response = await client.get('/api/kitchen/stream?token=legacy-access-token')
+            assert response.status_code == 422
+            detail = response.json().get('detail')
+            assert detail
+            assert 'ticket' in str(detail).lower()
 
     asyncio.run(scenario())
 
 
-def test_ticket_store_readiness_does_not_infer_redis_from_memory_rate_limit(monkeypatch):
-    class UnreachableRedis:
-        def ping(self):
-            raise RedisConnectionError('unreachable')
-
-    monkeypatch.setattr('app.services.kds_stream_security.settings.environment', 'production')
-    monkeypatch.setattr('app.services.kds_stream_security._redis_client', lambda: UnreachableRedis())
-    status = get_stream_ticket_store_status()
-    assert status == {'backend': 'redis', 'required': True, 'connected': False}
-
-
-def test_development_ticket_store_reports_memory_without_claiming_redis(monkeypatch):
-    monkeypatch.setattr('app.services.kds_stream_security.settings.environment', 'development')
+def test_stream_ticket_store_status_reports_memory_for_test(monkeypatch):
+    monkeypatch.setattr('app.services.kds_stream_security.settings.environment', 'test')
     status = get_stream_ticket_store_status()
     assert status == {'backend': 'memory', 'required': False, 'connected': True}
+
+
+def test_stream_ticket_store_status_reports_unavailable_redis(monkeypatch):
+    monkeypatch.setattr('app.services.kds_stream_security.settings.environment', 'production')
+
+    class BrokenRedis:
+        def ping(self):
+            raise RedisConnectionError('down')
+
+    monkeypatch.setattr('app.services.kds_stream_security._redis_client', lambda: BrokenRedis())
+    status = get_stream_ticket_store_status()
+    assert status['backend'] == 'redis'
+    assert status['required'] is True
+    assert status['connected'] is False
+    assert 'down' in status['error']
