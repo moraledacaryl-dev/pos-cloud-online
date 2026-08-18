@@ -7,6 +7,10 @@ from sqlalchemy.orm import Session, selectinload
 from app.models.entities import AuditLog
 
 
+AUDIT_PAGE_SIZE_DEFAULT = 50
+AUDIT_PAGE_SIZE_MAX = 100
+
+
 def _entity_links(entity_type: str | None, entity_id: str | None, details: dict | list | None = None) -> dict:
     details = details if isinstance(details, dict) else {}
     order_id = details.get('order_id') or (entity_id if entity_type in {'order', 'pos_order'} else None)
@@ -75,8 +79,23 @@ def _serialize(row: AuditLog) -> dict:
     }
 
 
-def list_audit_logs(db: Session, *, actor_user_id: int | None = None, action: str | None = None, entity_type: str | None = None, entity_id: str | None = None, date_from: str | None = None, date_to: str | None = None, q: str | None = None, limit: int = 200):
+def list_audit_logs(
+    db: Session,
+    *,
+    actor_user_id: int | None = None,
+    action: str | None = None,
+    entity_type: str | None = None,
+    entity_id: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    q: str | None = None,
+    limit: int = AUDIT_PAGE_SIZE_DEFAULT,
+    before_id: int | None = None,
+):
+    page_size = max(1, min(int(limit or AUDIT_PAGE_SIZE_DEFAULT), AUDIT_PAGE_SIZE_MAX))
     query = db.query(AuditLog).options(selectinload(AuditLog.actor)).order_by(AuditLog.id.desc())
+    if before_id is not None:
+        query = query.filter(AuditLog.id < int(before_id))
     if actor_user_id:
         query = query.filter(AuditLog.actor_user_id == int(actor_user_id))
     if action:
@@ -92,4 +111,13 @@ def list_audit_logs(db: Session, *, actor_user_id: int | None = None, action: st
     if q:
         like = f'%{q.strip()}%'
         query = query.filter(or_(AuditLog.actor_username.ilike(like), AuditLog.action.ilike(like), AuditLog.entity_type.ilike(like), AuditLog.entity_id.ilike(like), AuditLog.details_json.ilike(like)))
-    return [_serialize(row) for row in query.limit(limit).all()]
+
+    rows = query.limit(page_size + 1).all()
+    has_more = len(rows) > page_size
+    page_rows = rows[:page_size]
+    next_cursor = page_rows[-1].id if has_more and page_rows else None
+    return {
+        'items': [_serialize(row) for row in page_rows],
+        'next_cursor': next_cursor,
+        'page_size': page_size,
+    }

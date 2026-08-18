@@ -3,162 +3,43 @@
 import { canAccess } from './permissions';
 
 export const ROUTE_ITEMS = [
-  {
-    href: '/dashboard',
-    label: 'Dashboard',
-    title: 'Dashboard',
-    subtitle: 'Live sales, sessions, drawer, and sync snapshot',
-    permissionsAny: ['dashboard.view'],
-    group: 'Main',
-  },
-  {
-    href: '/pos',
-    label: 'POS',
-    title: 'POS Terminal',
-    subtitle: 'Order taking, split payments, and cashier flow',
-    permissionsAny: ['pos.use'],
-    group: 'Main',
-  },
-  {
-    href: '/kitchen',
-    label: 'Kitchen',
-    title: 'Kitchen',
-    subtitle: 'One KDS for active work, held items, ready orders, stations, and all-day totals',
-    permissionsAny: ['kitchen.view'],
-    group: 'Main',
-  },
-  {
-    href: '/kitchen-board',
-    label: 'Kitchen Board',
-    title: 'Kitchen',
-    subtitle: 'One KDS for active work, held items, ready orders, stations, and all-day totals',
-    permissionsAny: ['kitchen.view'],
-    group: 'Main',
-    hidden: true,
-  },
-  {
-    href: '/bar',
-    label: 'Bar',
-    title: 'Kitchen',
-    subtitle: 'Bar station view inside the unified KDS',
-    permissionsAny: ['kitchen.view'],
-    group: 'Main',
-    hidden: true,
-  },
-  {
-    href: '/expo',
-    label: 'Expo / Pass',
-    title: 'Kitchen',
-    subtitle: 'Expo/pass view inside the unified KDS',
-    permissionsAny: ['kitchen.view'],
-    group: 'Main',
-    hidden: true,
-  },
-  {
-    href: '/customer-display',
-    label: 'Customer Display',
-    title: 'Customer Display',
-    subtitle: 'Mirror order totals and payment progress for guests',
-    permissionsAny: ['pos.use'],
-    group: 'Main',
-  },
-  {
-    href: '/orders',
-    label: 'Orders',
-    title: 'Orders',
-    subtitle: 'Search, review, and control POS orders across shifts',
-    permissionsAny: ['orders.manage', 'pos.use'],
-    group: 'Main',
-  },
-  {
-    href: '/registers',
-    label: 'Registers',
-    title: 'Registers',
-    subtitle: 'Outlets, register mapping, and drawer ownership',
-    permissionsAny: ['registers.view'],
-    group: 'Operations',
-  },
-  {
-    href: '/sessions',
-    label: 'Sessions',
-    title: 'Sessions',
-    subtitle: 'Open and close shifts with drawer reconciliation',
-    permissionsAny: ['registers.view'],
-    group: 'Operations',
-  },
-  {
-    href: '/cash-movements',
-    label: 'Cash Movements',
-    title: 'Cash Movements',
-    subtitle: 'Paid in, paid out, float, and drawer adjustments',
-    permissionsAny: ['cash.manage'],
-    group: 'Operations',
-  },
-  {
-    href: '/room-charges',
-    label: 'Room Charges',
-    title: 'Room Charges',
-    subtitle: 'Track pending folio charges, disputes, and guest billing',
-    permissionsAny: ['room_charges.view', 'room_charges.manage', 'orders.manage'],
-    group: 'Operations',
-  },
-  {
-    href: '/catalog',
-    label: 'Catalog',
-    title: 'Catalog',
-    subtitle: 'Imported sellable items, pricing, availability, and sync',
-    permissionsAny: ['catalog.view'],
-    group: 'Operations',
-  },
-  {
-    href: '/recipes',
-    label: 'Recipes',
-    title: 'Recipe Library',
-    subtitle: 'Open staff recipe PDFs linked to Accounting dishes',
-    permissionsAny: ['recipes.view'],
-    group: 'Operations',
-  },
-  {
-    href: '/sync',
-    label: 'Sync Queue',
-    title: 'Sync Queue',
-    subtitle: 'Outbox-based accounting sync and retry management',
-    permissionsAny: ['sync.view'],
-    group: 'Admin',
-  },
-  {
-    href: '/settings',
-    label: 'Settings',
-    title: 'Settings',
-    subtitle: 'Accounting connection, sync mode, and UI preferences',
-    permissionsAny: ['settings.manage'],
-    group: 'Admin',
-  },
-  {
-    href: '/users',
-    label: 'Users',
-    title: 'Users',
-    subtitle: 'Cashier, manager, and kitchen user access',
-    permissionsAny: ['users.manage'],
-    group: 'Admin',
-  },
-  {
-    href: '/audit',
-    label: 'Audit Log',
-    title: 'Audit Log',
-    subtitle: 'Review user actions, audits, linked entities, and approval decisions',
-    permissionsAny: ['audit.view', 'reports.view', 'settings.manage'],
-    group: 'Admin',
-  },
+  { href: '/dashboard', label: 'Dashboard', title: 'Dashboard', subtitle: 'Live sales, sessions, drawer, and sync snapshot', permissionsAny: ['dashboard.view'], group: 'Main' },
+  { href: '/pos', label: 'POS', title: 'POS Terminal', subtitle: 'Order taking, split payments, and cashier flow', permissionsAny: ['pos.use'], group: 'Main' },
+  { href: '/kitchen', label: 'Kitchen', title: 'Kitchen', subtitle: 'One KDS for active work, held items, ready orders, stations, and all-day totals', permissionsAny: ['kitchen.view'], group: 'Main' },
+  { href: '/kitchen-board', label: 'Kitchen Board', title: 'Kitchen', subtitle: 'One KDS for active work, held items, ready orders, stations, and all-day totals', permissionsAny: ['kitchen.view'], group: 'Main', hidden: true },
+  { href: '/bar', label: 'Bar', title: 'Kitchen', subtitle: 'Bar station view inside the unified KDS', permissionsAny: ['kitchen.view'], group: 'Main', hidden: true },
+  { href: '/expo', label: 'Expo / Pass', title: 'Kitchen', subtitle: 'Expo/pass view inside the unified KDS', permissionsAny: ['kitchen.view'], group: 'Main', hidden: true },
+  { href: '/customer-display', label: 'Customer Display', title: 'Customer Display', subtitle: 'Mirror order totals and payment progress for guests', permissionsAny: ['pos.use'], group: 'Main' },
+  { href: '/orders', label: 'Orders', title: 'Orders', subtitle: 'Search, review, and control POS orders across shifts', permissionsAny: ['orders.manage', 'pos.use'], group: 'Main' },
+  { href: '/registers', label: 'Registers', title: 'Registers', subtitle: 'Outlets, register mapping, and drawer ownership', permissionsAny: ['registers.view'], group: 'Operations' },
+  { href: '/sessions', label: 'Sessions', title: 'Sessions', subtitle: 'Open and close shifts with drawer reconciliation', permissionsAny: ['registers.view'], group: 'Operations' },
+  { href: '/cash-movements', label: 'Cash Movements', title: 'Cash Movements', subtitle: 'Paid in, paid out, float, and drawer adjustments', permissionsAny: ['cash.manage'], group: 'Operations' },
+  { href: '/room-charges', label: 'Room Charges', title: 'Room Charges', subtitle: 'Track pending folio charges, disputes, and guest billing', permissionsAny: ['room_charges.view', 'room_charges.manage', 'orders.manage'], group: 'Operations' },
+  { href: '/catalog', label: 'Catalog', title: 'Catalog', subtitle: 'Imported sellable items, pricing, availability, and sync', permissionsAny: ['catalog.view'], group: 'Operations' },
+  { href: '/recipes', label: 'Recipes', title: 'Recipe Library', subtitle: 'Open staff recipe PDFs linked to Accounting dishes', permissionsAny: ['recipes.view'], group: 'Operations' },
+  { href: '/sync', label: 'Sync Queue', title: 'Sync Queue', subtitle: 'Outbox-based accounting sync and retry management', permissionsAny: ['sync.view'], group: 'Admin' },
+  { href: '/settings', label: 'Settings', title: 'Settings', subtitle: 'Accounting connection, sync mode, and UI preferences', permissionsAny: ['settings.manage'], group: 'Admin' },
+  { href: '/users', label: 'Users', title: 'Users', subtitle: 'Cashier, manager, and kitchen user access', permissionsAny: ['users.manage'], group: 'Admin' },
+  { href: '/audit', label: 'Audit Log', title: 'Audit Log', subtitle: 'Review user actions, audits, linked entities, and approval decisions', permissionsAny: ['audit.view', 'reports.view', 'settings.manage'], group: 'Admin' },
 ];
 
+export function normalizeRoutePath(pathname) {
+  if (!pathname) return '/';
+  const withoutQuery = pathname.split('?')[0].split('#')[0] || '/';
+  if (withoutQuery === '/') return '/';
+  return withoutQuery.replace(/\/+$/, '') || '/';
+}
+
 export function getRouteMeta(pathname) {
-  if (!pathname) return null;
-  const normalized = pathname.split('?')[0].split('#')[0];
+  const normalized = normalizeRoutePath(pathname);
   const exact = ROUTE_ITEMS.find((route) => route.href === normalized);
   if (exact) return exact;
-  const prefixMatch = ROUTE_ITEMS.find((route) => normalized.startsWith(`${route.href}/`));
-  return prefixMatch || null;
+  return ROUTE_ITEMS.find((route) => normalized.startsWith(`${route.href}/`)) || null;
+}
+
+export function isKnownRoute(pathname) {
+  const normalized = normalizeRoutePath(pathname);
+  return normalized === '/login' || normalized === '/customer-display' || !!getRouteMeta(normalized);
 }
 
 export function getRouteTitle(pathname) {
@@ -179,23 +60,12 @@ export function routeGroups() {
 }
 
 export function routeCanAccess(user, pathname) {
-  // Explicitly allow public routes
-  if (pathname === '/login' || pathname === '/customer-display') {
-    return true;
-  }
-  
-  const route = getRouteMeta(pathname);
-  // Deny access to unknown protected routes
-  if (!route) {
-    return false;
-  }
-  
-  // Allow routes without permission requirements (shouldn't exist but safety)
-  if (!route.permissionsAny || !route.permissionsAny.length) {
-    return true;
-  }
-  
-  // Check permissions
+  const normalized = normalizeRoutePath(pathname);
+  if (normalized === '/login' || normalized === '/customer-display') return true;
+  const route = getRouteMeta(normalized);
+  // Unknown routes are not authorization failures. Let Next render not-found.
+  if (!route) return true;
+  if (!route.permissionsAny || !route.permissionsAny.length) return true;
   return route.permissionsAny.some((permission) => canAccess(user, permission));
 }
 

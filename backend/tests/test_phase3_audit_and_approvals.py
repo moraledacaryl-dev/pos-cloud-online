@@ -70,7 +70,7 @@ def test_phase3_creates_discount_void_and_cash_approval_rows():
         create_cash_movement(db, cash_payload, approved_by_user_id=grant['approved_by_user_id'])
 
     approval_types = {row['approval_type'] for row in list_manager_approvals(db, limit=50)}
-    actions = {row['action'] for row in list_audit_logs(db, limit=100)}
+    actions = {row['action'] for row in list_audit_logs(db, limit=100)['items']}
     assert 'discount' in approval_types
     assert 'void' in approval_types
     assert 'cash_paid_out' in approval_types
