@@ -1,0 +1,33 @@
+name: Pass 8 lockfile generation
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lockfile:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Regenerate npm lockfile
+        run: npm install --package-lock-only --ignore-scripts
+      - name: Verify requested dependency versions
+        run: node -e "const l=require('./package-lock.json'); const p=l.packages; for (const [name,v] of [['next','15.5.21'],['sharp','0.35.3'],['postcss','8.5.23'],['nanoid','3.3.16']]) { const k='node_modules/'+name; if (!p[k] || p[k].version!==v) throw new Error(name+' resolved to '+(p[k]&&p[k].version)); } console.log('lockfile versions verified')"
+      - name: Print lockfile markers
+        run: npm ls next sharp postcss nanoid
+      - name: Upload regenerated lockfile
+        uses: actions/upload-artifact@v4
+        with:
+          name: pass8-package-lock
+          path: frontend/package-lock.json
+          if-no-files-found: error
