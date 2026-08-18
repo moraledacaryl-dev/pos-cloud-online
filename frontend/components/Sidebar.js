@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { forwardRef, useEffect, useMemo, useState } from 'react';
 import { useCurrentUser } from '../lib/useCurrentUser';
 import { visibleRouteGroups } from '../lib/routes';
 
@@ -23,7 +23,7 @@ function collapsedLabel(label) {
     .slice(0, 2);
 }
 
-export default function Sidebar() {
+const Sidebar = forwardRef(function Sidebar({ mobileOpen = false, onNavigate, onClose }, ref) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const { user } = useCurrentUser();
@@ -41,29 +41,38 @@ export default function Sidebar() {
   }, [collapsed]);
 
   const visibleGroups = useMemo(() => visibleRouteGroups(user), [user]);
+  const className = `${collapsed ? 'sidebar collapsed' : 'sidebar'}${mobileOpen ? ' mobile-open' : ''}`;
 
   return (
-    <aside className={collapsed ? 'sidebar collapsed' : 'sidebar'}>
+    <aside ref={ref} id="primary-navigation" className={className} aria-label="Primary navigation">
       <div className="brand">
-        <div className="brand-badge">PO</div>
+        <div className="brand-badge" aria-hidden="true">PO</div>
         {!collapsed && (
           <div>
             <h2>Dedicated POS</h2>
             <div className="small muted-on-dark">Fast sales and drawer control</div>
           </div>
         )}
+        <button type="button" className="drawer-close" aria-label="Close navigation menu" onClick={onClose}>×</button>
         <button type="button" className="sidebar-toggle" aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} onClick={() => setCollapsed((v) => !v)}>
           {collapsed ? '>' : '<'}
         </button>
       </div>
-      <nav>
+      <nav aria-label="POS sections">
         {visibleGroups.map((group) => (
           <div key={group.label} className="nav-group">
             {!collapsed && <div className="nav-group-label">{group.label}</div>}
             {group.items.map((item) => {
               const active = pathname === item.href || pathname.startsWith(item.href + '/');
               return (
-                <Link key={item.href} href={item.href} className={active ? 'active' : ''} title={collapsed ? item.label : undefined}>
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={active ? 'active' : ''}
+                  aria-current={active ? 'page' : undefined}
+                  title={collapsed ? item.label : undefined}
+                  onClick={onNavigate}
+                >
                   {collapsed ? collapsedLabel(item.label) : item.label}
                 </Link>
               );
@@ -74,7 +83,7 @@ export default function Sidebar() {
           <div className="nav-group">
             {!collapsed && <div className="nav-group-label">Connected Apps</div>}
             {connectedApps.map((item) => (
-              <a key={item.label} href={item.href} rel="noreferrer" title={collapsed ? item.label : undefined}>
+              <a key={item.label} href={item.href} rel="noreferrer" title={collapsed ? item.label : undefined} onClick={onNavigate}>
                 {collapsed ? collapsedLabel(item.label) : item.label}
               </a>
             ))}
@@ -83,4 +92,6 @@ export default function Sidebar() {
       </nav>
     </aside>
   );
-}
+});
+
+export default Sidebar;
