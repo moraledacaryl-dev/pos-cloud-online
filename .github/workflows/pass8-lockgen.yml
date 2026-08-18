@@ -4,7 +4,7 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   lockfile:
@@ -14,6 +14,8 @@ jobs:
         working-directory: frontend
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -23,11 +25,17 @@ jobs:
         run: npm install --package-lock-only --ignore-scripts
       - name: Verify requested dependency versions
         run: node -e "const l=require('./package-lock.json'); const p=l.packages; for (const [name,v] of [['next','16.3.1'],['sharp','0.35.3'],['postcss','8.5.23'],['nanoid','3.3.18']]) { const k='node_modules/'+name; if (!p[k] || p[k].version!==v) throw new Error(name+' resolved to '+(p[k]&&p[k].version)); } console.log('lockfile versions verified')"
-      - name: Print production audit JSON
-        run: npm audit --omit=dev --json || true
-      - name: Upload regenerated lockfile
-        uses: actions/upload-artifact@v4
-        with:
-          name: pass8-package-lock
-          path: frontend/package-lock.json
-          if-no-files-found: error
+      - name: Require clean production dependency audit
+        run: npm audit --omit=dev --audit-level=high
+      - name: Commit regenerated lockfile to Pass 8 branch
+        working-directory: .
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/package-lock.json
+          if git diff --cached --quiet; then
+            echo "package-lock.json already current"
+          else
+            git commit -m "Pass 8: regenerate npm lockfile under Node 24"
+            git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          fi
