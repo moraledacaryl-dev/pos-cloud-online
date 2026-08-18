@@ -2,6 +2,9 @@
   "name": "pos-cloud",
   "private": true,
   "version": "0.1.0",
+  "engines": {
+    "node": ">=24 <25"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -10,11 +13,13 @@
     "test:ui": "node --test tests/phase8_frontend.test.mjs tests/phase9_frontend.test.mjs tests/request-guards.test.mjs tests/kds-stream-security.test.mjs tests/browser-auth-security.test.mjs tests/customer-display-security.test.mjs tests/mobile-accessibility.test.mjs tests/pass7-audit-routing-integrity.test.mjs"
   },
   "dependencies": {
-    "next": "^15.5.18",
+    "next": "15.5.21",
     "react": "18.3.1",
-    "react-dom": "18.3.1"
+    "react-dom": "18.3.1",
+    "sharp": "0.35.3"
   },
   "overrides": {
-    "postcss": "8.5.10"
+    "nanoid": "3.3.16",
+    "postcss": "8.5.23"
   }
 }
