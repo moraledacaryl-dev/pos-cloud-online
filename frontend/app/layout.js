@@ -1,4 +1,5 @@
 import './globals.css';
+import './mobile-accessibility.css';
 import AppShell from '../components/AppShell';
 import { CurrentUserProvider } from '../lib/useCurrentUser';
 
