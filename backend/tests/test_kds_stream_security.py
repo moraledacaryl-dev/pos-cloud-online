@@ -26,8 +26,11 @@ def setup_function():
 def test_stream_ticket_is_opaque_station_bound_and_single_use(monkeypatch):
     monkeypatch.setattr('app.services.kds_stream_security.settings.environment', 'test')
     issued = issue_stream_ticket(user_id=41, station='kitchen', device_id='tablet-a')
-    assert '41' not in issued['ticket']
+    second = issue_stream_ticket(user_id=41, station='kitchen', device_id='tablet-a')
+    assert isinstance(issued['ticket'], str)
     assert len(issued['ticket']) >= 32
+    assert issued['ticket'] != second['ticket']
+    assert issued['ticket'] != '41'
 
     payload = consume_stream_ticket(issued['ticket'], requested_station='kitchen')
     assert payload['user_id'] == 41

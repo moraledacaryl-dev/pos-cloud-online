@@ -26,7 +26,6 @@ export function getProductProfile(item) {
     profile_key: explicit?.profile_key || slug(item?.display_name || item?.menu_item_name),
     customer_display_name: explicit?.customer_display_name || item?.display_name || item?.menu_item_name,
     prompt_note_label: explicit?.prompt_note_label || '',
-    // Sellable variants and add-ons must exist as Accounting-managed SKUs so inventory follows the sale.
     modifier_groups: [],
     bundle_choices: [],
     shortcuts: [],
@@ -115,6 +114,16 @@ export function resetPromotions(cart) {
   return cart.map((line) => recalcLine({ ...line, promo_discount_amount: 0, applied_promo_code: undefined }));
 }
 
-export function serializeCustomerDisplay({ cart, totals, guestName, tableLabel, orderType, currentOrderNo }) {
-  return { updated_at: new Date().toISOString(), order_no: currentOrderNo || '', guest_name: guestName || 'Walk-in', table_label: tableLabel || orderType || '-', cart: cart.map((line) => ({ local_id: line.local_id, name: line.customer_display_name || line.name, quantity: num(line.quantity), total: Math.max((num(line.price) * num(line.quantity)) - num(line.discount_amount), 0), note: line.note || '' })), totals };
+export function serializeCustomerDisplay({ cart, totals, tableLabel, orderType, currentOrderNo }) {
+  return {
+    updated_at: new Date().toISOString(),
+    order_no: currentOrderNo || '',
+    table_label: tableLabel || orderType || '-',
+    cart: cart.map((line) => ({
+      name: line.customer_display_name || line.name,
+      quantity: num(line.quantity),
+      total: Math.max((num(line.price) * num(line.quantity)) - num(line.discount_amount), 0),
+    })),
+    totals,
+  };
 }

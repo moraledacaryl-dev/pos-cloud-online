@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.api.customer_display import get_snapshot, update_snapshot
+from app.api.customer_display import _stored_snapshot, update_snapshot
 from app.core.settings import DEFAULT_ACCOUNTING_API_BASE, Settings, looks_like_placeholder_secret
 from app.db.database import Base
 from app.models.entities import Outlet, Register, SyncOutboxEvent, SystemSetting, User
@@ -224,10 +224,13 @@ def test_customer_display_snapshot_is_server_backed_and_sanitized():
         'cart': [{'local_id': 'line-1', 'name': 'Iced Coffee', 'quantity': '2', 'total': '240', 'note': 'Less ice'}],
         'totals': {'gross': '240', 'discount': 'bad', 'total': '240'},
     }, db=db, user=user)
-    snapshot = get_snapshot('main', db=db)
+    snapshot = _stored_snapshot(db, 'main')
 
     assert result['ok'] is True
     assert snapshot['cart'][0]['name'] == 'Iced Coffee'
     assert snapshot['cart'][0]['quantity'] == 2
     assert snapshot['totals']['discount'] == 0
     assert snapshot['totals']['total'] == 240
+    assert 'guest_name' not in snapshot
+    assert 'local_id' not in snapshot['cart'][0]
+    assert 'note' not in snapshot['cart'][0]
