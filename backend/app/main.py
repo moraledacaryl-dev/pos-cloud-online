@@ -15,7 +15,6 @@ from app.core.settings import settings
 from app.db.database import SessionLocal, engine
 from app.services import sync_service
 from app.services.accounting_review_defaults import ensure_accounting_review_routes, install_accounting_review_transport
-from app.services.audit_service import write_audit_log
 from app.services.auth_service import ensure_admin_user
 from app.services.ops_service import build_health_report
 from app.services.permission_service import ensure_permissions_seed
@@ -69,23 +68,19 @@ async def request_context_middleware(request: Request, call_next):
         raise
     duration_ms = round((time.time() - started) * 1000, 2)
     response.headers['x-request-id'] = request_id
-    log_json(logger, 'info', 'request.completed', path=request.url.path, method=request.method, status_code=response.status_code, duration_ms=duration_ms)
-    try:
-        if request.url.path.startswith(settings.api_prefix):
-            with SessionLocal() as db:
-                write_audit_log(
-                    db,
-                    action='http.request',
-                    entity_type='request',
-                    entity_id=request_id,
-                    request_path=request.url.path,
-                    request_method=request.method,
-                    ip_address=client_ip,
-                    status_code=response.status_code,
-                    details={'duration_ms': duration_ms},
-                )
-    except Exception:
-        pass
+    # Structured access logging is intentionally the request-level record.
+    # Business/security audit rows are written explicitly by the services that
+    # own those actions; routine GET/poll traffic must not grow the audit table.
+    log_json(
+        logger,
+        'info',
+        'request.completed',
+        path=request.url.path,
+        method=request.method,
+        status_code=response.status_code,
+        duration_ms=duration_ms,
+        client_ip=client_ip,
+    )
     return response
 
 
