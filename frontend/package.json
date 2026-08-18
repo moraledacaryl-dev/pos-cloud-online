@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "test:smoke": "node -e \"console.log('frontend smoke ok')\"",
-    "test:ui": "node --test tests/phase8_frontend.test.mjs tests/phase9_frontend.test.mjs tests/request-guards.test.mjs tests/kds-stream-security.test.mjs tests/browser-auth-security.test.mjs"
+    "test:ui": "node --test tests/phase8_frontend.test.mjs tests/phase9_frontend.test.mjs tests/request-guards.test.mjs tests/kds-stream-security.test.mjs tests/browser-auth-security.test.mjs tests/customer-display-security.test.mjs"
   },
   "dependencies": {
     "next": "^15.5.18",
