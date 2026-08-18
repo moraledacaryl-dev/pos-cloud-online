@@ -23,8 +23,8 @@ jobs:
         run: npm install --package-lock-only --ignore-scripts
       - name: Verify requested dependency versions
         run: node -e "const l=require('./package-lock.json'); const p=l.packages; for (const [name,v] of [['next','15.5.21'],['sharp','0.35.3'],['postcss','8.5.23'],['nanoid','3.3.16']]) { const k='node_modules/'+name; if (!p[k] || p[k].version!==v) throw new Error(name+' resolved to '+(p[k]&&p[k].version)); } console.log('lockfile versions verified')"
-      - name: Print lockfile markers
-        run: npm ls next sharp postcss nanoid
+      - name: Print production audit JSON
+        run: npm audit --omit=dev --json || true
       - name: Upload regenerated lockfile
         uses: actions/upload-artifact@v4
         with:
