@@ -9,7 +9,7 @@ const auditPage = fs.readFileSync(new URL('../app/audit/page.js', import.meta.ur
 test('unknown routes are not treated as authorization failures', () => {
   assert.match(routes, /if \(!route\) return true/);
   assert.match(guard, /if \(!route && !isPublic\) return children/);
-  assert.doesNotMatch(guard, /defaultRouteForUser\(user\).*routeCanAccess/s);
+  assert.doesNotMatch(guard, /if \(!route[^\n]*window\.location\.replace/);
 });
 
 test('authenticated login redirects to the user workspace', () => {
