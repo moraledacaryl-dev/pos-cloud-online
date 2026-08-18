@@ -4,7 +4,7 @@ import { usePathname } from 'next/navigation';
 import { logoutSession } from '../lib/api';
 import { getRouteTitle, getRouteSubtitle } from '../lib/routes';
 
-export default function Header() {
+export default function Header({ menuButtonRef, menuOpen = false, onMenuToggle }) {
   const pathname = usePathname();
   const title = getRouteTitle(pathname);
   const subtitle = getRouteSubtitle(pathname);
@@ -16,9 +16,22 @@ export default function Header() {
 
   return (
     <header className="topbar">
-      <div>
-        <div className="topbar-title">{title}</div>
-        <div className="topbar-subtitle">{subtitle}</div>
+      <div className="topbar-leading">
+        <button
+          ref={menuButtonRef}
+          type="button"
+          className="mobile-menu-button secondary"
+          aria-label={menuOpen ? 'Close navigation menu' : 'Open navigation menu'}
+          aria-expanded={menuOpen}
+          aria-controls="primary-navigation"
+          onClick={onMenuToggle}
+        >
+          <span aria-hidden="true">☰</span>
+        </button>
+        <div>
+          <div className="topbar-title">{title}</div>
+          <div className="topbar-subtitle">{subtitle}</div>
+        </div>
       </div>
       {pathname !== '/login' && <button className="secondary" onClick={handleLogout}>Logout</button>}
     </header>
