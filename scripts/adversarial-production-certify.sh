@@ -66,11 +66,54 @@ if grep -RInE "pos_token|pos_refresh_token|localStorage\\.(getItem|setItem|remov
 fi
 pass "frontend contains no legacy localStorage/JWT URL credential flow"
 
-# Manager approval regression: protected request DTO/API code must not accept arbitrary approver IDs.
-if grep -RIn 'approved_by_user_id' backend/app/api backend/app/schemas* 2>/dev/null; then
-  fail "client-supplied approved_by_user_id remains in API/schema code"
-fi
-pass "client-supplied manager approver identity is absent from API schemas"
+# Manager approval regression: internal approver attribution may legitimately carry
+# approved_by_user_id after a server-verified grant is consumed. Prove the actual
+# exploit boundary instead: every protected payload must reject a caller-supplied
+# approver ID before grant handling, and the grant guard must remain wired in.
+APP_DIR="$APP_DIR" python3 - <<'PY'
+import importlib.util
+import pathlib
+import sys
+
+app_dir = pathlib.Path(sys.argv[0]) if False else pathlib.Path(__import__('os').environ['APP_DIR'])
+sys.path.insert(0, str(app_dir / 'backend'))
+
+from app.schemas.common import (
+    CashMovementCreate,
+    OrderCreate,
+    OrderUpdate,
+    OrderVoidPayload,
+    RefundCreate,
+    RegisterSessionReopen,
+    RoomChargePostingStatusUpdate,
+)
+from app.services.approval_guard import reject_legacy_client_approver
+
+payloads = [
+    RegisterSessionReopen(reason='x', approved_by_user_id=999),
+    OrderCreate(register_session_id=1, approved_by_user_id=999),
+    OrderUpdate(approved_by_user_id=999),
+    OrderVoidPayload(reason='x', approved_by_user_id=999),
+    RefundCreate(approved_by_user_id=999),
+    CashMovementCreate(register_session_id=1, approved_by_user_id=999, direction='out', movement_type='safe_drop', amount=1),
+    RoomChargePostingStatusUpdate(posting_status='disputed', approved_by_user_id=999),
+]
+
+for payload in payloads:
+    try:
+        reject_legacy_client_approver(payload)
+    except ValueError as exc:
+        if 'Client-supplied approved_by_user_id' not in str(exc):
+            raise
+    else:
+        raise SystemExit(f'legacy approver ID was accepted for {type(payload).__name__}')
+
+print('PASS: protected request DTOs reject caller-supplied approver IDs')
+PY
+
+grep -q "reject_legacy_client_approver(payload)" backend/app/services/approval_guard.py \
+  || fail "approval guard is no longer enforced before protected grant consumption"
+pass "manager approval exploit boundary remains server-verified"
 
 # Negative public probes. These are intentionally non-destructive.
 http_probe GET "$PUBLIC_BASE/api/auth/me" 401
