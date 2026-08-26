@@ -81,15 +81,20 @@ test.describe.serial('production-equivalent browser acceptance', () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await login(page, ownerUsername, ownerPassword);
 
-    const opener = page.getByRole('button', { name: 'Open navigation menu' });
+    // Use a DOM-identity-stable locator because the accessible name correctly
+    // changes from "Open navigation menu" to "Close navigation menu" while open.
+    const opener = page.locator('button.mobile-menu-button');
     await expect(opener).toBeVisible();
+    await expect(opener).toHaveAttribute('aria-label', 'Open navigation menu');
     await opener.click();
     await expect(opener).toHaveAttribute('aria-expanded', 'true');
+    await expect(opener).toHaveAttribute('aria-label', 'Close navigation menu');
     await expect(page.locator('#primary-navigation')).toBeVisible();
 
     await page.keyboard.press('Escape');
-    await expect(page.getByRole('button', { name: 'Open navigation menu' })).toHaveAttribute('aria-expanded', 'false');
-    await expect(page.getByRole('button', { name: 'Open navigation menu' })).toBeFocused();
+    await expect(opener).toHaveAttribute('aria-expanded', 'false');
+    await expect(opener).toHaveAttribute('aria-label', 'Open navigation menu');
+    await expect(opener).toBeFocused();
   });
 
   test('known unauthorized route is 403 UI while unknown route remains a real 404', async ({ page }) => {
