@@ -4,6 +4,7 @@ set -euo pipefail
 APP_DIR="${APP_DIR:-/opt/pos-cloud-online}"
 PUBLIC_BASE="${PUBLIC_BASE:-https://pos.hiddenoasis.app}"
 EXPECTED_COMMIT="${EXPECTED_COMMIT:-}"
+PYTHON="$APP_DIR/backend/.venv/bin/python"
 
 fail() {
   echo "ADVERSARIAL CERTIFICATION FAIL: $*" >&2
@@ -39,11 +40,11 @@ http_probe() {
 
 require_command git
 require_command curl
-require_command python3
 require_command systemctl
 require_command ss
 
 [[ -d "$APP_DIR/.git" ]] || fail "not a Git checkout: $APP_DIR"
+[[ -x "$PYTHON" ]] || fail "application virtualenv Python not executable: $PYTHON"
 cd "$APP_DIR"
 
 [[ -z "$(git status --porcelain)" ]] || fail "working tree is not clean"
@@ -70,12 +71,11 @@ pass "frontend contains no legacy localStorage/JWT URL credential flow"
 # approved_by_user_id after a server-verified grant is consumed. Prove the actual
 # exploit boundary instead: every protected payload must reject a caller-supplied
 # approver ID before grant handling, and the grant guard must remain wired in.
-APP_DIR="$APP_DIR" python3 - <<'PY'
-import importlib.util
+APP_DIR="$APP_DIR" "$PYTHON" - <<'PY'
 import pathlib
 import sys
 
-app_dir = pathlib.Path(sys.argv[0]) if False else pathlib.Path(__import__('os').environ['APP_DIR'])
+app_dir = pathlib.Path(__import__('os').environ['APP_DIR'])
 sys.path.insert(0, str(app_dir / 'backend'))
 
 from app.schemas.common import (
@@ -142,7 +142,7 @@ pass "browser security headers and HSTS are present"
 # Public readiness must prove strict runtime security, Redis tickets, worker freshness, and clean outbox.
 DETAILS_JSON="$(curl -fsS "$PUBLIC_BASE/healthz/details")"
 READY_JSON="$(curl -fsS "$PUBLIC_BASE/readyz/integrations")"
-DETAILS_JSON="$DETAILS_JSON" READY_JSON="$READY_JSON" python3 - <<'PY'
+DETAILS_JSON="$DETAILS_JSON" READY_JSON="$READY_JSON" "$PYTHON" - <<'PY'
 import json
 import os
 
