@@ -18,21 +18,21 @@ STREAMS = int(os.getenv('KDS_LOAD_STREAMS', '20'))
 async def main() -> int:
     timeout = httpx.Timeout(connect=10.0, read=None, write=10.0, pool=10.0)
     headers = {'Authorization': f'Bearer {BEARER}'} if BEARER else {}
-    async with httpx.AsyncClient(base_url=BASE_URL, timeout=timeout, follow_redirects=False, headers=headers) as client:
+    async with httpx.AsyncClient(base_url=BASE_URL, timeout=timeout, follow_redirects=False, headers=headers) as controller:
         mutation_headers = {}
         if not BEARER:
-            login = await client.post('/api/auth/login', json={'username': USERNAME, 'password': PASSWORD})
+            login = await controller.post('/api/auth/login', json={'username': USERNAME, 'password': PASSWORD})
             if login.status_code != 200:
                 raise RuntimeError(f'login failed: {login.status_code} {login.text[:300]}')
-            csrf = client.cookies.get('pos_csrf')
+            csrf = controller.cookies.get('pos_csrf')
             if not csrf:
                 raise RuntimeError('browser login did not set pos_csrf')
             mutation_headers['X-CSRF-Token'] = csrf
 
-        stream_contexts = []
+        stream_handles: list[tuple[httpx.AsyncClient, object, httpx.Response, object]] = []
         try:
             for index in range(STREAMS):
-                ticket_response = await client.post(
+                ticket_response = await controller.post(
                     '/api/kitchen/stream-ticket',
                     json={'station': 'kitchen', 'device_id': f'ci-load-{index}'},
                     headers=mutation_headers,
@@ -40,20 +40,33 @@ async def main() -> int:
                 if ticket_response.status_code != 200:
                     raise RuntimeError(f'stream ticket {index} failed: {ticket_response.status_code} {ticket_response.text[:300]}')
                 ticket = ticket_response.json()['ticket']
-                context = client.stream('GET', '/api/kitchen/stream', params={'ticket': ticket, 'station': 'kitchen'})
+
+                # Give every SSE connection its own HTTP client and retain the
+                # response + iterator for the entire load window.  Retaining only
+                # the context manager lets httpx release earlier responses when
+                # later streams are opened, which falsely collapses the active
+                # stream count to one.
+                stream_client = httpx.AsyncClient(base_url=BASE_URL, timeout=timeout, follow_redirects=False)
+                context = stream_client.stream(
+                    'GET',
+                    '/api/kitchen/stream',
+                    params={'ticket': ticket, 'station': 'kitchen'},
+                )
                 response = await context.__aenter__()
                 if response.status_code != 200:
                     body = await response.aread()
                     await context.__aexit__(None, None, None)
+                    await stream_client.aclose()
                     raise RuntimeError(f'stream {index} failed: {response.status_code} {body[:300]!r}')
                 lines = response.aiter_lines()
                 first = await anext(lines)
                 if first != 'event: hello':
                     await context.__aexit__(None, None, None)
+                    await stream_client.aclose()
                     raise RuntimeError(f'stream {index} did not emit hello frame: {first!r}')
-                stream_contexts.append(context)
+                stream_handles.append((stream_client, context, response, lines))
 
-            metrics = await client.get('/api/kitchen/stream-metrics')
+            metrics = await controller.get('/api/kitchen/stream-metrics')
             metrics.raise_for_status()
             active = int(metrics.json().get('active_streams') or 0)
             if active < STREAMS:
@@ -61,9 +74,9 @@ async def main() -> int:
 
             for round_no in range(5):
                 results = await asyncio.gather(
-                    client.get('/api/auth/me'),
-                    client.get('/api/kitchen/tickets'),
-                    client.get('/api/orders'),
+                    controller.get('/api/auth/me'),
+                    controller.get('/api/kitchen/tickets'),
+                    controller.get('/api/orders'),
                 )
                 statuses = [response.status_code for response in results]
                 if statuses != [200, 200, 200]:
@@ -71,11 +84,14 @@ async def main() -> int:
 
             print(f'PASS: {STREAMS} simultaneous KDS streams did not starve auth/kitchen/order requests.')
         finally:
-            for context in reversed(stream_contexts):
-                await context.__aexit__(None, None, None)
+            for stream_client, context, _response, _lines in reversed(stream_handles):
+                try:
+                    await context.__aexit__(None, None, None)
+                finally:
+                    await stream_client.aclose()
 
         for _ in range(30):
-            metrics = await client.get('/api/kitchen/stream-metrics')
+            metrics = await controller.get('/api/kitchen/stream-metrics')
             metrics.raise_for_status()
             if int(metrics.json().get('active_streams') or 0) == 0:
                 print('PASS: KDS active stream metric returned to zero after disconnect cleanup.')
