@@ -60,7 +60,7 @@ done
 pass "all POS services are active"
 
 # Browser credential regression: reusable auth tokens must not be stored or reconstructed in JS.
-if grep -RInE 'pos_token|pos_refresh_token|localStorage\.(getItem|setItem|removeItem).*token|searchParams\.set\(["'"']token["'"']' \
+if grep -RInE "pos_token|pos_refresh_token|localStorage\\.(getItem|setItem|removeItem).*token|searchParams\\.set\\(['\"]token['\"]" \
   frontend/lib frontend/app frontend/components --exclude='*.test.*'; then
   fail "legacy browser credential handling detected"
 fi
