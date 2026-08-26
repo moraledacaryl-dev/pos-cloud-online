@@ -169,12 +169,15 @@ test.describe.serial('production-equivalent browser acceptance', () => {
 
     await login(page, ownerUsername, ownerPassword);
     await page.goto('/pos');
-    await expect(page.getByText('POS Terminal', { exact: false }).first()).toBeVisible();
+    // /pos is an immersive workspace and intentionally does not render the
+    // application Header. Wait for a semantic landmark owned by the POS page
+    // itself so Axe scans the actual ready workspace state.
+    await expect(page.getByRole('heading', { name: 'Open a Session' })).toBeVisible();
     expect(await seriousAxeViolations(page), 'serious/critical Axe violations on desktop POS').toEqual([]);
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.reload();
-    await expect(page.getByRole('button', { name: 'Open navigation menu' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Open a Session' })).toBeVisible();
     expect(await seriousAxeViolations(page), 'serious/critical Axe violations on mobile POS').toEqual([]);
   });
 });
