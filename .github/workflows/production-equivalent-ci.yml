@@ -49,7 +49,6 @@ jobs:
       STARTUP_REQUIRE_MIGRATIONS: 'false'
       RATE_LIMIT_ENABLED: 'false'
       RATE_LIMIT_BACKEND: memory
-      ACCOUNTING_API_BASE: http://127.0.0.1:9/api
       ACCOUNTING_API_TOKEN: ci-placeholder-token
       HTTP_TIMEOUT_SECONDS: '1'
     steps:
