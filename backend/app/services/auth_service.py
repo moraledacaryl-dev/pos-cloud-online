@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 import hashlib
 import uuid
-from jose import jwt
+import jwt
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
