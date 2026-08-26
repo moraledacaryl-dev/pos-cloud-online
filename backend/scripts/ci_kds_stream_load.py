@@ -11,19 +11,23 @@ import httpx
 BASE_URL = os.getenv('KDS_LOAD_BASE_URL', 'http://127.0.0.1:8100').rstrip('/')
 USERNAME = os.getenv('KDS_LOAD_USERNAME', 'ci-owner')
 PASSWORD = os.getenv('KDS_LOAD_PASSWORD', 'CiOwnerPassword-2026!')
+BEARER = os.getenv('KDS_LOAD_BEARER', '').strip()
 STREAMS = int(os.getenv('KDS_LOAD_STREAMS', '20'))
 
 
 async def main() -> int:
     timeout = httpx.Timeout(connect=10.0, read=None, write=10.0, pool=10.0)
-    async with httpx.AsyncClient(base_url=BASE_URL, timeout=timeout, follow_redirects=False) as client:
-        login = await client.post('/api/auth/login', json={'username': USERNAME, 'password': PASSWORD})
-        if login.status_code != 200:
-            raise RuntimeError(f'login failed: {login.status_code} {login.text[:300]}')
-        csrf = client.cookies.get('pos_csrf')
-        if not csrf:
-            raise RuntimeError('browser login did not set pos_csrf')
-        mutation_headers = {'X-CSRF-Token': csrf}
+    headers = {'Authorization': f'Bearer {BEARER}'} if BEARER else {}
+    async with httpx.AsyncClient(base_url=BASE_URL, timeout=timeout, follow_redirects=False, headers=headers) as client:
+        mutation_headers = {}
+        if not BEARER:
+            login = await client.post('/api/auth/login', json={'username': USERNAME, 'password': PASSWORD})
+            if login.status_code != 200:
+                raise RuntimeError(f'login failed: {login.status_code} {login.text[:300]}')
+            csrf = client.cookies.get('pos_csrf')
+            if not csrf:
+                raise RuntimeError('browser login did not set pos_csrf')
+            mutation_headers['X-CSRF-Token'] = csrf
 
         stream_contexts = []
         try:
