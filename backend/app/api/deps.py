@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import OAuth2PasswordBearer
-from jose import jwt
+import jwt
 from sqlalchemy.orm import Session
 
 from app.core.settings import settings
