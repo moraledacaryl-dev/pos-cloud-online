@@ -89,9 +89,7 @@ def test_expired_grant_fails():
     manager, cashier, _ = seed_users(db)
     grant, payload = approved_refund_grant(db, manager, cashier)
     row = db.query(ManagerApproval).filter(ManagerApproval.id == grant['id']).first()
-    details = json.loads(row.request_details_json)
-    details['_approval_grant']['expires_at'] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
-    row.request_details_json = json.dumps(details)
+    row.expires_at_text = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
     db.commit()
     with pytest.raises(ValueError, match='expired'):
         consume_approval_grant(db, approval_uuid=grant['approval_uuid'], requester_user_id=cashier.id, approval_type='refund', entity_type='refund', entity_id=10, protected_payload=payload)

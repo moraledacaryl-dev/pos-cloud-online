@@ -4,12 +4,18 @@ from __future__ import annotations
 import argparse
 import getpass
 import os
+from pathlib import Path
+import sys
 
-import app.models  # noqa: F401
-from app.db.database import SessionLocal
-from app.models.entities import User
-from app.services.auth_service import hash_password
-from app.services.permission_service import assign_user_roles, ensure_permissions_seed, list_roles
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
+
+import app.models  # noqa: E402,F401
+from app.db.database import SessionLocal  # noqa: E402
+from app.models.entities import User  # noqa: E402
+from app.services.auth_service import hash_password  # noqa: E402
+from app.services.permission_service import assign_user_roles, ensure_permissions_seed, list_roles  # noqa: E402
 
 
 def main() -> int:

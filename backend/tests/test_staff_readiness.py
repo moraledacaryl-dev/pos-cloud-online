@@ -72,7 +72,8 @@ class CaptureAsyncClient:
         return FakeResponse({'ok': True})
 
 
-def test_accounting_api_base_default_is_accounting_subdomain():
+def test_accounting_api_base_default_is_accounting_subdomain(monkeypatch):
+    monkeypatch.delenv('ACCOUNTING_API_BASE', raising=False)
     assert DEFAULT_ACCOUNTING_API_BASE == 'https://accounting.hiddenoasis.app/api'
     assert Settings(_env_file=None).accounting_api_base == 'https://accounting.hiddenoasis.app/api'
     assert Settings(_env_file=None).accounting_api_base != 'https://hiddenoasis.app/api'
@@ -118,7 +119,8 @@ def test_accounting_sync_startup_repair_handles_text_value_json():
     assert repaired == 'api_base=https://accounting.hiddenoasis.app/api'
 
 
-def test_default_seed_uses_accounting_subdomain_and_repairs_existing_legacy_sync():
+def test_default_seed_uses_accounting_subdomain_and_repairs_existing_legacy_sync(monkeypatch):
+    monkeypatch.delenv('ACCOUNTING_API_BASE', raising=False)
     db = make_session()
     ensure_default_outlet_registers(db)
     assert setting_json(db, 'accounting_sync')['api_base'] == 'https://accounting.hiddenoasis.app/api'

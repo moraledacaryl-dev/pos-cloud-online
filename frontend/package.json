@@ -10,13 +10,18 @@
     "build": "next build",
     "start": "next start",
     "test:smoke": "node -e \"console.log('frontend smoke ok')\"",
-    "test:ui": "node --test tests/phase8_frontend.test.mjs tests/phase9_frontend.test.mjs tests/request-guards.test.mjs tests/kds-stream-security.test.mjs tests/browser-auth-security.test.mjs tests/customer-display-security.test.mjs tests/mobile-accessibility.test.mjs tests/pass7-audit-routing-integrity.test.mjs"
+    "test:ui": "node --test tests/phase8_frontend.test.mjs tests/phase9_frontend.test.mjs tests/request-guards.test.mjs tests/kds-stream-security.test.mjs tests/browser-auth-security.test.mjs tests/customer-display-security.test.mjs tests/mobile-accessibility.test.mjs tests/pass7-audit-routing-integrity.test.mjs",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "next": "16.3.1",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "sharp": "0.35.3"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.10.2",
+    "@playwright/test": "^1.55.0"
   },
   "overrides": {
     "nanoid": "3.3.18",
