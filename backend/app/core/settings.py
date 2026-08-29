@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -23,7 +24,13 @@ def looks_like_placeholder_secret(value: str | None) -> bool:
     normalized = (value or '').strip().lower()
     if not normalized:
         return True
-    return any(marker in normalized for marker in PLACEHOLDER_SECRET_MARKERS) or len(normalized) < 16
+    compact = re.sub(r'[^a-z0-9]+', '', normalized)
+    compact_markers = tuple(re.sub(r'[^a-z0-9]+', '', marker) for marker in PLACEHOLDER_SECRET_MARKERS)
+    return (
+        any(marker in normalized for marker in PLACEHOLDER_SECRET_MARKERS)
+        or any(marker and marker in compact for marker in compact_markers)
+        or len(normalized) < 16
+    )
 
 
 def _default_database_url() -> str:
@@ -126,6 +133,10 @@ class Settings(BaseSettings):
             warnings.append('STAFF_INTEGRATION_KEY is unset or still using a placeholder value.')
         if self.is_strict_environment and self.allow_default_admin_bootstrap:
             warnings.append('Default admin bootstrap must be disabled in production and staging.')
+        if self.is_strict_environment and self.rate_limit_enabled and self.rate_limit_backend.strip().lower() != 'redis':
+            warnings.append('RATE_LIMIT_BACKEND must be redis in production and staging when rate limiting is enabled.')
+        if self.is_strict_environment and self.rate_limit_enabled and not (self.redis_url or '').strip():
+            warnings.append('REDIS_URL is required for strict-environment rate limiting.')
         return warnings
 
     @property
