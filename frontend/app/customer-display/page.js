@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { API_BASE, fetchCustomerDisplaySnapshot } from '../../lib/api';
 
 const peso = new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' });
@@ -36,9 +36,14 @@ export default function CustomerDisplayPage() {
   const [generatedCode, setGeneratedCode] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const params = useMemo(() => typeof window === 'undefined' ? new URLSearchParams() : new URLSearchParams(window.location.search), []);
-  const channel = params.get('channel') || 'main';
-  const managerSetup = params.get('setup') === '1';
+  const [channel, setChannel] = useState('main');
+  const [managerSetup, setManagerSetup] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setChannel(params.get('channel') || 'main');
+    setManagerSetup(params.get('setup') === '1');
+  }, []);
 
   useEffect(() => {
     let active = true;

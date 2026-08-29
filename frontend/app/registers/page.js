@@ -8,6 +8,7 @@ export default function RegistersPage() {
   const [registers, setRegisters] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [accountSearch, setAccountSearch] = useState('');
+  const [accountingUnavailable, setAccountingUnavailable] = useState('');
   const [outletForm, setOutletForm] = useState({ id: null, code: '', name: '', business_unit: 'F&B', is_active: true, notes: '' });
   const [registerForm, setRegisterForm] = useState({ id: null, outlet_id: '', code: '', name: '', register_type: 'cash_drawer', accounting_financial_account_id: '', accounting_financial_account_code: '', cash_tender_label: 'Cash', default_order_type: 'dine_in', is_active: true, notes: '' });
   const [validation, setValidation] = useState(null);
@@ -16,14 +17,23 @@ export default function RegistersPage() {
   const [error, setError] = useState('');
 
   async function loadAll() {
+    setError('');
     try {
-      const [outletRows, registerRows, accountRows] = await Promise.all([fetchOutlets(), fetchRegisters(), fetchAccountingAccounts().catch(() => [])]);
+      const [outletRows, registerRows] = await Promise.all([fetchOutlets(), fetchRegisters()]);
       setOutlets(Array.isArray(outletRows) ? outletRows : []);
       setRegisters(Array.isArray(registerRows) ? registerRows : []);
-      setAccounts(Array.isArray(accountRows) ? accountRows : []);
       if (!registerForm.outlet_id && outletRows?.[0]?.id) setRegisterForm((prev) => ({ ...prev, outlet_id: String(outletRows[0].id) }));
     } catch (e) {
       setError(e.message || 'Failed to load register setup.');
+    }
+
+    try {
+      const accountRows = await fetchAccountingAccounts();
+      setAccounts(Array.isArray(accountRows) ? accountRows : []);
+      setAccountingUnavailable('');
+    } catch (e) {
+      setAccounts([]);
+      setAccountingUnavailable('Accounting is temporarily unavailable. Local register configuration remains visible, but drawer mapping lookup and validation are unavailable until the integration recovers.');
     }
   }
 
@@ -65,8 +75,12 @@ export default function RegistersPage() {
     try {
       const res = await validateAccountingAccount({ account_id: registerForm.accounting_financial_account_id || undefined, account_code: registerForm.accounting_financial_account_code || undefined });
       setValidation(res);
+      setAccountingUnavailable('');
       if (!res.ok) setError('No matching accounting account found for this mapping.');
-    } catch (e) { setError(e.message || 'Failed to validate accounting mapping.'); }
+    } catch (e) {
+      setValidation(null);
+      setAccountingUnavailable('Accounting is temporarily unavailable. Mapping validation cannot run right now; retry after the integration recovers.');
+    }
   }
 
   function editOutlet(row) {
@@ -94,6 +108,7 @@ export default function RegistersPage() {
         <p className="muted">Connect each POS register to a real accounting drawer using a searchable picker instead of typing raw IDs blindly.</p>
         {!!notice && <p className="notice-text" style={{ marginTop: 8 }}>{notice}</p>}
         {!!error && <p className="error-text" style={{ marginTop: 8 }}>{error}</p>}
+        {!!accountingUnavailable && <div className="integration-status warn" role="status"><strong>Accounting unavailable</strong><p>{accountingUnavailable}</p></div>}
       </section>
 
       <div className="card-grid card-grid-double">
@@ -120,7 +135,7 @@ export default function RegistersPage() {
             <label className="field">Active<select value={String(!!registerForm.is_active)} onChange={(e) => setRegisterForm((prev) => ({ ...prev, is_active: e.target.value === 'true' }))}><option value="true">Active</option><option value="false">Inactive</option></select></label>
             <label className="field">Accounting Drawer ID<input value={registerForm.accounting_financial_account_id} onChange={(e) => setRegisterForm((prev) => ({ ...prev, accounting_financial_account_id: e.target.value }))} /></label>
             <label className="field">Accounting Drawer Code<input value={registerForm.accounting_financial_account_code} onChange={(e) => setRegisterForm((prev) => ({ ...prev, accounting_financial_account_code: e.target.value }))} /></label>
-            <div className="row wrap" style={{ alignItems: 'end' }}><button type="button" className="secondary" onClick={checkMapping}>Validate Mapping</button>{validation?.ok && <span className="badge success">{validation.account?.name}</span>}</div>
+            <div className="row wrap" style={{ alignItems: 'end' }}><button type="button" className="secondary" onClick={checkMapping} disabled={!!accountingUnavailable}>Validate Mapping</button>{validation?.ok && <span className="badge success">{validation.account?.name}</span>}</div>
             <label className="field" style={{ gridColumn: '1 / -1' }}>Notes<input value={registerForm.notes} onChange={(e) => setRegisterForm((prev) => ({ ...prev, notes: e.target.value }))} /></label>
             <div className="row wrap" style={{ gridColumn: '1 / -1' }}><button className="primary" type="submit">{registerForm.id ? 'Update Register' : 'Save Register'}</button>{registerForm.id && <button type="button" className="secondary" onClick={() => setRegisterForm({ id: null, outlet_id: outlets?.[0]?.id ? String(outlets[0].id) : '', code: '', name: '', register_type: 'cash_drawer', accounting_financial_account_id: '', accounting_financial_account_code: '', cash_tender_label: 'Cash', default_order_type: 'dine_in', is_active: true, notes: '' })}>Cancel Edit</button>}</div>
           </form>
@@ -128,9 +143,9 @@ export default function RegistersPage() {
       </div>
 
       <section className="section">
-        <div className="toolbar"><h2>Accounting Account Picker</h2><input placeholder="Search drawer, bank, e-wallet" value={accountSearch} onChange={(e) => setAccountSearch(e.target.value)} style={{ width: 240 }} /></div>
+        <div className="toolbar"><h2>Accounting Account Picker</h2><input placeholder="Search drawer, bank, e-wallet" value={accountSearch} onChange={(e) => setAccountSearch(e.target.value)} style={{ width: 240 }} disabled={!!accountingUnavailable} /></div>
         <table className="table" style={{ marginTop: 10 }}>
-          <thead><tr><th>Name</th><th>Code</th><th>Type</th><th>Balance</th><th></th></tr></thead>
+          <thead><tr><th>Name</th><th>Code</th><th>Type</th><th>Balance</th><th>Action</th></tr></thead>
           <tbody>
             {filteredAccounts.map((row) => (
               <tr key={row.id}>
@@ -138,34 +153,32 @@ export default function RegistersPage() {
                 <td><button type="button" className="secondary" onClick={() => setRegisterForm((prev) => ({ ...prev, accounting_financial_account_id: String(row.id), accounting_financial_account_code: row.code || '' }))}>Use</button></td>
               </tr>
             ))}
-            {!filteredAccounts.length && <tr><td colSpan="5" className="muted">No accounting accounts available or API not configured yet.</td></tr>}
+            {!filteredAccounts.length && <tr><td colSpan="5" className="muted">{accountingUnavailable ? 'Accounting account lookup is temporarily unavailable.' : 'No accounting accounts available.'}</td></tr>}
           </tbody>
         </table>
       </section>
 
-
-
-<section className="section">
-  <div className="toolbar"><h2>Register Mapping Health</h2><button type="button" className="secondary" onClick={async () => { const h = await fetchAccountingHealth(); setHealthRows(h?.rows || []); }}>Refresh Health</button></div>
-  <table className="table" style={{ marginTop: 10 }}>
-    <thead><tr><th>Register</th><th>Mapped Account</th><th>Status</th></tr></thead>
-    <tbody>
-      {healthRows.map((row) => (
-        <tr key={row.register_id}>
-          <td>{row.register_name} <span className="small muted">({row.register_code})</span></td>
-          <td>{row.accounting_financial_account_id || '-'} {row.accounting_financial_account_code ? `(${row.accounting_financial_account_code})` : ''} {row.account_name ? `- ${row.account_name}` : ''}</td>
-          <td><span className={`badge ${row.healthy ? 'success' : 'danger'}`}>{row.healthy ? 'healthy' : 'missing or invalid'}</span></td>
-        </tr>
-      ))}
-      {!healthRows.length && <tr><td colSpan="3" className="muted">No mapping health data yet.</td></tr>}
-    </tbody>
-  </table>
-</section>
+      <section className="section">
+        <div className="toolbar"><h2>Register Mapping Health</h2><button type="button" className="secondary" onClick={async () => { try { const h = await fetchAccountingHealth(); setHealthRows(h?.rows || []); setAccountingUnavailable(''); } catch { setHealthRows([]); setAccountingUnavailable('Accounting is temporarily unavailable. Mapping health cannot be refreshed right now.'); } }}>Refresh Health</button></div>
+        <table className="table" style={{ marginTop: 10 }}>
+          <thead><tr><th>Register</th><th>Mapped Account</th><th>Status</th></tr></thead>
+          <tbody>
+            {healthRows.map((row) => (
+              <tr key={row.register_id}>
+                <td>{row.register_name} <span className="small muted">({row.register_code})</span></td>
+                <td>{row.accounting_financial_account_id || '-'} {row.accounting_financial_account_code ? `(${row.accounting_financial_account_code})` : ''} {row.account_name ? `- ${row.account_name}` : ''}</td>
+                <td><span className={`badge ${row.healthy ? 'success' : 'danger'}`}>{row.healthy ? 'healthy' : 'missing or invalid'}</span></td>
+              </tr>
+            ))}
+            {!healthRows.length && <tr><td colSpan="3" className="muted">No mapping health data yet.</td></tr>}
+          </tbody>
+        </table>
+      </section>
 
       <section className="section">
         <h2>Current Outlets</h2>
         <table className="table" style={{ marginTop: 10 }}>
-          <thead><tr><th>Code</th><th>Name</th><th>BU</th><th>Status</th><th></th></tr></thead>
+          <thead><tr><th>Code</th><th>Name</th><th>BU</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody>
             {outlets.map((row) => (
               <tr key={row.id}><td>{row.code}</td><td>{row.name}</td><td>{row.business_unit || '-'}</td><td><span className={`badge ${row.is_active ? 'success' : 'warn'}`}>{row.is_active ? 'active' : 'inactive'}</span></td><td><div className="row wrap"><button type="button" className="secondary" onClick={() => editOutlet(row)}>Edit</button><button type="button" className="secondary" onClick={() => archiveOutlet(row)}>{row.is_active ? 'Archive' : 'Activate'}</button></div></td></tr>
@@ -177,7 +190,7 @@ export default function RegistersPage() {
       <section className="section">
         <h2>Current Registers</h2>
         <table className="table" style={{ marginTop: 10 }}>
-          <thead><tr><th>Outlet</th><th>Code</th><th>Name</th><th>Accounting Drawer</th><th>Default Type</th><th>Status</th><th></th></tr></thead>
+          <thead><tr><th>Outlet</th><th>Code</th><th>Name</th><th>Accounting Drawer</th><th>Default Type</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody>
             {registers.map((row) => (
               <tr key={row.id}><td>{row.outlet_name}</td><td>{row.code}</td><td>{row.name}</td><td>{row.accounting_financial_account_id || '-'} {row.accounting_financial_account_code ? `(${row.accounting_financial_account_code})` : ''}</td><td>{row.default_order_type}</td><td><span className={`badge ${row.is_active ? 'success' : 'warn'}`}>{row.is_active ? 'active' : 'inactive'}</span></td><td><div className="row wrap"><button type="button" className="secondary" onClick={() => editRegister(row)}>Edit</button><button type="button" className="secondary" onClick={() => archiveRegister(row)}>{row.is_active ? 'Archive' : 'Activate'}</button></div></td></tr>
