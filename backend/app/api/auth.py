@@ -1,7 +1,10 @@
+import hashlib
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_permissions
+from app.core.rate_limit import enforce_rate_limit
 from app.core.settings import settings
 from app.db.database import get_db
 from app.models.entities import Role, User
@@ -27,6 +30,33 @@ from app.services.security_admin_policy import (
 )
 
 router = APIRouter()
+
+
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else 'unknown'
+
+
+def _normalized_username(value: str | None) -> str:
+    return str(value or '').strip().casefold()[:120] or 'empty'
+
+
+def _token_fingerprint(value: str | None) -> str:
+    return hashlib.sha256(str(value or '').encode('utf-8')).hexdigest()[:24]
+
+
+def _enforce_login_limits(request: Request, username: str | None) -> None:
+    ip = _client_ip(request)
+    normalized = _normalized_username(username)
+    enforce_rate_limit(f'auth:login:ip:{ip}', limit=20, window_seconds=60)
+    enforce_rate_limit(f'auth:login:user:{normalized}', limit=8, window_seconds=60)
+    enforce_rate_limit(f'auth:login:pair:{ip}:{normalized}', limit=6, window_seconds=60)
+
+
+def _enforce_refresh_limits(request: Request, token: str | None) -> None:
+    ip = _client_ip(request)
+    fingerprint = _token_fingerprint(token)
+    enforce_rate_limit(f'auth:refresh:ip:{ip}', limit=60, window_seconds=60)
+    enforce_rate_limit(f'auth:refresh:token:{fingerprint}', limit=30, window_seconds=60)
 
 
 def _user_payload(db: Session, user: User):
@@ -93,11 +123,12 @@ def bootstrap(db: Session = Depends(get_db)):
 
 @router.post('/login')
 def login(payload: LoginPayload, request: Request, response: Response, db: Session = Depends(get_db)):
+    _enforce_login_limits(request, payload.username)
     user = authenticate_user(db, payload.username, payload.password)
     if not user:
         raise HTTPException(status_code=401, detail='Incorrect username or password')
     access_token = create_access_token(user.username, session_version=int(user.session_version or 1))
-    refresh_token = create_refresh_token(db, user, user_agent=request.headers.get('user-agent'), ip_address=request.client.host if request.client else None)
+    refresh_token = create_refresh_token(db, user, user_agent=request.headers.get('user-agent'), ip_address=_client_ip(request))
     user_payload = _user_payload(db, user)
     if _browser_session_enabled():
         set_browser_auth_cookies(response, access_token, refresh_token)
@@ -110,9 +141,10 @@ def refresh(request: Request, response: Response, payload: RefreshTokenPayload |
     token = browser_refresh_token(request)
     if not token and payload is not None:
         token = payload.refresh_token
+    _enforce_refresh_limits(request, token)
     if not token:
         raise HTTPException(status_code=401, detail='Refresh token is invalid or expired')
-    rotated = rotate_refresh_token(db, token, user_agent=request.headers.get('user-agent'), ip_address=request.client.host if request.client else None)
+    rotated = rotate_refresh_token(db, token, user_agent=request.headers.get('user-agent'), ip_address=_client_ip(request))
     if not rotated:
         clear_browser_auth_cookies(response)
         raise HTTPException(status_code=401, detail='Refresh token is invalid or expired')
