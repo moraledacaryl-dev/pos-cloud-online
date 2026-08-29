@@ -1,6 +1,6 @@
 import pytest
 
-from app.core.settings import Settings
+from app.core.settings import Settings, looks_like_placeholder_secret
 
 
 def make_settings(**overrides):
@@ -10,6 +10,9 @@ def make_settings(**overrides):
         'accounting_integration_secret': 'a' * 48,
         'integration_api_key': 'i' * 48,
         'allow_default_admin_bootstrap': False,
+        'rate_limit_enabled': True,
+        'rate_limit_backend': 'redis',
+        'redis_url': 'redis://127.0.0.1:6379/0',
     }
     base.update(overrides)
     return Settings(_env_file=None, **base)
@@ -51,6 +54,29 @@ def test_strict_environment_rejects_missing_or_placeholder_signing_secret(enviro
         placeholder.validate_runtime_security()
 
 
+@pytest.mark.parametrize(
+    'value',
+    [
+        'CHANGE_ME_GENERATE_WITH_OPENSSL_RAND_HEX_32',
+        'CHANGE_ME_SHARED_CROSS_APP_INTEGRATION_API_KEY',
+        'CHANGE-ME-SHARED-POS-ACCOUNTING-INTEGRATION-SECRET',
+        'change_me_pos_inventory_integration_token',
+    ],
+)
+def test_placeholder_detection_normalizes_common_separators(value):
+    assert looks_like_placeholder_secret(value) is True
+
+
+@pytest.mark.parametrize('environment', ['production', 'staging'])
+def test_strict_environment_rejects_documented_sample_secret(environment):
+    settings = make_settings(
+        environment=environment,
+        secret_key='CHANGE_ME_GENERATE_WITH_OPENSSL_RAND_HEX_32',
+    )
+    with pytest.raises(RuntimeError, match='SECRET_KEY'):
+        settings.validate_runtime_security()
+
+
 @pytest.mark.parametrize('environment', ['production', 'staging'])
 def test_strict_environment_rejects_bootstrap_enabled(environment):
     settings = make_settings(environment=environment, allow_default_admin_bootstrap=True)
@@ -82,6 +108,20 @@ def test_enabled_integrations_require_credentials():
     staff = make_settings(staff_integration_enabled=True, staff_integration_key='')
     with pytest.raises(RuntimeError, match='STAFF_INTEGRATION_KEY'):
         staff.validate_runtime_security()
+
+
+@pytest.mark.parametrize('environment', ['production', 'staging'])
+def test_strict_environment_rejects_memory_rate_limiting(environment):
+    settings = make_settings(environment=environment, rate_limit_backend='memory')
+    with pytest.raises(RuntimeError, match='RATE_LIMIT_BACKEND'):
+        settings.validate_runtime_security()
+
+
+@pytest.mark.parametrize('environment', ['production', 'staging'])
+def test_strict_environment_requires_redis_url_for_rate_limiting(environment):
+    settings = make_settings(environment=environment, rate_limit_backend='redis', redis_url='')
+    with pytest.raises(RuntimeError, match='REDIS_URL'):
+        settings.validate_runtime_security()
 
 
 def test_development_security_warnings_do_not_fail_startup_validation():
