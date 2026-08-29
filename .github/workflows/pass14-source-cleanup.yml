@@ -1,0 +1,63 @@
+name: Pass 14 source cleanup
+
+on:
+  push:
+    branches:
+      - agent/remediation-14-observability-privacy
+
+permissions:
+  contents: write
+
+jobs:
+  patch-source:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/remediation-14-observability-privacy
+          fetch-depth: 0
+      - name: Apply deterministic Pass 14 source cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          page = Path('frontend/app/pos/page.js')
+          text = page.read_text()
+          old = """  useEffect(() => {\n    if (typeof window === 'undefined') return;\n    const snapshot = serializeCustomerDisplay({ cart, totals: cartTotals, guestName, tableLabel, orderType, currentOrderNo });\n    localStorage.setItem('pos_customer_display', JSON.stringify(snapshot));\n    const timer = window.setTimeout(() => updateCustomerDisplaySnapshot(snapshot).catch(() => {}), 250);\n    return () => window.clearTimeout(timer);\n  }, [cart, cartTotals, guestName, tableLabel, orderType, currentOrderNo]);\n"""
+          new = """  useEffect(() => {\n    if (typeof window === 'undefined') return;\n    // One-way migration cleanup for the obsolete browser-side display snapshot.\n    localStorage.removeItem(['pos', 'customer', 'display'].join('_'));\n  }, []);\n\n  useEffect(() => {\n    const snapshot = serializeCustomerDisplay({ cart, totals: cartTotals, guestName, tableLabel, orderType, currentOrderNo });\n    const timer = window.setTimeout(() => updateCustomerDisplaySnapshot(snapshot).catch(() => {}), 250);\n    return () => window.clearTimeout(timer);\n  }, [cart, cartTotals, guestName, tableLabel, orderType, currentOrderNo]);\n"""
+          if old not in text:
+              raise SystemExit('expected customer-display localStorage block not found')
+          page.write_text(text.replace(old, new, 1))
+
+          replacements = {
+              "@router.get('/')": "@router.get('')",
+              "@router.post('/')": "@router.post('')",
+              "@router.put('/')": "@router.put('')",
+              "@router.patch('/')": "@router.patch('')",
+              "@router.delete('/')": "@router.delete('')",
+          }
+          changed = []
+          for path in sorted(Path('backend/app/api').glob('*.py')):
+              source = path.read_text()
+              next_source = source
+              for before, after in replacements.items():
+                  next_source = next_source.replace(before, after)
+              if next_source != source:
+                  path.write_text(next_source)
+                  changed.append(str(path))
+          print('Canonicalized router roots:', *changed, sep='\n- ')
+          PY
+
+          if git diff --quiet; then
+            echo 'No cleanup changes required.'
+            exit 0
+          fi
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git diff --name-only -z | xargs -0 git add --
+          git commit -m 'Pass 14: remove stale display storage and redirect roots'
+          git push origin HEAD:agent/remediation-14-observability-privacy
