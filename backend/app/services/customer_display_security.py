@@ -16,6 +16,7 @@ DISPLAY_COOKIE = 'pos_display'
 PAIRING_TTL_SECONDS = 120
 DEVICE_TTL_DAYS = 180
 SNAPSHOT_TTL_SECONDS = 600
+DISPLAY_HEARTBEAT_PERSIST_SECONDS = 60
 
 
 def _now() -> datetime:
@@ -117,13 +118,19 @@ def require_display_device(db: Session, request: Request, channel: str) -> Custo
     if not device or not device.is_active or device.revoked_at:
         raise HTTPException(status_code=401, detail='Customer display credential is invalid or revoked')
     expires_at = _parse(device.expires_at)
-    if expires_at and expires_at <= _now():
+    now = _now()
+    if expires_at and expires_at <= now:
         raise HTTPException(status_code=401, detail='Customer display credential has expired')
     if device.channel != channel:
         raise HTTPException(status_code=403, detail='Customer display is paired to another channel')
-    device.last_seen_at = _iso(_now())
-    db.add(device)
-    db.commit()
+
+    # Customer displays poll frequently. Persist presence at most once per minute
+    # instead of turning every read into a database write/commit.
+    last_seen = _parse(device.last_seen_at)
+    if last_seen is None or (now - last_seen).total_seconds() >= DISPLAY_HEARTBEAT_PERSIST_SECONDS:
+        device.last_seen_at = _iso(now)
+        db.add(device)
+        db.commit()
     return device
 
 
