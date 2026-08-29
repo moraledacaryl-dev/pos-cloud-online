@@ -160,6 +160,7 @@ AUTOMATED PRODUCTION CERTIFICATION: PASS
 
 This script is intentionally non-destructive. It does not create orders, payments,
 refunds, voids, room charges, cash movements, or register sessions.
-Complete the controlled pilot checklist in docs/PASS_12_PRODUCTION_ACCEPTANCE.md
-before declaring the release operationally certified.
+A green automated certification proves the deployed code/runtime gate only.
+Complete the dated evidence requirements in docs/PASS_16_OPERATIONAL_ACCEPTANCE.md
+before declaring literal operational acceptance.
 EOF
