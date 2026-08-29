@@ -68,6 +68,7 @@ export default function KitchenPage({ initialStation = '', initialView = '' }) {
   const [connectionState, setConnectionState] = useState('connecting');
   const [newTicketCount, setNewTicketCount] = useState(0);
   const [partialLine, setPartialLine] = useState(null);
+  const [soundEnabled, setSoundEnabled] = useState(false);
   const seenRef = useRef(new Set());
   const audioRef = useRef(null);
   const streamRef = useRef(null);
@@ -84,6 +85,33 @@ export default function KitchenPage({ initialStation = '', initialView = '' }) {
     if (VIEWS.some((item) => item.key === requestedView)) setView(requestedView);
   }, []);
 
+  async function playAlert() {
+    if (!soundEnabled || !audioRef.current) return;
+    try {
+      audioRef.current.currentTime = 0;
+      await audioRef.current.play();
+    } catch {
+      setSoundEnabled(false);
+      setNotice('Kitchen sound was blocked by the browser. Select Enable sound to turn alerts back on.');
+    }
+  }
+
+  async function enableSound() {
+    if (!audioRef.current) return;
+    setNotice('');
+    try {
+      audioRef.current.currentTime = 0;
+      await audioRef.current.play();
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      setSoundEnabled(true);
+      setNotice('Kitchen sound alerts enabled.');
+    } catch {
+      setSoundEnabled(false);
+      setNotice('Kitchen sound could not be enabled in this browser.');
+    }
+  }
+
   async function loadTickets() {
     try {
       const rows = await fetchKitchenTickets({ station: station || undefined, statuses });
@@ -92,7 +120,7 @@ export default function KitchenPage({ initialStation = '', initialView = '' }) {
       safeRows.forEach((row) => seenRef.current.add(row.line_id));
       if (incoming.length && view === 'active') {
         setNewTicketCount((prev) => prev + incoming.length);
-        try { audioRef.current?.play?.(); } catch {}
+        await playAlert();
       }
       setTickets(safeRows);
       setError('');
@@ -101,7 +129,7 @@ export default function KitchenPage({ initialStation = '', initialView = '' }) {
     }
   }
 
-  useEffect(() => { loadTickets().catch(console.error); }, [station, view]);
+  useEffect(() => { loadTickets().catch(console.error); }, [station, view, soundEnabled]);
 
   useEffect(() => {
     let cancelled = false;
@@ -159,7 +187,7 @@ export default function KitchenPage({ initialStation = '', initialView = '' }) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [station, view]);
+  }, [station, view, soundEnabled]);
 
   const grouped = useGroupedKitchenTickets(tickets);
   const allDay = useMemo(() => allDayRows(tickets), [tickets]);
@@ -228,9 +256,7 @@ export default function KitchenPage({ initialStation = '', initialView = '' }) {
 
   return (
     <div className="kds-page">
-      <audio ref={audioRef} preload="none">
-        <source src="data:audio/wav;base64,UklGRlQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YTAAAAEA" />
-      </audio>
+      <audio ref={audioRef} src="/sounds/kds-alert.wav" preload="auto" />
 
       <section className="section kds-topbar">
         <div>
@@ -240,6 +266,7 @@ export default function KitchenPage({ initialStation = '', initialView = '' }) {
         <div className="kds-top-actions">
           <span className={`badge ${connectionState === 'connected' ? 'success' : connectionState === 'connecting' ? 'warn' : 'danger'}`}>{connectionState}</span>
           <span className={`badge ${newTicketCount ? 'warn' : 'info'}`}>{newTicketCount ? `${newTicketCount} new` : 'No new'}</span>
+          <button type="button" className="secondary" aria-pressed={soundEnabled} onClick={() => enableSound().catch(() => {})}>{soundEnabled ? 'Sound enabled' : 'Enable sound'}</button>
           <button type="button" className="secondary" onClick={() => { setNewTicketCount(0); loadTickets().catch(() => {}); }}>Refresh</button>
           <button type="button" className="secondary" onClick={() => window.print()}>Print</button>
         </div>
