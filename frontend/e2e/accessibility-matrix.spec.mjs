@@ -85,8 +85,9 @@ test.describe.serial('Pass 13 full-route accessibility matrix', () => {
     await keyboardLogin(page, cashierUsername, cashierPassword);
     await page.goto('/users', { waitUntil: 'domcontentloaded' });
     await expect(page.locator('[data-route-status="403"]')).toBeVisible();
-    await page.getByRole('button', { name: 'Open my workspace' }).focus();
-    await expect(page.getByRole('button', { name: 'Open my workspace' })).toBeFocused();
+    const workspaceLink = page.getByRole('link', { name: 'Open my workspace' });
+    await workspaceLink.focus();
+    await expect(workspaceLink).toBeFocused();
     expect(await seriousAxeViolations(page), 'serious/critical Axe violations on cashier denial state').toEqual([]);
   });
 });
