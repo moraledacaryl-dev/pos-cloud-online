@@ -1,0 +1,33 @@
+.nav-group-label,
+.muted-on-dark {
+  color: #626861;
+}
+
+.list-row-button.active .muted,
+.list-row-button[aria-current="true"] .muted {
+  color: #d7ddd8;
+}
+
+[role="dialog"]:focus-visible,
+.table[tabindex="0"]:focus-visible,
+.section[tabindex="0"]:focus-visible,
+.cart-lines-box[tabindex="0"]:focus-visible {
+  outline: 3px solid #1f6a47;
+  outline-offset: 2px;
+}
+
+@media (max-width: 1000px) {
+  .table[tabindex="0"],
+  .section[tabindex="0"],
+  .cart-lines-box[tabindex="0"] {
+    max-width: 100%;
+    scroll-behavior: smooth;
+    overscroll-behavior-inline: contain;
+    scrollbar-gutter: stable;
+  }
+
+  .table[tabindex="0"] {
+    width: max-content;
+    min-width: 100%;
+  }
+}
