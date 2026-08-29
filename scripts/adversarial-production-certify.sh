@@ -3,6 +3,7 @@ set -euo pipefail
 
 APP_DIR="${APP_DIR:-/opt/pos-cloud-online}"
 PUBLIC_BASE="${PUBLIC_BASE:-https://pos.hiddenoasis.app}"
+BACKEND_BASE="${BACKEND_BASE:-http://127.0.0.1:8100}"
 EXPECTED_COMMIT="${EXPECTED_COMMIT:-}"
 PYTHON="$APP_DIR/backend/.venv/bin/python"
 
@@ -67,6 +68,13 @@ if grep -RInE "pos_token|pos_refresh_token|localStorage\\.(getItem|setItem|remov
 fi
 pass "frontend contains no legacy localStorage/JWT URL credential flow"
 
+# Customer-display privacy regression: the obsolete duplicated cart snapshot must
+# not be persisted in browser localStorage now that the display is server-backed.
+if grep -RIn "pos_customer_display" frontend/app frontend/lib frontend/components --exclude='*.test.*'; then
+  fail "legacy customer-display localStorage persistence detected"
+fi
+pass "frontend contains no legacy customer-display localStorage persistence"
+
 # Manager approval regression: internal approver attribution may legitimately carry
 # approved_by_user_id after a server-verified grant is consumed. Prove the actual
 # exploit boundary instead: every protected payload must reject a caller-supplied
@@ -122,6 +130,8 @@ http_probe GET "$PUBLIC_BASE/api/audit?limit=25" 401
 http_probe GET "$PUBLIC_BASE/api/customer-display/main" 401
 http_probe GET "$PUBLIC_BASE/api/kitchen/stream?token=legacy-adversarial-test" 422
 http_probe GET "$PUBLIC_BASE/api/kitchen/stream-metrics" 401
+http_probe GET "$PUBLIC_BASE/healthz/details" 404
+http_probe GET "$PUBLIC_BASE/internal/healthz/details" 404
 
 UNKNOWN_CODE="$(curl -sS --max-time 8 -o /dev/null -w '%{http_code}' "$PUBLIC_BASE/adversarial-route-does-not-exist")"
 [[ "$UNKNOWN_CODE" == "404" ]] || fail "unknown route returned HTTP $UNKNOWN_CODE instead of 404"
@@ -139,9 +149,9 @@ grep -qi '^content-security-policy:.*frame-ancestors' "$HEADERS" || fail "CSP fr
 grep -qi '^strict-transport-security:' "$HEADERS" || fail "HSTS missing at HTTPS proxy"
 pass "browser security headers and HSTS are present"
 
-# Public readiness must prove strict runtime security, Redis tickets, worker freshness, and clean outbox.
-DETAILS_JSON="$(curl -fsS "$PUBLIC_BASE/healthz/details")"
-READY_JSON="$(curl -fsS "$PUBLIC_BASE/readyz/integrations")"
+# Detailed readiness is deliberately queried only over direct loopback.
+DETAILS_JSON="$(curl -fsS "$BACKEND_BASE/internal/healthz/details")"
+READY_JSON="$(curl -fsS "$BACKEND_BASE/internal/readyz/integrations")"
 DETAILS_JSON="$DETAILS_JSON" READY_JSON="$READY_JSON" "$PYTHON" - <<'PY'
 import json
 import os
