@@ -1,7 +1,9 @@
 'use client';
 
-import { useEffect } from 'react';
+import Link from 'next/link';
+import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
+import { logoutSession } from '../lib/api';
 import { useCurrentUser } from '../lib/useCurrentUser';
 import { defaultRouteForUser, getRouteMeta, normalizeRoutePath, routeCanAccess } from '../lib/routes';
 
@@ -9,6 +11,7 @@ export default function RouteGuard({ children }) {
   const pathname = usePathname();
   const normalized = normalizeRoutePath(pathname);
   const { loaded, user } = useCurrentUser();
+  const [loggingOut, setLoggingOut] = useState(false);
   const isLogin = normalized === '/login';
   const isCustomerDisplay = normalized === '/customer-display';
   const isPublic = isLogin || isCustomerDisplay;
@@ -26,6 +29,17 @@ export default function RouteGuard({ children }) {
     const target = defaultRouteForUser(user);
     if (target && target !== '/login') window.location.replace(target);
   }, [isLogin, loaded, user]);
+
+  async function handleLogout() {
+    setLoggingOut(true);
+    try {
+      await logoutSession();
+    } catch {
+      // Clearing the server session is best-effort here; login remains the safe destination.
+    } finally {
+      window.location.replace('/login');
+    }
+  }
 
   if (!loaded && !isPublic) {
     return (
@@ -60,10 +74,18 @@ export default function RouteGuard({ children }) {
 
   if (!isKnownProtectedRoute || routeCanAccess(user, normalized)) return children;
 
+  const fallback = defaultRouteForUser(user) || '/';
+
   return (
     <section className="section" role="alert" data-route-status="403">
       <h1>Access Restricted</h1>
       <p className="muted">This page exists, but your account does not have permission to open it.</p>
+      <div className="route-denied-actions">
+        <Link className="button-link" href={fallback}>Open my workspace</Link>
+        <button type="button" className="secondary" disabled={loggingOut} onClick={handleLogout}>
+          {loggingOut ? 'Signing out…' : 'Sign out'}
+        </button>
+      </div>
     </section>
   );
 }
