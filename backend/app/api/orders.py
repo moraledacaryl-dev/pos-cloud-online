@@ -32,7 +32,7 @@ def state_policy(user=Depends(require_permissions('pos.use'))):
     return policy_snapshot()
 
 
-@router.get('/')
+@router.get('')
 def orders(status: str | None = None, session_id: int | None = None, q: str | None = None, business_date: str | None = None, limit: int = 200, db: Session = Depends(get_db), user=Depends(require_permissions('pos.use'))):
     return list_orders(db, status=status, session_id=session_id, q=q, business_date=business_date, limit=limit)
 
@@ -45,7 +45,7 @@ def order_detail(order_id: int, db: Session = Depends(get_db), user=Depends(requ
         raise HTTPException(status_code=404, detail=str(e))
 
 
-@router.post('/')
+@router.post('')
 def add_order(payload: OrderCreate, db: Session = Depends(get_db), current_user=Depends(require_permissions('orders.manage'))):
     try:
         reject_legacy_client_approver(payload)

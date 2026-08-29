@@ -73,7 +73,6 @@ class Settings(BaseSettings):
     sync_worker_poll_seconds: int = 30
     sync_worker_batch_size: int = 25
     sync_worker_stale_seconds: int = 120
-    trusted_proxy_depth: int = 0
     accounting_api_base: str = DEFAULT_ACCOUNTING_API_BASE
     accounting_integration_secret: str = ''
     integration_api_key: str = ''
@@ -89,7 +88,6 @@ class Settings(BaseSettings):
     operations_integration_timeout_seconds: int = 5
     staff_integration_enabled: bool = False
     staff_integration_key: str = ''
-    trust_proxy_headers: bool = False
     model_config = SettingsConfigDict(env_file=str(BACKEND_ROOT / '.env'), extra='ignore')
 
     @property

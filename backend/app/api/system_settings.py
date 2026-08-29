@@ -41,7 +41,7 @@ DEFAULT_TABLE_LAYOUT = {
 }
 
 
-@router.get('/')
+@router.get('')
 def get_settings(db: Session = Depends(get_db), user=Depends(require_permissions('settings.manage'))):
     return {
         'accounting_sync': public_accounting_sync(setting_json(db, 'accounting_sync', default={})),
@@ -49,7 +49,7 @@ def get_settings(db: Session = Depends(get_db), user=Depends(require_permissions
     }
 
 
-@router.put('/')
+@router.put('')
 def update_settings(payload: SystemSettingsUpdate, db: Session = Depends(get_db), current_user=Depends(require_permissions('settings.manage'))):
     data = payload.model_dump(exclude_unset=True)
     if 'accounting_sync' in data:

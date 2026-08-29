@@ -19,14 +19,37 @@ function proxy(req, res, target) {
       'x-forwarded-proto': 'http',
     },
   };
-  const upstream = http.request(options, (upstreamRes) => {
-    res.writeHead(upstreamRes.statusCode || 502, upstreamRes.headers);
-    upstreamRes.pipe(res);
+  const upstream = http.request(options);
+  let upstreamRes = null;
+  let settled = false;
+
+  const destroyUpstream = () => {
+    if (settled) return;
+    settled = true;
+    if (!upstream.destroyed) upstream.destroy();
+    if (upstreamRes && !upstreamRes.destroyed) upstreamRes.destroy();
+  };
+
+  req.once('aborted', destroyUpstream);
+  res.once('close', destroyUpstream);
+
+  upstream.on('response', (response) => {
+    upstreamRes = response;
+    if (res.destroyed) {
+      response.destroy();
+      return;
+    }
+    res.writeHead(response.statusCode || 502, response.headers);
+    response.once('error', destroyUpstream);
+    response.once('end', () => { settled = true; });
+    response.pipe(res);
   });
+
   upstream.on('error', (error) => {
-    if (!res.headersSent) res.writeHead(502, { 'content-type': 'text/plain' });
-    res.end(`CI proxy upstream failure: ${error.message}`);
+    if (!res.headersSent && !res.destroyed) res.writeHead(502, { 'content-type': 'text/plain' });
+    if (!res.destroyed) res.end(`CI proxy upstream failure: ${error.message}`);
   });
+
   req.pipe(upstream);
 }
 

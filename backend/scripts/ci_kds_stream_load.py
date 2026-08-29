@@ -76,7 +76,7 @@ async def main() -> int:
                 results = await asyncio.gather(
                     controller.get('/api/auth/me'),
                     controller.get('/api/kitchen/tickets'),
-                    controller.get('/api/orders/'),
+                    controller.get('/api/orders'),
                 )
                 statuses = [response.status_code for response in results]
                 if statuses != [200, 200, 200]:

@@ -61,15 +61,20 @@ done
 require_http_200 "$BACKEND_BASE/healthz"
 require_http_200 "$BACKEND_BASE/readyz"
 require_http_200 "$BACKEND_BASE/readyz/integrations"
+require_http_200 "$BACKEND_BASE/internal/healthz/details"
+require_http_200 "$BACKEND_BASE/internal/readyz/integrations"
 require_http_200 "$FRONTEND_BASE/"
 require_http_200 "$PUBLIC_BASE/"
 require_http_200 "$PUBLIC_BASE/healthz"
-require_http_200 "$PUBLIC_BASE/healthz/details"
 require_http_200 "$PUBLIC_BASE/readyz"
 require_http_200 "$PUBLIC_BASE/readyz/integrations"
 
-DETAILS_JSON="$(curl -fsS "$PUBLIC_BASE/healthz/details")"
-INTEGRATION_JSON="$(curl -fsS "$PUBLIC_BASE/readyz/integrations")"
+PUBLIC_DETAILS_CODE="$(http_code "$PUBLIC_BASE/healthz/details")"
+[[ "$PUBLIC_DETAILS_CODE" == "404" ]] || fail "$PUBLIC_BASE/healthz/details returned HTTP $PUBLIC_DETAILS_CODE instead of 404"
+pass "public detailed health endpoint is not exposed"
+
+DETAILS_JSON="$(curl -fsS "$BACKEND_BASE/internal/healthz/details")"
+INTEGRATION_JSON="$(curl -fsS "$BACKEND_BASE/internal/readyz/integrations")"
 
 DETAILS_JSON="$DETAILS_JSON" INTEGRATION_JSON="$INTEGRATION_JSON" python3 - <<'PY'
 import json
@@ -109,7 +114,7 @@ if errors:
         print(f"- {error}")
     sys.exit(1)
 
-print("PASS: production health payload is fully ready")
+print("PASS: production health payload is fully ready on local-only monitoring surface")
 print(
     "Outbox:",
     json.dumps(

@@ -65,12 +65,12 @@ async def accounting_accounts_validate(account_id: int | None = None, account_co
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.get('/')
+@router.get('')
 def registers(active_only: bool = False, db: Session = Depends(get_db), user=Depends(require_permissions('registers.view'))):
     return list_registers(db, only_active=active_only)
 
 
-@router.post('/')
+@router.post('')
 async def add_register(payload: RegisterCreate, db: Session = Depends(get_db), user=Depends(require_permissions('registers.manage'))):
     try:
         if payload.accounting_financial_account_id or payload.accounting_financial_account_code:

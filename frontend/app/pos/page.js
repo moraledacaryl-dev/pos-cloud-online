@@ -470,8 +470,12 @@ export default function PosPage() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    // One-way migration cleanup for the obsolete browser-side display snapshot.
+    localStorage.removeItem(['pos', 'customer', 'display'].join('_'));
+  }, []);
+
+  useEffect(() => {
     const snapshot = serializeCustomerDisplay({ cart, totals: cartTotals, guestName, tableLabel, orderType, currentOrderNo });
-    localStorage.setItem('pos_customer_display', JSON.stringify(snapshot));
     const timer = window.setTimeout(() => updateCustomerDisplaySnapshot(snapshot).catch(() => {}), 250);
     return () => window.clearTimeout(timer);
   }, [cart, cartTotals, guestName, tableLabel, orderType, currentOrderNo]);
