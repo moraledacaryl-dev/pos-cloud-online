@@ -1,0 +1,22 @@
+[Unit]
+Description=Hidden Oasis POS Backend
+After=network.target postgresql.service redis-server.service
+Requires=postgresql.service redis-server.service
+
+[Service]
+Type=simple
+User=hiddenoasis
+Group=hiddenoasis
+WorkingDirectory=/opt/pos-cloud-online/backend
+EnvironmentFile=/etc/hiddenoasis/pos-backend.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStartPre=/opt/pos-cloud-online/backend/.venv/bin/alembic upgrade head
+ExecStart=/opt/pos-cloud-online/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8100 --proxy-headers --forwarded-allow-ips=127.0.0.1
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target
