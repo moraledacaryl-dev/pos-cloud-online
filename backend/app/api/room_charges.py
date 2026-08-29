@@ -18,7 +18,7 @@ from app.services.room_charge_policy import validate_room_charge_status_update
 router = APIRouter()
 
 
-@router.get('/')
+@router.get('')
 def room_charge_queue(posting_status: str | None = None, stay_date: str | None = None, room_number: str | None = None, q: str | None = None, limit: int = 200, db: Session = Depends(get_db), user=Depends(require_any_permissions('room_charges.view', 'orders.manage', 'pos.use'))):
     return list_room_charge_postings(db, posting_status=posting_status, stay_date=stay_date, room_number=room_number, q=q, limit=limit)
 

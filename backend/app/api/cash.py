@@ -54,12 +54,12 @@ def _correct_cash_audit_attribution(db: Session, movement_id: int, current_user,
     db.commit()
 
 
-@router.get('/')
+@router.get('')
 def cash_movements(session_id: int | None = None, limit: int = 300, db: Session = Depends(get_db), user=Depends(require_permissions('cash.manage'))):
     return list_cash_movements(db, session_id=session_id, limit=limit)
 
 
-@router.post('/')
+@router.post('')
 def add_cash_movement(payload: CashMovementCreate, db: Session = Depends(get_db), current_user=Depends(require_permissions('cash.manage'))):
     try:
         reject_legacy_client_approver(payload)

@@ -11,7 +11,7 @@ from app.services.pos_service import close_register_session, get_register_sessio
 router = APIRouter()
 
 
-@router.get('/')
+@router.get('')
 def sessions(status: str | None = None, register_id: int | None = None, limit: int = 200, db: Session = Depends(get_db), user=Depends(require_permissions('registers.view'))):
     return list_register_sessions(db, status=status, register_id=register_id, limit=limit)
 

@@ -21,7 +21,7 @@ def dishes(q: str | None = None, db: Session = Depends(get_db), user=Depends(req
     return list_recipe_dishes(db, q=q)
 
 
-@router.get('/')
+@router.get('')
 def documents(q: str | None = None, db: Session = Depends(get_db), user=Depends(require_permissions('recipes.view'))):
     return list_recipe_documents(db, q=q)
 
