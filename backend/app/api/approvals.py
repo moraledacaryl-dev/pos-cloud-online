@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 
 from app.api.deps import require_any_permissions
+from app.core.rate_limit import enforce_rate_limit
 from app.db.database import get_db
 from app.services.approval_service import authorize_approval_with_credentials, list_manager_approvals, approve_manager_approval, reject_manager_approval
 
@@ -23,8 +24,17 @@ class ApprovalAuthorizeRequest(BaseModel):
     protected_payload: dict | list | None = None
 
 
+def _approval_auth_limits(http_request: Request, manager_username: str) -> None:
+    ip = http_request.client.host if http_request.client else 'unknown'
+    username = str(manager_username or '').strip().casefold()[:100] or 'empty'
+    enforce_rate_limit(f'auth:manager-approval:ip:{ip}', limit=20, window_seconds=60)
+    enforce_rate_limit(f'auth:manager-approval:user:{username}', limit=8, window_seconds=60)
+    enforce_rate_limit(f'auth:manager-approval:pair:{ip}:{username}', limit=6, window_seconds=60)
+
+
 @router.post('/authorize')
-def authorize_approval(request: ApprovalAuthorizeRequest, db: Session = Depends(get_db), user=Depends(require_any_permissions('pos.use', 'orders.manage', 'cash.manage', 'sessions.manage', 'room_charges.manage'))):
+def authorize_approval(request: ApprovalAuthorizeRequest, http_request: Request, db: Session = Depends(get_db), user=Depends(require_any_permissions('pos.use', 'orders.manage', 'cash.manage', 'sessions.manage', 'room_charges.manage'))):
+    _approval_auth_limits(http_request, request.manager_username)
     try:
         return authorize_approval_with_credentials(
             db,
