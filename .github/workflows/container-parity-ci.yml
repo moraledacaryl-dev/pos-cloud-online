@@ -30,6 +30,7 @@ jobs:
       - name: Migrate isolated container database
         run: |
           docker volume create pos-container-ci >/dev/null
+          docker run --rm --user 0 -v pos-container-ci:/data hiddenoasis-pos-backend:ci sh -c 'chown -R pos:pos /data'
           docker run --rm \
             -v pos-container-ci:/data \
             -e ENVIRONMENT=test \
