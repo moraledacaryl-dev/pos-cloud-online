@@ -1,7 +1,7 @@
 [Unit]
 Description=Hidden Oasis POS Accounting Sync Worker
-After=network.target postgresql.service hiddenoasis-pos-backend.service
-Requires=postgresql.service
+After=network.target postgresql.service redis-server.service pos-backend.service
+Requires=postgresql.service redis-server.service pos-backend.service
 
 [Service]
 Type=simple

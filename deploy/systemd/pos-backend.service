@@ -1,7 +1,7 @@
 [Unit]
 Description=Hidden Oasis POS Backend
-After=network.target postgresql.service
-Requires=postgresql.service
+After=network.target postgresql.service redis-server.service
+Requires=postgresql.service redis-server.service
 
 [Service]
 Type=simple

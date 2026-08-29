@@ -1,0 +1,100 @@
+name: Container parity CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  container-parity:
+    name: Build and smoke production containers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build backend image
+        run: docker build -t hiddenoasis-pos-backend:ci backend
+
+      - name: Prove backend runtime and locked dependencies
+        run: |
+          docker run --rm hiddenoasis-pos-backend:ci python --version | grep 'Python 3.12'
+          docker run --rm hiddenoasis-pos-backend:ci python - <<'PY'
+          import fastapi, sqlalchemy, redis, jwt
+          print('backend imports ok')
+          PY
+
+      - name: Migrate isolated container database
+        run: |
+          docker volume create pos-container-ci >/dev/null
+          docker run --rm --user 0 -v pos-container-ci:/data hiddenoasis-pos-backend:ci sh -c 'chown -R pos:pos /data'
+          docker run --rm \
+            -v pos-container-ci:/data \
+            -e ENVIRONMENT=test \
+            -e DATABASE_URL=sqlite:////data/pos.db \
+            -e STARTUP_REQUIRE_MIGRATIONS=false \
+            -e RATE_LIMIT_ENABLED=false \
+            hiddenoasis-pos-backend:ci alembic upgrade head
+
+      - name: Start backend container and require liveness
+        run: |
+          docker run -d --name pos-backend-ci \
+            -p 18100:8100 \
+            -v pos-container-ci:/data \
+            -e ENVIRONMENT=test \
+            -e DATABASE_URL=sqlite:////data/pos.db \
+            -e STARTUP_REQUIRE_MIGRATIONS=false \
+            -e RATE_LIMIT_ENABLED=false \
+            hiddenoasis-pos-backend:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18100/healthz >/dev/null; then
+              curl -fsS http://127.0.0.1:18100/healthz
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs pos-backend-ci
+          exit 1
+
+      - name: Build frontend image
+        run: docker build -t hiddenoasis-pos-frontend:ci frontend
+
+      - name: Prove frontend runtime
+        run: docker run --rm hiddenoasis-pos-frontend:ci node --version | grep '^v24\.'
+
+      - name: Start frontend container and require liveness
+        run: |
+          docker run -d --name pos-frontend-ci -p 13100:3100 hiddenoasis-pos-frontend:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:13100/login >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs pos-frontend-ci
+          exit 1
+
+      - name: Assert image and port parity contracts
+        run: |
+          grep -q '^FROM node:24-alpine' frontend/Dockerfile
+          grep -q '^FROM python:3.12-slim' backend/Dockerfile
+          grep -q 'requirements.lock' backend/Dockerfile
+          grep -q 'EXPOSE 3100' frontend/Dockerfile
+          grep -q 'EXPOSE 8100' backend/Dockerfile
+          test -f deploy/systemd/pos-backend.service
+          test -f deploy/systemd/pos-frontend.service
+          test -f deploy/systemd/pos-sync-worker.service
+          test ! -e deploy/systemd/hiddenoasis-pos-backend.service
+          test ! -e deploy/systemd/hiddenoasis-pos-frontend.service
+          test ! -e deploy/systemd/hiddenoasis-pos-sync-worker.service
+          grep -q -- '--port 8100' deploy/systemd/pos-backend.service
+          grep -q -- '-p 3100' deploy/systemd/pos-frontend.service
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker rm -f pos-backend-ci pos-frontend-ci 2>/dev/null || true
+          docker volume rm pos-container-ci 2>/dev/null || true

@@ -1,6 +1,7 @@
 [Unit]
 Description=Hidden Oasis POS Frontend
-After=network.target hiddenoasis-pos-backend.service
+After=network.target pos-backend.service
+Requires=pos-backend.service
 
 [Service]
 Type=simple
