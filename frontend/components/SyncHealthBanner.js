@@ -67,10 +67,10 @@ export default function SyncHealthBanner() {
     : 'Local selling is available. Downstream synchronization will retry automatically.';
 
   return (
-    <div className={`sync-health-banner ${summary.tone}`}>
+    <aside className={`sync-health-banner ${summary.tone}`} aria-label="POS sync status">
       <div><strong>{label}</strong><span>{detail}</span></div>
       {canViewDiagnostics ? <Link href="/sync">Open diagnostics</Link> : <span>Tell a manager if this continues.</span>}
       <span className="sr-only" aria-live="polite">{announcement}</span>
-    </div>
+    </aside>
   );
 }
