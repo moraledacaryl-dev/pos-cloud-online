@@ -3,7 +3,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -84,6 +84,19 @@ async def request_context_middleware(request: Request, call_next):
     return response
 
 
+def _require_direct_loopback(request: Request) -> None:
+    """Detailed operational health is for direct local monitoring only.
+
+    A reverse-proxied request carries X-Forwarded-For even when Nginx connects
+    to Uvicorn over loopback. Reject it so external callers cannot obtain
+    database, worker, queue, migration, or downstream dependency details.
+    """
+    client_ip = request.client.host if request.client else ''
+    forwarded_for = (request.headers.get('x-forwarded-for') or '').strip()
+    if client_ip not in {'127.0.0.1', '::1'} or forwarded_for:
+        raise HTTPException(status_code=404, detail='Not found')
+
+
 @app.get('/')
 def root():
     return {'app': settings.app_name, 'status': 'ok'}
@@ -91,8 +104,8 @@ def root():
 
 @app.get('/healthz')
 def healthz():
-    """Liveness only: process is up and can answer HTTP."""
-    return {'ok': True, 'environment': settings.environment}
+    """Public liveness only: process is up and can answer HTTP."""
+    return {'ok': True}
 
 
 @app.get('/api/healthz')
@@ -100,24 +113,21 @@ def api_healthz():
     return healthz()
 
 
-@app.get('/healthz/details')
-async def healthz_details():
+@app.get('/internal/healthz/details')
+async def internal_healthz_details(request: Request):
+    _require_direct_loopback(request)
     with SessionLocal() as db:
         return await build_health_report(db, engine)
 
 
-@app.get('/api/healthz/details')
-async def api_healthz_details():
-    return await healthz_details()
-
-
 @app.get('/readyz')
 async def readyz():
-    """Core POS readiness. Integration degradation does not stop local selling."""
+    """Public core readiness with no operational internals."""
     with SessionLocal() as db:
         report = await build_health_report(db, engine)
-    status_code = 200 if report.get('sales_ready') else 503
-    return JSONResponse(status_code=status_code, content=report)
+    sales_ready = bool(report.get('sales_ready'))
+    status_code = 200 if sales_ready else 503
+    return JSONResponse(status_code=status_code, content={'ok': sales_ready, 'sales_ready': sales_ready})
 
 
 @app.get('/api/readyz')
@@ -127,16 +137,35 @@ async def api_readyz():
 
 @app.get('/readyz/integrations')
 async def integration_readyz():
-    """Strict downstream readiness for monitoring sync worker/outbox health."""
+    """Public strict dependency readiness with no queue or dependency details."""
     with SessionLocal() as db:
         report = await build_health_report(db, engine)
-    status_code = 200 if report.get('ok') else 503
-    return JSONResponse(status_code=status_code, content=report)
+    ok = bool(report.get('ok'))
+    status_code = 200 if ok else 503
+    return JSONResponse(status_code=status_code, content={'ok': ok, 'integrations_ready': bool(report.get('integrations_ready'))})
 
 
 @app.get('/api/readyz/integrations')
 async def api_integration_readyz():
     return await integration_readyz()
+
+
+@app.get('/internal/readyz')
+async def internal_readyz(request: Request):
+    _require_direct_loopback(request)
+    with SessionLocal() as db:
+        report = await build_health_report(db, engine)
+    status_code = 200 if report.get('sales_ready') else 503
+    return JSONResponse(status_code=status_code, content=report)
+
+
+@app.get('/internal/readyz/integrations')
+async def internal_integration_readyz(request: Request):
+    _require_direct_loopback(request)
+    with SessionLocal() as db:
+        report = await build_health_report(db, engine)
+    status_code = 200 if report.get('ok') else 503
+    return JSONResponse(status_code=status_code, content=report)
 
 
 app.include_router(api_router, prefix=settings.api_prefix)
