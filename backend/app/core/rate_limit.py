@@ -20,20 +20,20 @@ _BACKEND = 'memory'
 
 def init_rate_limiter():
     global _REDIS_CLIENT, _BACKEND
-    desired = (settings.rate_limit_backend or ('redis' if settings.is_production else 'memory')).strip().lower()
+    desired = (settings.rate_limit_backend or ('redis' if settings.is_strict_environment else 'memory')).strip().lower()
     _REDIS_CLIENT = None
     if not settings.rate_limit_enabled:
         _BACKEND = 'disabled'
         return {'backend': _BACKEND, 'connected': True}
     if desired == 'redis':
         if not settings.redis_url:
-            if settings.is_production:
-                raise RuntimeError('REDIS_URL is required in production when rate limiting is enabled.')
+            if settings.is_strict_environment:
+                raise RuntimeError('REDIS_URL is required in production/staging when rate limiting is enabled.')
             _BACKEND = 'memory'
             return {'backend': _BACKEND, 'connected': False}
         if redis is None:
-            if settings.is_production:
-                raise RuntimeError('redis package is required for Redis-backed rate limiting in production.')
+            if settings.is_strict_environment:
+                raise RuntimeError('redis package is required for Redis-backed rate limiting in production/staging.')
             _BACKEND = 'memory'
             return {'backend': _BACKEND, 'connected': False}
         client = redis.Redis.from_url(settings.redis_url, decode_responses=True)
@@ -65,7 +65,7 @@ def _enforce_memory_limit(key: str, max_hits: int, window_seconds: int):
 
 def _enforce_redis_limit(key: str, max_hits: int, window_seconds: int):
     if _REDIS_CLIENT is None:
-        if settings.is_production:
+        if settings.is_strict_environment:
             raise HTTPException(status_code=503, detail='Rate limiter is unavailable.')
         return _enforce_memory_limit(key, max_hits, window_seconds)
     window_bucket = int(time() // window_seconds)
@@ -75,7 +75,7 @@ def _enforce_redis_limit(key: str, max_hits: int, window_seconds: int):
         if hits == 1:
             _REDIS_CLIENT.expire(redis_key, int(window_seconds) + 5)
     except Exception as exc:
-        if settings.is_production:
+        if settings.is_strict_environment:
             raise HTTPException(status_code=503, detail='Rate limiter is unavailable.') from exc
         return _enforce_memory_limit(key, max_hits, window_seconds)
     if hits > max_hits:
