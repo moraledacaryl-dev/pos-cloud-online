@@ -1,0 +1,47 @@
+name: Pass 17 fix tslib lock integrity
+
+on:
+  push:
+    branches:
+      - agent/pass17-next-security-patch
+    paths:
+      - .github/workflows/pass17-fix-tslib-integrity.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix-lock:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/pass17-next-security-patch
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Correct tslib integrity and verify clean install
+        working-directory: frontend
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('package-lock.json')
+          s = p.read_text()
+          bad = 'sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEKo0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w=='
+          good = 'sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w=='
+          if s.count(bad) != 1:
+              raise SystemExit(f'expected exactly one bad tslib integrity, found {s.count(bad)}')
+          p.write_text(s.replace(bad, good))
+          PY
+          npm ci
+          node -e "const l=require('./package-lock.json'); if(l.packages['node_modules/next'].version !== '16.3.3') process.exit(1)"
+      - name: Commit corrected lockfile
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add frontend/package-lock.json
+          git diff --cached --quiet && exit 0
+          git commit -m 'Pass 17: correct tslib lock integrity'
+          git push origin HEAD:agent/pass17-next-security-patch
