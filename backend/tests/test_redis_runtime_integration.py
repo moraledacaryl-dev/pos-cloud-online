@@ -1,4 +1,7 @@
 import os
+import subprocess
+import sys
+import uuid
 
 import pytest
 from fastapi import HTTPException
@@ -30,6 +33,50 @@ def test_real_redis_rate_limiter_enforces_limit(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         rate_limit.enforce_rate_limit(key, limit=2, window_seconds=30)
     assert exc.value.status_code == 429
+
+
+def test_real_redis_login_bucket_is_shared_across_independent_workers():
+    redis_url = os.environ['REDIS_URL']
+    prefix = f"pos-ci:multiworker:{uuid.uuid4().hex}"
+    key = 'login:shared-client'
+    child = """
+from fastapi import HTTPException
+from app.core import rate_limit
+from app.core.settings import settings
+
+settings.environment = 'staging'
+settings.rate_limit_enabled = True
+settings.rate_limit_backend = 'redis'
+settings.redis_url = __import__('os').environ['REDIS_URL']
+settings.rate_limit_redis_prefix = __import__('os').environ['RATE_LIMIT_REDIS_PREFIX']
+rate_limit.init_rate_limiter()
+try:
+    rate_limit.enforce_rate_limit('login:shared-client', limit=2, window_seconds=60)
+except HTTPException as exc:
+    print(exc.status_code)
+else:
+    print('ok')
+"""
+    env = os.environ.copy()
+    env['REDIS_URL'] = redis_url
+    env['RATE_LIMIT_REDIS_PREFIX'] = prefix
+
+    outputs = []
+    for _ in range(3):
+        completed = subprocess.run(
+            [sys.executable, '-c', child],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        outputs.append(completed.stdout.strip())
+
+    assert outputs == ['ok', 'ok', '429']
+
+    client = Redis.from_url(redis_url, decode_responses=True)
+    for redis_key in client.scan_iter(match=f'{prefix}:{key}:*'):
+        client.delete(redis_key)
 
 
 def test_real_redis_kds_ticket_is_one_use_and_station_bound(monkeypatch):
