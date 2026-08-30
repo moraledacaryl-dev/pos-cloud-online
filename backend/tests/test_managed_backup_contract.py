@@ -27,7 +27,7 @@ def test_backup_service_runs_as_postgres_with_restricted_write_path():
     assert 'ProtectSystem=strict' in text
     assert 'NoNewPrivileges=true' in text
     assert 'ReadWritePaths=/var/backups/hiddenoasis/pos' in text
-    assert 'ExecStart=/opt/pos-cloud-online/scripts/production-backup.sh' in text
+    assert 'ExecStart=/usr/bin/bash /opt/pos-cloud-online/scripts/production-backup.sh' in text
 
 
 def test_backup_timer_is_daily_persistent_and_enabled_via_timers_target():

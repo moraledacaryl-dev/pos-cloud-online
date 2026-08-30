@@ -11,7 +11,7 @@ WorkingDirectory=/opt/pos-cloud-online
 Environment=POS_BACKUP_DATABASE=hiddenoasis_pos_live
 Environment=POS_BACKUP_DIR=/var/backups/hiddenoasis/pos
 Environment=POS_BACKUP_RETENTION_DAYS=14
-ExecStart=/opt/pos-cloud-online/scripts/production-backup.sh
+ExecStart=/usr/bin/bash /opt/pos-cloud-online/scripts/production-backup.sh
 Nice=10
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7
