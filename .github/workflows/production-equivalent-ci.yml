@@ -260,7 +260,10 @@ jobs:
       SECRET_KEY: BrowserE2ESigningKey_2026_0123456789abcdef
       ALLOW_DEFAULT_ADMIN_BOOTSTRAP: 'false'
       STARTUP_REQUIRE_MIGRATIONS: 'true'
-      RATE_LIMIT_ENABLED: 'true'
+      # Throttling behavior is exercised against real Redis in the dedicated
+      # abuse job. Disable it here so repeated browser fixture logins cannot
+      # consume the production login bucket and make UI acceptance flaky.
+      RATE_LIMIT_ENABLED: 'false'
       RATE_LIMIT_BACKEND: redis
       RATE_LIMIT_PER_MINUTE: '1000'
       CORS_ORIGINS: http://127.0.0.1:8080
@@ -319,6 +322,7 @@ jobs:
         run: npm run test:e2e
       - name: Upload Playwright evidence
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
@@ -326,6 +330,7 @@ jobs:
             frontend/playwright-report
             frontend/test-results
           if-no-files-found: ignore
+          retention-days: 3
       - name: Show service logs on failure
         if: failure()
         run: |
