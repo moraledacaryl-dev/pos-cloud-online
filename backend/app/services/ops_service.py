@@ -168,7 +168,10 @@ async def build_health_report(db: Session, engine: Engine) -> dict:
         failed_events=int(outbox.get('failed', 0)),
         blocked_events=int(outbox.get('blocked', 0)),
         accounting_configured=bool(accounting_api.get('configured')),
-        accounting_reachable=bool(accounting_api.get('reachable', False)),
+        # A downstream HTTP response proves network reachability, but a 4xx/5xx
+        # health response is still an unhealthy integration and must degrade the
+        # strict integration-readiness endpoint.
+        accounting_reachable=bool(accounting_api.get('ok', False)),
         kds_ticket_store_required=bool(ticket_store.get('required')),
         kds_ticket_store_reachable=bool(ticket_store.get('connected')),
     )
