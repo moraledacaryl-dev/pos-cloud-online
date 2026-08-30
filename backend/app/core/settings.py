@@ -1,5 +1,6 @@
 from pathlib import Path
 import re
+from urllib.parse import urlsplit
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -31,6 +32,17 @@ def looks_like_placeholder_secret(value: str | None) -> bool:
         or any(marker and marker in compact for marker in compact_markers)
         or len(normalized) < 16
     )
+
+
+def is_supported_redis_url(value: str | None) -> bool:
+    candidate = (value or '').strip()
+    if not candidate:
+        return False
+    try:
+        parsed = urlsplit(candidate)
+    except ValueError:
+        return False
+    return parsed.scheme.lower() in {'redis', 'rediss'} and bool(parsed.hostname)
 
 
 def _default_database_url() -> str:
@@ -133,8 +145,8 @@ class Settings(BaseSettings):
             warnings.append('Default admin bootstrap must be disabled in production and staging.')
         if self.is_strict_environment and self.rate_limit_enabled and self.rate_limit_backend.strip().lower() != 'redis':
             warnings.append('RATE_LIMIT_BACKEND must be redis in production and staging when rate limiting is enabled.')
-        if self.is_strict_environment and self.rate_limit_enabled and not (self.redis_url or '').strip():
-            warnings.append('REDIS_URL is required for strict-environment rate limiting.')
+        if self.is_strict_environment and self.rate_limit_enabled and not is_supported_redis_url(self.redis_url):
+            warnings.append('REDIS_URL must use redis:// or rediss:// with a host in production and staging.')
         return warnings
 
     @property
