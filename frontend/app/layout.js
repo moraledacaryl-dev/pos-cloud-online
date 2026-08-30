@@ -2,13 +2,18 @@ import './globals.css';
 import './mobile-accessibility.css';
 import './pass12-runtime.css';
 import './pass13-accessibility.css';
+import { connection } from 'next/server';
 import AppShell from '../components/AppShell';
 import AccessibilityRuntime from '../components/AccessibilityRuntime';
 import { CurrentUserProvider } from '../lib/useCurrentUser';
 
 export const metadata = { title: 'POS Cloud' };
 
-export default function RootLayout({ children }) {
+export default async function RootLayout({ children }) {
+  // Nonce-based CSP requires a request-time render so Next.js can propagate
+  // the fresh nonce from proxy.js to framework and page scripts.
+  await connection();
+
   return (
     <html lang="en">
       <body>
