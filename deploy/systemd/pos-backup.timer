@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Hidden Oasis POS PostgreSQL backup daily
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+Persistent=true
+RandomizedDelaySec=15m
+Unit=pos-backup.service
+
+[Install]
+WantedBy=timers.target
