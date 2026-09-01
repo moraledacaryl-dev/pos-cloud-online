@@ -755,7 +755,7 @@ async def run_outbox_sync(db: Session, limit: int = 25) -> dict:
                         body = res.text[:500]
                     row.status = 'failed'
                     row.retry_count = int(row.retry_count or 0) + 1
-                    row.next_retry_at = (datetime.utcnow() + timedelta(minutes=min(row.retry_count * 2, 30))).replace(microsecond=0).isoformat()
+                    row.next_retry_at = (datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=min(row.retry_count * 2, 30))).replace(microsecond=0).isoformat()
                     row.last_error = json.dumps(body, ensure_ascii=False) if not isinstance(body, str) else body
                     failed += 1
                 if row.event_type in {'cash_movement.created', 'transfer.created'} and row.status == 'synced':
@@ -787,7 +787,7 @@ async def run_outbox_sync(db: Session, limit: int = 25) -> dict:
             except Exception as e:
                 row.status = 'failed'
                 row.retry_count = int(row.retry_count or 0) + 1
-                row.next_retry_at = (datetime.utcnow() + timedelta(minutes=min(row.retry_count * 2, 30))).replace(microsecond=0).isoformat()
+                row.next_retry_at = (datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=min(row.retry_count * 2, 30))).replace(microsecond=0).isoformat()
                 row.last_error = str(e)
                 failed += 1
                 db.add(row)
@@ -853,7 +853,7 @@ async def retry_outbox_event(db: Session, event_id: int) -> dict:
                     body = res.text[:500]
                 row.status = 'failed'
                 row.retry_count = int(row.retry_count or 0) + 1
-                row.next_retry_at = (datetime.utcnow() + timedelta(minutes=min(row.retry_count * 2, 30))).replace(microsecond=0).isoformat()
+                row.next_retry_at = (datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=min(row.retry_count * 2, 30))).replace(microsecond=0).isoformat()
                 row.last_error = json.dumps(body, ensure_ascii=False) if not isinstance(body, str) else body
                 failed += 1
             if row.event_type in {'cash_movement.created', 'transfer.created'} and row.status == 'synced':
@@ -887,7 +887,7 @@ async def retry_outbox_event(db: Session, event_id: int) -> dict:
         except Exception as e:
             row.status = 'failed'
             row.retry_count = int(row.retry_count or 0) + 1
-            row.next_retry_at = (datetime.utcnow() + timedelta(minutes=min(row.retry_count * 2, 30))).replace(microsecond=0).isoformat()
+            row.next_retry_at = (datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=min(row.retry_count * 2, 30))).replace(microsecond=0).isoformat()
             row.last_error = str(e)
             failed += 1
             db.add(row)

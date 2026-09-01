@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import create_engine
@@ -174,7 +174,7 @@ def test_unmapped_register_cannot_open_or_close_a_shift():
 def test_worker_skips_failed_event_until_retry_time_is_due():
     db = make_session()
     save_setting_json(db, 'accounting_sync', {'api_base': 'https://accounting.test/api'}, username='test')
-    future_time = (datetime.utcnow() + timedelta(minutes=20)).replace(microsecond=0).isoformat()
+    future_time = (datetime.now(UTC).replace(tzinfo=None) + timedelta(minutes=20)).replace(microsecond=0).isoformat()
     row = SyncOutboxEvent(
         event_uuid='event-1',
         aggregate_type='register_session',
