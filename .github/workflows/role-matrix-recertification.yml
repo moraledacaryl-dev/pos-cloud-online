@@ -1,0 +1,139 @@
+name: Role matrix recertification
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  role-matrix:
+    name: Read-only browser role matrix
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: pos
+          POSTGRES_PASSWORD: pos
+          POSTGRES_DB: pos_role_matrix
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pos -d pos_role_matrix"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://pos:pos@127.0.0.1:5432/pos_role_matrix
+      REDIS_URL: redis://127.0.0.1:6379/0
+      ENVIRONMENT: development
+      SECRET_KEY: RoleMatrixSigningKey_2026_0123456789abcdef
+      ALLOW_DEFAULT_ADMIN_BOOTSTRAP: 'false'
+      STARTUP_REQUIRE_MIGRATIONS: 'true'
+      RATE_LIMIT_ENABLED: 'false'
+      RATE_LIMIT_BACKEND: redis
+      CORS_ORIGINS: http://127.0.0.1:8080
+      ACCOUNTING_API_BASE: http://127.0.0.1:9/api
+      HTTP_TIMEOUT_SECONDS: '1'
+      NEXT_PUBLIC_API_BASE: /api
+      E2E_BASE_URL: http://127.0.0.1:8080
+      E2E_OWNER_USERNAME: ci-owner
+      E2E_OWNER_PASSWORD: CiOwnerPassword-2026!
+      E2E_MANAGER_USERNAME: ci-manager
+      E2E_MANAGER_PASSWORD: CiManagerPassword-2026!
+      E2E_CASHIER_USERNAME: ci-cashier
+      E2E_CASHIER_PASSWORD: CiCashierPassword-2026!
+      E2E_KITCHEN_USERNAME: ci-kitchen
+      E2E_KITCHEN_PASSWORD: CiKitchenPassword-2026!
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.lock
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: python -m pip install --upgrade pip && pip install -r requirements.lock
+
+      - name: Install frontend dependencies and browser
+        working-directory: frontend
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Migrate and provision disposable role users
+        working-directory: backend
+        run: |
+          alembic upgrade head
+          ADMIN_USERNAME=ci-owner ADMIN_FULL_NAME='CI Owner' ADMIN_ROLE=owner ADMIN_PASSWORD='CiOwnerPassword-2026!' python scripts/create_admin.py
+          ADMIN_USERNAME=ci-manager ADMIN_FULL_NAME='CI Manager' ADMIN_ROLE=manager ADMIN_PASSWORD='CiManagerPassword-2026!' python scripts/create_admin.py
+          ADMIN_USERNAME=ci-cashier ADMIN_FULL_NAME='CI Cashier' ADMIN_ROLE=cashier ADMIN_PASSWORD='CiCashierPassword-2026!' python scripts/create_admin.py
+          ADMIN_USERNAME=ci-kitchen ADMIN_FULL_NAME='CI Kitchen' ADMIN_ROLE=kitchen ADMIN_PASSWORD='CiKitchenPassword-2026!' python scripts/create_admin.py
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Start isolated backend frontend and proxy
+        run: |
+          (cd backend && python -m uvicorn app.main:app --host 127.0.0.1 --port 8100 > /tmp/role-backend.log 2>&1 & echo $! > /tmp/role-backend.pid)
+          (cd frontend && npm run start -- -H 127.0.0.1 -p 3100 > /tmp/role-frontend.log 2>&1 & echo $! > /tmp/role-frontend.pid)
+          (cd frontend && node e2e/ci-proxy.mjs > /tmp/role-proxy.log 2>&1 & echo $! > /tmp/role-proxy.pid)
+          for i in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:8100/healthz >/dev/null && curl -fsS http://127.0.0.1:8080/login >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/role-backend.log || true
+          cat /tmp/role-frontend.log || true
+          cat /tmp/role-proxy.log || true
+          exit 1
+
+      - name: Run read-only route role matrix
+        working-directory: frontend
+        run: npx playwright test e2e/role-matrix-recert.spec.mjs --reporter=html
+
+      - name: Upload role matrix evidence
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: role-matrix-report
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Show service logs on failure
+        if: failure()
+        run: |
+          cat /tmp/role-backend.log || true
+          cat /tmp/role-frontend.log || true
+          cat /tmp/role-proxy.log || true
+
+      - name: Stop isolated services
+        if: always()
+        run: |
+          kill "$(cat /tmp/role-proxy.pid)" 2>/dev/null || true
+          kill "$(cat /tmp/role-frontend.pid)" 2>/dev/null || true
+          kill "$(cat /tmp/role-backend.pid)" 2>/dev/null || true
