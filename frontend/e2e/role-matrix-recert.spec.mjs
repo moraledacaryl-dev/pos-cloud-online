@@ -86,7 +86,7 @@ for (const roleCase of ROLE_CASES) {
 
     await page.goto('/definitely-not-a-pos-route', { waitUntil: 'domcontentloaded' });
     await expect(page.locator('[data-route-status="403"]'), `${roleCase.role} unknown route must not be misclassified as 403`).toHaveCount(0);
-    await expect(page.getByText('404', { exact: false })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Page Not Found' })).toBeVisible();
 
     expect(pageErrors, `${roleCase.role} had unhandled page errors`).toEqual([]);
     expect(serverFailures, `${roleCase.role} encountered 5xx responses`).toEqual([]);
