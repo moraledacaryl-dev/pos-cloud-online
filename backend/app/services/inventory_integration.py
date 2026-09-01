@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import httpx
 from sqlalchemy.orm import Session
@@ -19,7 +19,7 @@ INVENTORY_EVENT_TYPES = {
 
 
 def _now_text() -> str:
-    return datetime.utcnow().replace(microsecond=0).isoformat()
+    return datetime.now(UTC).replace(tzinfo=None).replace(microsecond=0).isoformat()
 
 
 def _join(base: str, path: str) -> str:
@@ -91,7 +91,7 @@ def _mark_retry(db: Session, row: SyncOutboxEvent, error: str) -> None:
     row.retry_count = int(row.retry_count or 0) + 1
     row.status = 'inventory_retry'
     row.last_error = error[:2000]
-    row.next_retry_at = (datetime.utcnow() + timedelta(minutes=min(row.retry_count * 2, 30))).replace(microsecond=0).isoformat()
+    row.next_retry_at = (datetime.now(UTC).replace(tzinfo=None) + timedelta(minutes=min(row.retry_count * 2, 30))).replace(microsecond=0).isoformat()
     db.add(row)
     db.commit()
 

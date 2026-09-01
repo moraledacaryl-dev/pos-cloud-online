@@ -5,7 +5,7 @@ import json
 import logging
 import re
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, selectinload
 
@@ -126,11 +126,11 @@ CASH_EVENT_TYPES_OUT = {'paid_out', 'refund', 'safe_drop', 'owner_withdrawal', '
 
 
 def now_iso() -> str:
-    return datetime.utcnow().replace(microsecond=0).isoformat()
+    return datetime.now(UTC).replace(tzinfo=None).replace(microsecond=0).isoformat()
 
 
 def today_iso() -> str:
-    return datetime.utcnow().date().isoformat()
+    return datetime.now(UTC).replace(tzinfo=None).date().isoformat()
 
 
 def _actor_username(db: Session, user_id: int | None) -> str | None:
@@ -2320,7 +2320,7 @@ def list_kitchen_lines(db: Session, station: str | None = None, statuses: list[s
             started_dt = datetime.fromisoformat(line.prep_started_at_text.replace('Z', '+00:00')) if getattr(line, 'prep_started_at_text', None) else None
             ready_dt = datetime.fromisoformat(line.ready_at_text.replace('Z', '+00:00')) if getattr(line, 'ready_at_text', None) else None
             if created_dt:
-                age_mins = max(0, round((datetime.utcnow() - created_dt.replace(tzinfo=None)).total_seconds() / 60))
+                age_mins = max(0, round((datetime.now(UTC).replace(tzinfo=None) - created_dt.replace(tzinfo=None)).total_seconds() / 60))
                 if age_mins >= 25:
                     priority = 'critical'
                     escalation = 'critical'
@@ -2331,7 +2331,7 @@ def list_kitchen_lines(db: Session, station: str | None = None, statuses: list[s
                     priority = 'watch'
                     escalation = 'watch'
             if started_dt:
-                end_dt = ready_dt or datetime.utcnow().replace(tzinfo=None)
+                end_dt = ready_dt or datetime.now(UTC).replace(tzinfo=None).replace(tzinfo=None)
                 prep_mins = max(0, round((end_dt - started_dt.replace(tzinfo=None)).total_seconds() / 60))
             if created_dt and ready_dt:
                 cycle_to_ready_mins = max(0, round((ready_dt.replace(tzinfo=None) - created_dt.replace(tzinfo=None)).total_seconds() / 60))
