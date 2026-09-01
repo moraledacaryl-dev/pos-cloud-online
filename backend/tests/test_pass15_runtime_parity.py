@@ -50,10 +50,14 @@ def test_systemd_templates_use_the_same_canonical_units_as_production():
 def test_frontend_sample_and_csp_match_supported_production_runtime():
     frontend_env = read('frontend/.env.production.example')
     next_config = read('frontend/next.config.js')
+    proxy = read('frontend/proxy.js')
 
     assert 'PORT=3100' in frontend_env
-    assert "script-src 'self' 'unsafe-inline' 'unsafe-eval'" not in next_config
-    assert "script-src 'self' 'unsafe-inline'" in next_config
+    assert "'unsafe-inline'" not in next_config
+    assert 'Content-Security-Policy' not in next_config
+    assert "script-src 'self' 'nonce-${nonce}' 'strict-dynamic'" in proxy
+    assert "style-src 'self' ${isDev ? \"'unsafe-inline'\" : `'nonce-${nonce}'`}" in proxy
+    assert "script-src 'self' 'unsafe-inline'" not in proxy
 
 
 def test_container_parity_workflow_builds_and_starts_both_images():
