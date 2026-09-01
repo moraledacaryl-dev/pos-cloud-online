@@ -41,6 +41,10 @@ jobs:
               Path('backend/app/services/sync_service.py'): [
                   ('datetime.utcnow()', 'datetime.now(timezone.utc).replace(tzinfo=None)'),
               ],
+              Path('backend/app/services/inventory_integration.py'): [
+                  ('from datetime import datetime, timedelta', 'from datetime import UTC, datetime, timedelta'),
+                  ('datetime.utcnow()', 'datetime.now(UTC).replace(tzinfo=None)'),
+              ],
               Path('backend/tests/test_staff_readiness.py'): [
                   ('from datetime import datetime, timedelta', 'from datetime import UTC, datetime, timedelta'),
                   ('datetime.utcnow()', 'datetime.now(UTC).replace(tzinfo=None)'),
@@ -70,6 +74,7 @@ jobs:
           git add backend/app/api/reports.py \
                   backend/app/services/pos_service.py \
                   backend/app/services/sync_service.py \
+                  backend/app/services/inventory_integration.py \
                   backend/tests/test_staff_readiness.py \
                   backend/tests/test_pass20_utc_compatibility.py
           git diff --cached --check
