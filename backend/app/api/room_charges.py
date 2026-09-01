@@ -5,6 +5,7 @@ from app.api.deps import require_any_permissions
 from app.db.database import get_db
 from app.schemas.common import InHouseBookingSnapshotCreate, InHouseBookingSnapshotUpdate, RoomChargePostingStatusUpdate
 from app.services.approval_guard import consume_protected_approval, reject_legacy_client_approver
+from app.services.operations_integration import publish_operations_event
 from app.services.pos_service import (
     create_in_house_booking_snapshot,
     get_room_charge_posting,
@@ -16,6 +17,32 @@ from app.services.pos_service import (
 from app.services.room_charge_policy import validate_room_charge_status_update
 
 router = APIRouter()
+
+
+def _publish_room_charge_status(posting_id: int, result: dict, target: str, current_user) -> None:
+    if target not in {'pending', 'pending_frontdesk_post', 'disputed', 'written_off'}:
+        return
+    event_type = 'room_charge.pending_frontdesk_post'
+    if target in {'disputed', 'written_off'}:
+        event_type = 'refund.review_needed'
+    room_number = result.get('room_number') or result.get('room') or ''
+    title = 'Room charge needs Front Desk posting' if event_type == 'room_charge.pending_frontdesk_post' else 'Room charge needs review'
+    publish_operations_event(
+        event_type,
+        f'room-charge:{posting_id}:{target}',
+        title=title,
+        summary=f'Room {room_number} • status {target.replace("_", " ")}'.strip(' •'),
+        priority='High' if target in {'disputed', 'written_off'} else 'Normal',
+        payload={
+            'posting_id': posting_id,
+            'posting_status': target,
+            'room_number': room_number or None,
+            'order_id': result.get('order_id'),
+        },
+        subject_type='room_charge',
+        subject_id=posting_id,
+        external_user_id=getattr(current_user, 'id', None),
+    )
 
 
 @router.get('')
@@ -77,8 +104,12 @@ def room_charge_status(posting_id: int, payload: RoomChargePostingStatusUpdate, 
                 entity_id=posting_id,
                 requested_reason=payload.dispute_note or payload.note or target,
             ) as grant:
-                return update_room_charge_posting_status(db, posting_id, payload, user_id=getattr(current_user, 'id', None), approved_by_user_id=grant['approved_by_user_id'])
-        return update_room_charge_posting_status(db, posting_id, payload, user_id=getattr(current_user, 'id', None), approved_by_user_id=None)
+                result = update_room_charge_posting_status(db, posting_id, payload, user_id=getattr(current_user, 'id', None), approved_by_user_id=grant['approved_by_user_id'])
+            _publish_room_charge_status(posting_id, result, target, current_user)
+            return result
+        result = update_room_charge_posting_status(db, posting_id, payload, user_id=getattr(current_user, 'id', None), approved_by_user_id=None)
+        _publish_room_charge_status(posting_id, result, target, current_user)
+        return result
     except ValueError as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
