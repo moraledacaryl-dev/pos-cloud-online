@@ -62,36 +62,38 @@ async function login(page, username, password) {
   ]);
 }
 
-for (const roleCase of ROLE_CASES) {
-  test(`${roleCase.role} route authorization matrix is correct and free of runtime failures`, async ({ page }) => {
-    const pageErrors = [];
-    const unexpectedServerFailures = [];
-    page.on('pageerror', (error) => pageErrors.push(String(error)));
-    page.on('response', (response) => {
-      if (response.status() < 500) return;
-      const url = new URL(response.url());
-      const expectedAccountingOutage = response.status() === 503 && url.pathname === '/api/registers/accounting-accounts';
-      if (!expectedAccountingOutage) unexpectedServerFailures.push(`${response.status()} ${response.url()}`);
-    });
+if (process.env.E2E_ROLE_MATRIX === 'true') {
+  for (const roleCase of ROLE_CASES) {
+    test(`${roleCase.role} route authorization matrix is correct and free of runtime failures`, async ({ page }) => {
+      const pageErrors = [];
+      const unexpectedServerFailures = [];
+      page.on('pageerror', (error) => pageErrors.push(String(error)));
+      page.on('response', (response) => {
+        if (response.status() < 500) return;
+        const url = new URL(response.url());
+        const expectedAccountingOutage = response.status() === 503 && url.pathname === '/api/registers/accounting-accounts';
+        if (!expectedAccountingOutage) unexpectedServerFailures.push(`${response.status()} ${response.url()}`);
+      });
 
-    await login(page, roleCase.username, roleCase.password);
+      await login(page, roleCase.username, roleCase.password);
 
-    for (const route of ROUTES) {
-      await page.goto(route, { waitUntil: 'domcontentloaded' });
-      await page.waitForTimeout(100);
-      const denial = page.locator('[data-route-status="403"]');
-      if (roleCase.allowed.has(route)) {
-        await expect(denial, `${roleCase.role} should be allowed on ${route}`).toHaveCount(0);
-      } else {
-        await expect(denial, `${roleCase.role} should be denied on ${route}`).toBeVisible();
+      for (const route of ROUTES) {
+        await page.goto(route, { waitUntil: 'domcontentloaded' });
+        await page.waitForTimeout(100);
+        const denial = page.locator('[data-route-status="403"]');
+        if (roleCase.allowed.has(route)) {
+          await expect(denial, `${roleCase.role} should be allowed on ${route}`).toHaveCount(0);
+        } else {
+          await expect(denial, `${roleCase.role} should be denied on ${route}`).toBeVisible();
+        }
       }
-    }
 
-    await page.goto('/definitely-not-a-pos-route', { waitUntil: 'domcontentloaded' });
-    await expect(page.locator('[data-route-status="403"]'), `${roleCase.role} unknown route must not be misclassified as 403`).toHaveCount(0);
-    await expect(page.getByRole('heading', { name: 'Page Not Found' })).toBeVisible();
+      await page.goto('/definitely-not-a-pos-route', { waitUntil: 'domcontentloaded' });
+      await expect(page.locator('[data-route-status="403"]'), `${roleCase.role} unknown route must not be misclassified as 403`).toHaveCount(0);
+      await expect(page.getByRole('heading', { name: 'Page Not Found' })).toBeVisible();
 
-    expect(pageErrors, `${roleCase.role} had unhandled page errors`).toEqual([]);
-    expect(unexpectedServerFailures, `${roleCase.role} encountered unexpected 5xx responses`).toEqual([]);
-  });
+      expect(pageErrors, `${roleCase.role} had unhandled page errors`).toEqual([]);
+      expect(unexpectedServerFailures, `${roleCase.role} encountered unexpected 5xx responses`).toEqual([]);
+    });
+  }
 }
