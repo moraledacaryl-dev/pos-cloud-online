@@ -50,6 +50,7 @@ jobs:
       HTTP_TIMEOUT_SECONDS: '1'
       NEXT_PUBLIC_API_BASE: /api
       E2E_BASE_URL: http://127.0.0.1:8080
+      E2E_ROLE_MATRIX: 'true'
       E2E_OWNER_USERNAME: ci-owner
       E2E_OWNER_PASSWORD: CiOwnerPassword-2026!
       E2E_MANAGER_USERNAME: ci-manager
