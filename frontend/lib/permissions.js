@@ -6,7 +6,7 @@ export const ROLE_PERMISSION_FALLBACKS = {
     'recipes.view', 'recipes.manage',
     'registers.view', 'registers.manage', 'sessions.manage', 'cash.manage', 'kitchen.view',
     'room_charges.view', 'room_charges.manage', 'sync.view', 'sync.manage', 'settings.manage',
-    'reports.view', 'audit.view', 'approvals.view', 'approvals.manage', 'users.manage', 'roles.manage',
+    'reports.view', 'audit.view', 'approvals.view', 'approvals.manage',
   ],
   cashier: [
     'dashboard.view', 'pos.use', 'orders.manage', 'catalog.view', 'registers.view', 
