@@ -1,0 +1,68 @@
+name: Pass 20 UTC remediation helper
+
+on:
+  push:
+    branches:
+      - agent/pass20-utc-final-recert
+
+permissions:
+  contents: write
+
+jobs:
+  remediate:
+    if: github.event.head_commit.message == 'Pass 20: add UTC remediation helper'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/pass20-utc-final-recert
+          fetch-depth: 0
+      - name: Replace deprecated application UTC calls
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          reports = Path('backend/app/api/reports.py')
+          text = reports.read_text()
+          text = text.replace('from datetime import datetime', 'from datetime import UTC, datetime', 1)
+          text = text.replace("generated_at = datetime.utcnow().replace(microsecond=0).isoformat()", "generated_at = datetime.now(UTC).replace(tzinfo=None, microsecond=0).isoformat()")
+          reports.write_text(text)
+
+          pos = Path('backend/app/services/pos_service.py')
+          text = pos.read_text()
+          text = text.replace('from datetime import datetime', 'from datetime import UTC, datetime', 1)
+          text = text.replace("return datetime.utcnow().replace(microsecond=0).isoformat()", "return datetime.now(UTC).replace(tzinfo=None, microsecond=0).isoformat()")
+          text = text.replace("return datetime.utcnow().date().isoformat()", "return datetime.now(UTC).date().isoformat()")
+          text = text.replace("datetime.utcnow() - created_dt.replace(tzinfo=None)", "datetime.now(UTC).replace(tzinfo=None) - created_dt.replace(tzinfo=None)")
+          pos.write_text(text)
+
+          sync = Path('backend/app/services/sync_service.py')
+          text = sync.read_text().replace('datetime.utcnow()', 'datetime.now(timezone.utc).replace(tzinfo=None)')
+          sync.write_text(text)
+
+          staff_test = Path('backend/tests/test_staff_readiness.py')
+          text = staff_test.read_text()
+          text = text.replace('from datetime import datetime, timedelta', 'from datetime import UTC, datetime, timedelta', 1)
+          text = text.replace('datetime.utcnow()', 'datetime.now(UTC).replace(tzinfo=None)')
+          staff_test.write_text(text)
+
+          guard = Path('backend/tests/test_pass20_utc_compatibility.py')
+          guard.write_text("""from pathlib import Path\n\n\ndef test_application_code_has_no_deprecated_datetime_utcnow_calls():\n    app_root = Path(__file__).resolve().parents[1] / 'app'\n    offenders = []\n    for path in app_root.rglob('*.py'):\n        if 'datetime.utcnow(' in path.read_text():\n            offenders.append(str(path.relative_to(app_root)))\n    assert not offenders, f'deprecated datetime.utcnow() remains in: {offenders}'\n""")
+
+          offenders = []
+          for path in Path('backend/app').rglob('*.py'):
+              if 'datetime.utcnow(' in path.read_text():
+                  offenders.append(str(path))
+          if offenders:
+              raise SystemExit(f'datetime.utcnow remains: {offenders}')
+          PY
+      - name: Commit remediation
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add backend/app/api/reports.py backend/app/services/pos_service.py backend/app/services/sync_service.py backend/tests/test_staff_readiness.py backend/tests/test_pass20_utc_compatibility.py
+          git diff --cached --check
+          git commit -m 'Pass 20: remove deprecated UTC calls'
+          git push origin HEAD:agent/pass20-utc-final-recert
