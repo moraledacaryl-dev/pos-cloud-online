@@ -30,7 +30,7 @@ jobs:
     outputs:
       release_sha: ${{ steps.release.outputs.sha }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - id: release
@@ -63,7 +63,7 @@ jobs:
       name: ${{ inputs.target_environment }}
     steps:
       - name: Deploy and certify exact SHA
-        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262 # v1.0.3
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
         env:
           EXPECTED_COMMIT: ${{ needs.verify-release.outputs.release_sha }}
           TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
@@ -78,18 +78,32 @@ jobs:
           script: |
             cd /opt/pos-cloud-online
             CONFIRM_DEPLOY=YES EXPECTED_COMMIT="$EXPECTED_COMMIT" TARGET_ENVIRONMENT="$TARGET_ENVIRONMENT" PUBLIC_BASE="$PUBLIC_BASE" bash scripts/deploy-release.sh
-      - name: Download non-sensitive deployment evidence
-        uses: appleboy/scp-action@917f8b81dfc1ccd331fef9e2d61bdc6c8be94634 # v0.1.7
+      - id: evidence
+        name: Capture non-sensitive deployment evidence
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
+        env:
+          EXPECTED_COMMIT: ${{ needs.verify-release.outputs.release_sha }}
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: ${{ secrets.SERVER_PORT }}
-          source: /var/lib/hiddenoasis-pos/deploy-evidence/${{ needs.verify-release.outputs.release_sha }}.txt
-          target: deployment-evidence
-          strip_components: 4
+          envs: EXPECTED_COMMIT
+          capture_stdout: true
+          script: |
+            EVIDENCE_FILE="/var/lib/hiddenoasis-pos/deploy-evidence/${EXPECTED_COMMIT}.txt"
+            test -r "$EVIDENCE_FILE"
+            cat -- "$EVIDENCE_FILE"
+      - name: Materialize deployment evidence artifact
+        env:
+          DEPLOYMENT_EVIDENCE: ${{ steps.evidence.outputs.stdout }}
+          RELEASE_SHA: ${{ needs.verify-release.outputs.release_sha }}
+        run: |
+          mkdir -p deployment-evidence
+          printf '%s\n' "$DEPLOYMENT_EVIDENCE" > "deployment-evidence/${RELEASE_SHA}.txt"
+          test -s "deployment-evidence/${RELEASE_SHA}.txt"
       - name: Upload deployment evidence
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: pos-deployment-${{ inputs.target_environment }}-${{ needs.verify-release.outputs.release_sha }}
           path: deployment-evidence

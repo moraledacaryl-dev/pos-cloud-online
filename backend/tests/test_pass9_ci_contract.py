@@ -1,7 +1,9 @@
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / '.github' / 'workflows' / 'production-equivalent-ci.yml'
+DEPLOY_WORKFLOW = ROOT / '.github' / 'workflows' / 'deploy-pos.yml'
 
 
 def test_production_equivalent_ci_keeps_required_security_and_runtime_gates():
@@ -44,3 +46,19 @@ def test_browser_e2e_keeps_axe_and_security_workflows():
         "['serious', 'critical']",
     ]:
         assert required in text
+
+
+def test_deploy_workflow_captures_remote_evidence_before_uploading_it():
+    text = DEPLOY_WORKFLOW.read_text(encoding='utf-8')
+    assert 'capture_stdout: true' in text
+    assert '${{ steps.evidence.outputs.stdout }}' in text
+    assert 'test -s "deployment-evidence/${RELEASE_SHA}.txt"' in text
+    assert 'appleboy/scp-action@' not in text
+
+
+def test_workflow_actions_are_pinned_to_immutable_commits():
+    action_ref = re.compile(r'^\s*-?\s*uses:\s+[^\s@]+@([^\s#]+)', re.MULTILINE)
+    for workflow in (ROOT / '.github' / 'workflows').glob('*.yml'):
+        refs = action_ref.findall(workflow.read_text(encoding='utf-8'))
+        assert refs, f'{workflow.name} declares no actions'
+        assert all(re.fullmatch(r'[0-9a-f]{40}', ref) for ref in refs), workflow.name
