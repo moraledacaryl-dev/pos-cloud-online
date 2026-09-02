@@ -57,9 +57,9 @@ jobs:
         with:
           python-version: '3.12'
           cache: pip
-          cache-dependency-path: backend/requirements.lock
-      - name: Install locked backend dependencies
-        run: python -m pip install --upgrade pip && pip install -r requirements.lock
+          cache-dependency-path: backend/requirements-dev.lock
+      - name: Install locked backend test dependencies
+        run: python -m pip install --upgrade pip && pip install -r requirements-dev.lock
       - name: Verify service connectivity
         run: |
           python - <<'PY'

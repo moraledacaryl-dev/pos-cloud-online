@@ -17,6 +17,8 @@ def test_production_equivalent_ci_keeps_required_security_and_runtime_gates():
         'test_redis_runtime_integration.py',
         'ci_kds_stream_load.py',
         'KDS_LOAD_STREAMS=20',
+        'cache-dependency-path: backend/requirements-dev.lock',
+        'pip install -r requirements-dev.lock',
         'npx playwright install',
         'npm run test:e2e',
         'pip-audit -r requirements.lock',
