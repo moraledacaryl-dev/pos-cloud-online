@@ -26,7 +26,16 @@ install_systemd_units() {
   install -o root -g root -m 0644 deploy/systemd/pos-backend.service /etc/systemd/system/pos-backend.service
   install -o root -g root -m 0644 deploy/systemd/pos-frontend.service /etc/systemd/system/pos-frontend.service
   install -o root -g root -m 0644 deploy/systemd/pos-sync-worker.service /etc/systemd/system/pos-sync-worker.service
+  install -o root -g root -m 0644 deploy/systemd/pos-backup.service /etc/systemd/system/pos-backup.service
+  install -o root -g root -m 0644 deploy/systemd/pos-backup.timer /etc/systemd/system/pos-backup.timer
   systemctl daemon-reload
+}
+
+run_production_backup() {
+  systemctl reset-failed pos-backup.service >/dev/null 2>&1 || true
+  systemctl start pos-backup.service
+  [[ "$(systemctl show pos-backup.service --property=Result --value)" == 'success' ]] \
+    || fail 'pos-backup.service did not complete successfully'
 }
 
 [[ "$CONFIRM_DEPLOY" == "YES" ]] || fail 'CONFIRM_DEPLOY must be exactly YES'
@@ -73,7 +82,7 @@ rollback_code() {
 trap rollback_code ERR
 
 EXPECTED_COMMIT="$PREVIOUS_COMMIT" PUBLIC_BASE="$PUBLIC_BASE" bash scripts/production-certify.sh
-bash scripts/production-backup.sh
+run_production_backup
 
 git switch --detach "$EXPECTED_COMMIT"
 ACTUAL_COMMIT="$(git rev-parse HEAD)"
@@ -99,6 +108,7 @@ systemctl stop pos-frontend pos-sync-worker pos-backend
 
 install -d -o hiddenoasis -g hiddenoasis -m 0750 frontend/.next/cache
 install_systemd_units
+systemctl enable pos-backup.timer
 systemctl restart pos-backend
 systemctl restart pos-sync-worker
 systemctl restart pos-frontend
