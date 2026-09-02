@@ -4,6 +4,32 @@ const API_BASE = (process.env.NEXT_PUBLIC_API_BASE || '/api').replace(/\/+$/, ''
 const mutationRegistry = createInFlightMutationRegistry();
 let refreshPromise = null;
 
+export function errorMessage(payload, fallback = 'Request failed') {
+  if (typeof payload === 'string' && payload.trim()) return payload.trim();
+  if (!payload || typeof payload !== 'object') return fallback;
+  const detail = payload.detail;
+  if (typeof detail === 'string' && detail.trim()) return detail.trim();
+  if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
+    if (typeof detail.message === 'string' && detail.message.trim()) return detail.message.trim();
+    if (typeof detail.code === 'string' && detail.code.trim()) return humanizeErrorCode(detail.code);
+  }
+  if (Array.isArray(detail)) {
+    const messages = detail.map((row) => {
+      if (typeof row === 'string') return row;
+      if (row && typeof row.msg === 'string') return row.msg;
+      if (row && typeof row.message === 'string') return row.message;
+      return '';
+    }).filter(Boolean);
+    if (messages.length) return messages.join(' ');
+  }
+  if (typeof payload.message === 'string' && payload.message.trim()) return payload.message.trim();
+  return fallback;
+}
+
+function humanizeErrorCode(value) {
+  return String(value || '').replace(/[._-]+/g, ' ').replace(/\s+/g, ' ').trim().replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
 function readCookie(name) {
   if (typeof document === 'undefined') return '';
   const prefix = `${encodeURIComponent(name)}=`;
@@ -39,7 +65,7 @@ async function refreshBrowserSession() {
   if (!refreshPromise) {
     refreshPromise = (async () => {
       const refreshed = await rawRequest('/auth/refresh', { method: 'POST' });
-      if (!refreshed.res.ok) throw new Error(refreshed.data?.detail || 'Session expired');
+      if (!refreshed.res.ok) throw new Error(errorMessage(refreshed.data, 'Session expired'));
       return refreshed.data;
     })().finally(() => { refreshPromise = null; });
   }
@@ -51,10 +77,10 @@ async function requestOnce(path, init = {}, retrying = false) {
   if (res.status === 401 && !retrying && !String(path).startsWith('/auth/')) {
     await refreshBrowserSession();
     const retried = await rawRequest(path, init);
-    if (!retried.res.ok) throw new Error(retried.data?.detail || 'Request failed');
+    if (!retried.res.ok) throw new Error(errorMessage(retried.data));
     return retried.data;
   }
-  if (!res.ok) throw new Error(data?.detail || 'Request failed');
+  if (!res.ok) throw new Error(errorMessage(data));
   return data;
 }
 
@@ -80,7 +106,7 @@ async function blobRequest(path, retrying = false) {
   if (!res.ok) {
     let data = null;
     try { data = await res.json(); } catch { data = null; }
-    throw new Error(data?.detail || 'Request failed');
+    throw new Error(errorMessage(data));
   }
   return res.blob();
 }

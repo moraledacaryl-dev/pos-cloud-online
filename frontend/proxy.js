@@ -10,7 +10,10 @@ function buildContentSecurityPolicy(nonce) {
     "form-action 'self'",
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
-    `style-src 'self' ${isDev ? "'unsafe-inline'" : `'nonce-${nonce}'`}`,
+    // React style props become style attributes and cannot carry a CSP nonce.
+    // Keep scripts nonce-only, while allowing the app's CSS custom properties
+    // and layout styles to render in production.
+    "style-src 'self' 'unsafe-inline'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ''}`,
     "connect-src 'self'",
     "media-src 'self'",

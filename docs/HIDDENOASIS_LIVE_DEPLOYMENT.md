@@ -7,33 +7,24 @@ Accounting repository:
 ../accounting-program-online/docs/HIDDENOASIS_LIVE_DEPLOYMENT.md
 ```
 
-The existing live host uses this compatibility profile until it is migrated
-deliberately to the hardened `/opt` layout:
+The canonical supported production profile is:
 
 ```text
 Frontend: https://pos.hiddenoasis.app
 Backend:  https://pos.hiddenoasis.app/api
 Database: hiddenoasis_pos_live
 DB user:  hiddenoasis_pos_app
-Source:   /root/pos-cloud-online
+Source:   /opt/pos-cloud-online
 Systemd:  pos-backend
 Systemd:  pos-frontend
 Systemd:  pos-sync-worker
-```
-
-The hardened `/opt` profile uses:
-
-```text
-/opt/pos-cloud-online
 /etc/hiddenoasis/pos-backend.env
 /etc/hiddenoasis/pos-frontend.env
-hiddenoasis-pos-backend
-hiddenoasis-pos-frontend
-hiddenoasis-pos-sync-worker
 ```
 
-Do not mix the live compatibility profile with the hardened profile during one
-deployment.
+The deprecated `/root/pos-cloud-online` and `hiddenoasis-pos-*` names are not
+certified by this repository. Migrate them explicitly before using the release
+workflow; never mix legacy and canonical units in one deployment.
 
 Before running `npm install`, `npm ci`, or `npm run build` on the live host,
 stop `accounting-frontend` and `pos-frontend`. Never replace `node_modules` or

@@ -34,7 +34,7 @@ test('production certification no longer depends on public detailed health', () 
   assert.match(script, /PUBLIC_DETAILS_CODE/);
 });
 
-test('strict production CSP is request-scoped and contains no unsafe-inline allowances', () => {
+test('production CSP keeps scripts nonce-only while permitting React style attributes', () => {
   const proxy = source('proxy.js');
   const nextConfig = source('next.config.js');
 
@@ -43,7 +43,7 @@ test('strict production CSP is request-scoped and contains no unsafe-inline allo
   assert.match(proxy, /requestHeaders\.set\('Content-Security-Policy', csp\)/);
   assert.match(proxy, /response\.headers\.set\('Content-Security-Policy', csp\)/);
   assert.match(proxy, /script-src 'self' 'nonce-\$\{nonce\}' 'strict-dynamic'/);
-  assert.match(proxy, /style-src 'self'.*nonce-\$\{nonce\}/);
+  assert.match(proxy, /style-src 'self' 'unsafe-inline'/);
   assert.equal(proxy.includes("script-src 'self' 'unsafe-inline'"), false);
   assert.equal(nextConfig.includes("'unsafe-inline'"), false);
   assert.equal(nextConfig.includes('Content-Security-Policy'), false);

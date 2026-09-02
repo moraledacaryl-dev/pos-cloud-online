@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, Request, Response
 from redis import Redis
+from redis.exceptions import RedisError
 from sqlalchemy.orm import Session
 
 from app.core.settings import settings
@@ -17,6 +18,16 @@ PAIRING_TTL_SECONDS = 120
 DEVICE_TTL_DAYS = 180
 SNAPSHOT_TTL_SECONDS = 600
 DISPLAY_HEARTBEAT_PERSIST_SECONDS = 60
+
+
+class CustomerDisplayStoreUnavailable(RuntimeError):
+    """Raised when the one-time pairing/rate-limit store cannot be reached."""
+
+    code = 'customer_display_store_unavailable'
+
+
+def _store_unavailable(exc: Exception) -> CustomerDisplayStoreUnavailable:
+    return CustomerDisplayStoreUnavailable('Customer display pairing is temporarily unavailable. Try again shortly.')
 
 
 def _now() -> datetime:
@@ -45,6 +56,13 @@ def _redis() -> Redis:
     return Redis.from_url(settings.redis_url, decode_responses=True, socket_connect_timeout=3, socket_timeout=3)
 
 
+def get_customer_display_store_status() -> dict:
+    try:
+        return {'backend': 'redis', 'required': True, 'connected': bool(_redis().ping())}
+    except RedisError:
+        return {'backend': 'redis', 'required': True, 'connected': False}
+
+
 def create_pairing_code(*, channel: str, register_id: int | None, requester_user_id: int) -> dict:
     code = secrets.token_urlsafe(9).replace('-', '').replace('_', '')[:10].upper()
     digest = _digest(code)
@@ -54,18 +72,24 @@ def create_pairing_code(*, channel: str, register_id: int | None, requester_user
         'requester_user_id': requester_user_id,
         'expires_at': _iso(_now() + timedelta(seconds=PAIRING_TTL_SECONDS)),
     }
-    client = _redis()
-    client.setex(f'pos:customer-display:pair:{digest}', PAIRING_TTL_SECONDS, json.dumps(payload, separators=(',', ':')))
+    try:
+        client = _redis()
+        client.setex(f'pos:customer-display:pair:{digest}', PAIRING_TTL_SECONDS, json.dumps(payload, separators=(',', ':')))
+    except RedisError as exc:
+        raise _store_unavailable(exc) from exc
     return {'pairing_code': code, 'expires_in_seconds': PAIRING_TTL_SECONDS, 'channel': channel, 'register_id': register_id}
 
 
 def _activation_rate_limit(request: Request) -> None:
     host = request.client.host if request.client else 'unknown'
-    client = _redis()
-    key = f'pos:customer-display:activate-rate:{host}'
-    count = client.incr(key)
-    if count == 1:
-        client.expire(key, 60)
+    try:
+        client = _redis()
+        key = f'pos:customer-display:activate-rate:{host}'
+        count = client.incr(key)
+        if count == 1:
+            client.expire(key, 60)
+    except RedisError as exc:
+        raise _store_unavailable(exc) from exc
     if count > 10:
         raise HTTPException(status_code=429, detail='Too many pairing attempts. Try again shortly.')
 
@@ -76,7 +100,10 @@ def activate_pairing_code(db: Session, request: Request, response: Response, cod
     if len(normalized) < 8:
         raise HTTPException(status_code=400, detail='Invalid pairing code')
     digest = _digest(normalized)
-    raw = _redis().getdel(f'pos:customer-display:pair:{digest}')
+    try:
+        raw = _redis().getdel(f'pos:customer-display:pair:{digest}')
+    except RedisError as exc:
+        raise _store_unavailable(exc) from exc
     if not raw:
         raise HTTPException(status_code=401, detail='Pairing code is invalid, expired, or already used')
     try:

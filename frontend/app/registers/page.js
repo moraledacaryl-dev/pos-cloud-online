@@ -144,7 +144,7 @@ export default function RegistersPage() {
 
       <section className="section">
         <div className="toolbar"><h2>Accounting Account Picker</h2><input placeholder="Search drawer, bank, e-wallet" value={accountSearch} onChange={(e) => setAccountSearch(e.target.value)} style={{ width: 240 }} disabled={!!accountingUnavailable} /></div>
-        <table className="table" style={{ marginTop: 10 }}>
+        <table className="table" tabIndex={0} aria-label="Scrollable data table" style={{ marginTop: 10 }}>
           <thead><tr><th>Name</th><th>Code</th><th>Type</th><th>Balance</th><th>Action</th></tr></thead>
           <tbody>
             {filteredAccounts.map((row) => (
@@ -160,7 +160,7 @@ export default function RegistersPage() {
 
       <section className="section">
         <div className="toolbar"><h2>Register Mapping Health</h2><button type="button" className="secondary" onClick={async () => { try { const h = await fetchAccountingHealth(); setHealthRows(h?.rows || []); setAccountingUnavailable(''); } catch { setHealthRows([]); setAccountingUnavailable('Accounting is temporarily unavailable. Mapping health cannot be refreshed right now.'); } }}>Refresh Health</button></div>
-        <table className="table" style={{ marginTop: 10 }}>
+        <table className="table" tabIndex={0} aria-label="Scrollable data table" style={{ marginTop: 10 }}>
           <thead><tr><th>Register</th><th>Mapped Account</th><th>Status</th></tr></thead>
           <tbody>
             {healthRows.map((row) => (
@@ -177,7 +177,7 @@ export default function RegistersPage() {
 
       <section className="section">
         <h2>Current Outlets</h2>
-        <table className="table" style={{ marginTop: 10 }}>
+        <table className="table" tabIndex={0} aria-label="Scrollable data table" style={{ marginTop: 10 }}>
           <thead><tr><th>Code</th><th>Name</th><th>BU</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody>
             {outlets.map((row) => (
@@ -189,7 +189,7 @@ export default function RegistersPage() {
 
       <section className="section">
         <h2>Current Registers</h2>
-        <table className="table" style={{ marginTop: 10 }}>
+        <table className="table" tabIndex={0} aria-label="Scrollable data table" style={{ marginTop: 10 }}>
           <thead><tr><th>Outlet</th><th>Code</th><th>Name</th><th>Accounting Drawer</th><th>Default Type</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody>
             {registers.map((row) => (

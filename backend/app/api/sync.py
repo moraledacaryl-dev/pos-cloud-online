@@ -7,7 +7,14 @@ from app.db.database import engine, get_db
 from app.schemas.common import SyncRunPayload
 from app.services.ops_service import build_health_report
 from app.services.pos_service import list_outbox_events
-from app.services.sync_service import archive_outbox_event, resolve_outbox_event, retry_outbox_event, run_outbox_sync, sync_in_house_bookings_from_accounting, unblock_outbox_event
+from app.services.sync_service import (
+    archive_outbox_event,
+    resolve_outbox_event,
+    retry_outbox_event,
+    run_outbox_sync,
+    sync_in_house_bookings_from_accounting,
+    unblock_outbox_event,
+)
 
 
 class ArchiveRequest(BaseModel):

@@ -2,10 +2,17 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.db.database import Base
-from app.models.entities import CatalogItem, CashMovement, Outlet, Register, SyncOutboxEvent, User
+from app.models.entities import CashMovement, CatalogItem, Outlet, Register, SyncOutboxEvent, User
 from app.schemas.common import CashMovementCreate, KitchenLineStatusPayload, OrderCreate, RegisterSessionClose, RegisterSessionOpen
 from app.services.auth_service import hash_password
-from app.services.pos_service import close_register_session, create_cash_movement, create_order, list_kitchen_lines, open_register_session, update_kitchen_line_status
+from app.services.pos_service import (
+    close_register_session,
+    create_cash_movement,
+    create_order,
+    list_kitchen_lines,
+    open_register_session,
+    update_kitchen_line_status,
+)
 
 
 def make_session():

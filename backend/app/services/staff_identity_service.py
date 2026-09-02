@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from app.models.staff_identity import PosUserStaffLink, StaffIdentity
 from app.models.entities import User
+from app.models.staff_identity import PosUserStaffLink, StaffIdentity
 from app.schemas.staff_identity import StaffEmployeeSyncEnvelope
-
 
 EXPECTED_SOURCE = 'hidden_oasis_staff_payroll'
 EXPECTED_EVENT = 'employee.sync'

@@ -5,14 +5,14 @@ from app.api.audit import router as audit_router
 from app.api.auth import router as auth_router
 from app.api.cash import router as cash_router
 from app.api.catalog import router as catalog_router
-from app.api.dashboard import router as dashboard_router
 from app.api.customer_display import router as customer_display_router
+from app.api.dashboard import router as dashboard_router
 from app.api.kitchen import router as kitchen_router
 from app.api.orders import router as orders_router
 from app.api.recipes import router as recipes_router
+from app.api.registers import router as registers_router
 from app.api.reports import router as reports_router
 from app.api.room_charges import router as room_charges_router
-from app.api.registers import router as registers_router
 from app.api.seed import router as seed_router
 from app.api.sessions import router as sessions_router
 from app.api.staff_integrations import router as staff_integrations_router

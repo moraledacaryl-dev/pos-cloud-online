@@ -121,8 +121,8 @@ export default function UsersPage() {
 
       <section className="section">
         <h2>Current Users</h2>
-        <table className="table" style={{ marginTop: 10 }}>
-          <thead><tr><th>Username</th><th>Name</th><th>Staff Identity</th><th>Primary Role</th><th>Assigned Roles</th><th>Status</th><th></th></tr></thead>
+        <table className="table" tabIndex={0} aria-label="Scrollable data table" style={{ marginTop: 10 }}>
+          <thead><tr><th>Username</th><th>Name</th><th>Staff Identity</th><th>Primary Role</th><th>Assigned Roles</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody>
             {filteredUsers.map((row) => (
               <tr key={row.id}>

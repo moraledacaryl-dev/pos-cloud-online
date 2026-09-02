@@ -3,6 +3,7 @@ import json
 
 import pytest
 from fastapi import HTTPException, Request, Response
+from redis.exceptions import ConnectionError as RedisConnectionError
 
 from app.api import customer_display
 from app.services import customer_display_security as security
@@ -29,6 +30,13 @@ class FakeRedis:
     def expire(self, key, ttl):
         self.expiry[key] = ttl
         return True
+
+
+class UnavailableRedis:
+    def __getattr__(self, _name):
+        def fail(*_args, **_kwargs):
+            raise RedisConnectionError('redis unavailable')
+        return fail
 
 
 def _request(cookie=''):
@@ -66,6 +74,32 @@ def test_pairing_code_is_random_hashed_single_use_and_short_lived(monkeypatch):
     second = fake.getdel(key)
     assert first is not None
     assert second is None
+
+
+def test_pairing_store_outage_is_typed_and_does_not_issue_a_code(monkeypatch):
+    monkeypatch.setattr(security, '_redis', lambda: UnavailableRedis())
+    with pytest.raises(security.CustomerDisplayStoreUnavailable) as exc:
+        security.create_pairing_code(channel='main', register_id=3, requester_user_id=7)
+    assert exc.value.code == 'customer_display_store_unavailable'
+
+
+def test_activation_store_outage_is_typed_before_device_creation(monkeypatch):
+    class DB:
+        def add(self, _obj):
+            raise AssertionError('device must not be created while the pairing store is unavailable')
+
+    monkeypatch.setattr(security, '_redis', lambda: UnavailableRedis())
+    with pytest.raises(security.CustomerDisplayStoreUnavailable):
+        security.activate_pairing_code(DB(), _request(), Response(), 'ABCDEFGH')
+
+
+def test_customer_display_api_maps_store_outage_to_retryable_503(monkeypatch):
+    monkeypatch.setattr(customer_display, 'create_pairing_code', lambda **_kwargs: (_ for _ in ()).throw(security.CustomerDisplayStoreUnavailable('down')))
+    with pytest.raises(HTTPException) as exc:
+        customer_display.new_pairing_code({'channel': 'main'}, user=type('User', (), {'id': 1})())
+    assert exc.value.status_code == 503
+    assert exc.value.detail['code'] == 'customer_display_store_unavailable'
+    assert exc.value.detail['retryable'] is True
 
 
 def test_display_snapshot_route_requires_paired_device():

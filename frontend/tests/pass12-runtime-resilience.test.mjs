@@ -13,12 +13,12 @@ test('Pass 12 app shell reserves an explicit sync-banner row', () => {
 
 test('Pass 12 KDS alerts are same-origin, gesture enabled, and promise-safe', () => {
   const kitchen = read('app/kitchen/page.js');
-  const config = read('next.config.js');
+  const proxy = read('proxy.js');
   assert.match(kitchen, /src="\/sounds\/kds-alert\.wav"/);
   assert.match(kitchen, /Enable sound/);
   assert.match(kitchen, /await audioRef\.current\.play\(\)/);
   assert.doesNotMatch(kitchen, /data:audio\/wav/);
-  assert.match(config, /media-src 'self'/);
+  assert.match(proxy, /media-src 'self'/);
 });
 
 test('Pass 12 customer display query state is hydrated after mount', () => {

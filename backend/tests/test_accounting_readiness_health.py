@@ -2,7 +2,6 @@ from pathlib import Path
 
 from app.services.reliability_policy import evaluate_operational_readiness
 
-
 ROOT = Path(__file__).resolve().parents[2]
 OPS_SERVICE = ROOT / 'backend' / 'app' / 'services' / 'ops_service.py'
 

@@ -1,16 +1,29 @@
-from datetime import datetime, timedelta, timezone
+import base64
 import hashlib
+import hmac
+import secrets
 import uuid
+from datetime import datetime, timedelta, timezone
+
 import jwt
-from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
 from app.core.settings import looks_like_placeholder_secret, settings
 from app.models.entities import RefreshToken, User
 from app.services.permission_service import assign_user_roles, ensure_permissions_seed, list_roles
 
-pwd_context = CryptContext(schemes=['pbkdf2_sha256'], deprecated='auto')
 ALGORITHM = 'HS256'
+PASSWORD_SCHEME = 'pbkdf2-sha256'
+PASSWORD_ROUNDS = 600_000
+
+
+def _adapted_b64encode(value: bytes) -> str:
+    return base64.b64encode(value).decode('ascii').rstrip('=').replace('+', '.')
+
+
+def _adapted_b64decode(value: str) -> bytes:
+    normalized = value.replace('.', '+')
+    return base64.b64decode(normalized + ('=' * (-len(normalized) % 4)))
 
 
 def _utc_now() -> datetime:
@@ -31,11 +44,25 @@ def _parse_iso(value: str | None):
 
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    salt = secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt, PASSWORD_ROUNDS)
+    return f'${PASSWORD_SCHEME}${PASSWORD_ROUNDS}${_adapted_b64encode(salt)}${_adapted_b64encode(digest)}'
 
 
 def verify_password(password: str, hashed: str) -> bool:
-    return pwd_context.verify(password, hashed)
+    try:
+        marker, scheme, rounds_text, salt_text, expected_text = str(hashed or '').split('$')
+        if marker or scheme != PASSWORD_SCHEME:
+            return False
+        rounds = int(rounds_text)
+        if rounds < 1 or rounds > 2_000_000:
+            return False
+        salt = _adapted_b64decode(salt_text)
+        expected = _adapted_b64decode(expected_text)
+        actual = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt, rounds, dklen=len(expected))
+        return hmac.compare_digest(actual, expected)
+    except (TypeError, ValueError):
+        return False
 
 
 def create_access_token(subject: str, session_version: int = 1) -> str:

@@ -21,7 +21,14 @@ from app.services.auth_service import (
     rotate_refresh_token,
 )
 from app.services.browser_auth import browser_refresh_token, clear_browser_auth_cookies, set_browser_auth_cookies
-from app.services.permission_service import assign_user_roles, get_user_effective_permissions, get_user_permission_keys, get_user_roles, list_permissions, list_roles
+from app.services.permission_service import (
+    assign_user_roles,
+    get_user_effective_permissions,
+    get_user_permission_keys,
+    get_user_roles,
+    list_permissions,
+    list_roles,
+)
 from app.services.security_admin_policy import (
     is_privileged_role_name,
     role_codes_include_owner,

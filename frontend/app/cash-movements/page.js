@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { createCashMovement, fetchAccountingAccounts, fetchCashMovements, fetchRegisterSessions, fetchRegisters } from '../../lib/api';
+import { cashMovementLabel, humanizeCode } from '../../lib/displayLabels.mjs';
 
 function money(value) {
   return `₱${Number(value || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -85,7 +86,10 @@ export default function CashMovementsPage() {
 
       <section className="section">
         <div className="row wrap" style={{ marginBottom: 12 }}>
-          {MOVEMENT_PRESETS.map((preset) => <button key={preset.movement_type} type="button" className="secondary" onClick={() => applyPreset(preset)}>{preset.movement_type}</button>)}
+          {MOVEMENT_PRESETS.map((preset) => {
+            const selected = form.movement_type === preset.movement_type;
+            return <button key={preset.movement_type} type="button" className={selected ? 'secondary active' : 'secondary'} aria-pressed={selected} onClick={() => applyPreset(preset)}>{cashMovementLabel(preset.movement_type)}</button>;
+          })}
         </div>
         <form className="form-grid" style={{ marginTop: 12 }} onSubmit={handleSubmit}>
           <label className="field">Session<select value={form.register_session_id} onChange={(e) => setForm((prev) => ({ ...prev, register_session_id: e.target.value }))}><option value="">Select session</option>{sessions.map((row) => <option key={row.id} value={row.id}>{row.session_code}</option>)}</select></label>
@@ -106,14 +110,14 @@ export default function CashMovementsPage() {
 
       <section className="section">
         <h2>Transfer History</h2>
-        <table className="table" style={{ marginTop: 10 }}>
+        <table className="table" tabIndex={0} aria-label="Scrollable data table" style={{ marginTop: 10 }}>
           <thead><tr><th>Date</th><th>Register</th><th>Transfer</th><th>To</th><th>Amount</th><th>Approval</th><th>Reference</th></tr></thead>
           <tbody>
             {transferRows.map((row) => (
               <tr key={`transfer-${row.id}`}>
                 <td>{row.event_date}</td>
                 <td>{row.register_name}</td>
-                <td>{row.movement_type}</td>
+                <td>{cashMovementLabel(row.movement_type)}</td>
                 <td>{row.destination_register_name || row.to_accounting_financial_account_id || '-'}</td>
                 <td>{money(row.amount)}</td>
                 <td>{row.approved_by_name || (row.requires_approval ? 'required' : '-')}</td>
@@ -127,11 +131,11 @@ export default function CashMovementsPage() {
 
       <section className="section">
         <h2>Recent Drawer Events</h2>
-        <table className="table" style={{ marginTop: 10 }}>
+        <table className="table" tabIndex={0} aria-label="Scrollable data table" style={{ marginTop: 10 }}>
           <thead><tr><th>Date</th><th>Register</th><th>Type</th><th>Direction</th><th>Amount</th><th>Reference</th><th>Sync</th></tr></thead>
           <tbody>
             {rows.map((row) => (
-              <tr key={row.id}><td>{row.event_date}</td><td>{row.register_name}</td><td>{row.movement_type}</td><td>{row.direction}</td><td>{money(row.amount)}</td><td>{row.reference_no || '-'}</td><td><span className={`badge ${row.synced_to_accounting ? 'success' : 'warn'}`}>{row.synced_to_accounting ? 'synced' : 'pending'}</span></td></tr>
+              <tr key={row.id}><td>{row.event_date}</td><td>{row.register_name}</td><td>{cashMovementLabel(row.movement_type)}</td><td>{humanizeCode(row.direction)}</td><td>{money(row.amount)}</td><td>{row.reference_no || '-'}</td><td><span className={`badge ${row.synced_to_accounting ? 'success' : 'warn'}`}>{row.synced_to_accounting ? 'Synced' : 'Pending'}</span></td></tr>
             ))}
             {!rows.length && <tr><td colSpan="7" className="muted">No cash movements yet.</td></tr>}
           </tbody>

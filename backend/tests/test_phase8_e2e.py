@@ -6,9 +6,28 @@ from sqlalchemy.orm import sessionmaker
 
 from app.db.database import Base
 from app.models.entities import CatalogItem, Outlet, Register, RoomChargePosting, SyncOutboxEvent, User
-from app.schemas.common import InHouseBookingSnapshotCreate, OrderCreate, OrderPayPayload, OrderPaymentCreate, OrderUpdate, RegisterSessionClose, RegisterSessionOpen, RoomChargePostingStatusUpdate
+from app.schemas.common import (
+    InHouseBookingSnapshotCreate,
+    OrderCreate,
+    OrderPaymentCreate,
+    OrderPayPayload,
+    OrderUpdate,
+    RegisterSessionClose,
+    RegisterSessionOpen,
+    RoomChargePostingStatusUpdate,
+)
 from app.services.auth_service import hash_password
-from app.services.pos_service import create_in_house_booking_snapshot, create_order, set_order_status, open_register_session, pay_order, save_setting_json, close_register_session, update_order, update_room_charge_posting_status
+from app.services.pos_service import (
+    close_register_session,
+    create_in_house_booking_snapshot,
+    create_order,
+    open_register_session,
+    pay_order,
+    save_setting_json,
+    set_order_status,
+    update_order,
+    update_room_charge_posting_status,
+)
 from app.services.sync_service import run_outbox_sync
 
 

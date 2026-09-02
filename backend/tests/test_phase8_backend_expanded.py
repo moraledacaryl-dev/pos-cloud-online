@@ -1,15 +1,42 @@
 import asyncio
 import json
+
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.db.database import Base
 from app.models.entities import CatalogItem, ManagerApproval, Outlet, Register, RoomChargePosting, SyncOutboxEvent, User
-from app.schemas.common import CashMovementCreate, CatalogItemUpdate, InHouseBookingSnapshotCreate, OrderCreate, OrderPayPayload, OrderPaymentCreate, RefundCreate, RegisterSessionClose, RegisterSessionOpen, RegisterSessionReopen, RoomChargePostingStatusUpdate
+from app.schemas.common import (
+    CashMovementCreate,
+    CatalogItemUpdate,
+    InHouseBookingSnapshotCreate,
+    OrderCreate,
+    OrderPaymentCreate,
+    OrderPayPayload,
+    RefundCreate,
+    RegisterSessionClose,
+    RegisterSessionOpen,
+    RegisterSessionReopen,
+    RoomChargePostingStatusUpdate,
+)
 from app.services.approval_guard import consume_protected_approval, protected_payload
 from app.services.approval_service import authorize_approval_with_credentials
 from app.services.auth_service import hash_password
-from app.services.pos_service import close_register_session, create_cash_movement, create_in_house_booking_snapshot, create_order, create_refund, list_room_charge_postings, open_register_session, pay_order, reopen_register_session, update_catalog_item, update_room_charge_posting_status, save_setting_json
+from app.services.pos_service import (
+    close_register_session,
+    create_cash_movement,
+    create_in_house_booking_snapshot,
+    create_order,
+    create_refund,
+    list_room_charge_postings,
+    open_register_session,
+    pay_order,
+    reopen_register_session,
+    save_setting_json,
+    update_catalog_item,
+    update_room_charge_posting_status,
+)
 from app.services.sync_service import sync_catalog_from_accounting
 
 
@@ -124,11 +151,20 @@ def test_partial_refund_on_split_tender_allocates_back_to_original_tenders():
     manager, _cashier, register, item = seed(db)
     session = open_register_session(db, RegisterSessionOpen(register_id=register.id, business_date='2026-04-20', shift_name='AM', opening_float=0))
     order = create_order(db, OrderCreate(register_session_id=session['id'], lines=[{'catalog_item_id': item.id, 'quantity': 2, 'unit_price': 100, 'discount_amount': 0}]))
-    paid = pay_order(db, order['id'], OrderPayPayload(payments=[OrderPaymentCreate(tender_type='cash', amount_applied=50, amount_received=50), OrderPaymentCreate(tender_type='gcash', amount_applied=150, amount_received=150, accounting_financial_account_id=12, reference_no='GC-1')]))
+    pay_order(db, order['id'], OrderPayPayload(payments=[OrderPaymentCreate(tender_type='cash', amount_applied=50, amount_received=50), OrderPaymentCreate(tender_type='gcash', amount_applied=150, amount_received=150, accounting_financial_account_id=12, reference_no='GC-1')]))
     refund = create_refund(db, order['id'], RefundCreate(refund_mode='amount', amount=100, approved_by_user_id=manager.id), cashier_user_id=manager.id)
     assert refund['refunded_amount'] == 100
     tender_types = {row['tender_type'] for row in refund['payments']}
     assert tender_types == {'cash', 'gcash'}
+
+
+@pytest.mark.parametrize('tampered_price', [1, 999])
+def test_order_rejects_client_side_price_tampering(tampered_price):
+    db = make_session()
+    _manager, _cashier, register, item = seed(db)
+    session = open_register_session(db, RegisterSessionOpen(register_id=register.id, business_date='2026-04-20', shift_name='AM', opening_float=0))
+    with pytest.raises(ValueError, match='price does not match the current catalog price'):
+        create_order(db, OrderCreate(register_session_id=session['id'], lines=[{'catalog_item_id': item.id, 'quantity': 1, 'unit_price': tampered_price, 'discount_amount': 0}]))
 
 
 def test_manager_override_records_discount_and_reopen_approval_rows():

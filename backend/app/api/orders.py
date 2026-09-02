@@ -4,13 +4,37 @@ from sqlalchemy.orm import Session
 from app.api.deps import require_permissions
 from app.db.database import get_db
 from app.models.entities import PosOrder
-from app.schemas.common import OrderCreate, OrderPayPayload, OrderTableMergePayload, OrderTableTransferPayload, OrderUpdate, OrderVoidPayload, RefundCreate
+from app.schemas.common import (
+    OrderCreate,
+    OrderPayPayload,
+    OrderTableMergePayload,
+    OrderTableTransferPayload,
+    OrderUpdate,
+    OrderVoidPayload,
+    RefundCreate,
+)
 from app.services.approval_guard import consume_protected_approval, reject_legacy_client_approver
-from app.services.inventory_integration import enqueue_inventory_event, should_reverse_inventory_for_refund, should_reverse_inventory_for_void
+from app.services.inventory_integration import (
+    enqueue_inventory_event,
+    should_reverse_inventory_for_refund,
+    should_reverse_inventory_for_void,
+)
 from app.services.operations_integration import publish_operations_event
 from app.services.order_state_policy import assert_order_action, policy_snapshot
 from app.services.payment_control_policy import validate_payment_control
-from app.services.pos_service import create_order, create_refund, get_order, list_orders, list_refunds, merge_order_table, pay_order, set_order_status, transfer_order_table, update_order, void_order
+from app.services.pos_service import (
+    create_order,
+    create_refund,
+    get_order,
+    list_orders,
+    list_refunds,
+    merge_order_table,
+    pay_order,
+    set_order_status,
+    transfer_order_table,
+    update_order,
+    void_order,
+)
 
 router = APIRouter()
 

@@ -1865,6 +1865,16 @@ button.danger {
   z-index: 30;
 }
 
+.pos-terminal-top .pos-tools-panel {
+  left: 0;
+  right: auto;
+}
+
+.order-more-menu .pos-tools-panel {
+  left: auto;
+  right: 0;
+}
+
 .pos-tools-panel button {
   width: 100%;
   text-align: left;
@@ -3943,9 +3953,35 @@ button.danger {
   }
 
   .terminal-main .order-topbar {
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "context context"
+      "navigation actions";
     gap: 6px;
-    padding: 5px 6px;
+    padding: 8px;
+  }
+
+  .terminal-main .order-context {
+    grid-area: context;
+  }
+
+  .terminal-main .order-context strong,
+  .terminal-main .order-context span {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+  }
+
+  .terminal-main .order-nav-block {
+    grid-area: navigation;
+  }
+
+  .terminal-main .order-primary-actions {
+    grid-area: actions;
+    max-width: 100%;
+    overflow-x: auto;
+    justify-content: flex-end;
+    scrollbar-width: thin;
   }
 
   .terminal-main .order-status-strip {
@@ -3956,8 +3992,8 @@ button.danger {
   .terminal-main .order-nav-block button,
   .terminal-main .terminal-exit-link,
   .terminal-main .pos-tools-menu summary {
-    min-height: 34px;
-    padding: 6px 8px;
+    min-height: 44px;
+    padding: 8px 10px;
     font-size: 12px;
   }
 
@@ -3979,7 +4015,7 @@ button.danger {
 
   .terminal-main .order-category-rail button {
     min-width: 118px;
-    min-height: 34px;
+    min-height: 44px;
   }
 
   .terminal-main .order-items-panel,

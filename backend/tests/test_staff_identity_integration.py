@@ -1,10 +1,11 @@
+import pytest
+from fastapi import HTTPException
+from pydantic import ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from pydantic import ValidationError
-from fastapi import HTTPException
-import pytest
 
-from app.api.staff_integrations import require_staff_integration_key, router as staff_integrations_router
+from app.api.staff_integrations import require_staff_integration_key
+from app.api.staff_integrations import router as staff_integrations_router
 from app.core.settings import settings
 from app.db.database import Base
 from app.models.entities import User

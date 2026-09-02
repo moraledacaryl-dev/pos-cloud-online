@@ -6,7 +6,13 @@ from app.db.database import get_db
 from app.schemas.common import RegisterSessionClose, RegisterSessionOpen, RegisterSessionReopen
 from app.services.approval_guard import consume_protected_approval
 from app.services.operations_integration import publish_operations_event
-from app.services.pos_service import close_register_session, get_register_session, list_register_sessions, open_register_session, reopen_register_session
+from app.services.pos_service import (
+    close_register_session,
+    get_register_session,
+    list_register_sessions,
+    open_register_session,
+    reopen_register_session,
+)
 
 router = APIRouter()
 

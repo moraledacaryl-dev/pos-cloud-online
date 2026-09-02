@@ -2,7 +2,6 @@ from sqlalchemy import Column, Index, String, UniqueConstraint
 
 from app.models.entities import ManagerApproval, RecipeDocument
 
-
 # Pass 1 evolved the manager_approvals table through Alembic 0008. Keep the ORM
 # mapper/metadata aligned with that deployed schema so autogenerate validation
 # cannot mistake security-critical grant fields for columns that should be dropped.

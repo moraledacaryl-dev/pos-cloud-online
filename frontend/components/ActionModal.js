@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useId, useState } from 'react';
+import { useDialogFocus } from '../lib/useDialogFocus';
 
 export default function ActionModal({
   open,
@@ -30,14 +31,7 @@ export default function ActionModal({
     setBusy(false);
   }, [defaultValue, open]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onKeyDown = (event) => {
-      if (event.key === 'Escape' && !busy) onClose?.();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [busy, onClose, open]);
+  useDialogFocus(open, () => { if (!busy) onClose?.(); });
 
   if (!open) return null;
 
@@ -56,7 +50,7 @@ export default function ActionModal({
   }
 
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}>
       <div className="modal-card" style={{ maxWidth: 520 }}>
         <div className="modal-header">
           <div><h2 id={titleId}>{title}</h2>{!!description && <p className="muted">{description}</p>}</div>

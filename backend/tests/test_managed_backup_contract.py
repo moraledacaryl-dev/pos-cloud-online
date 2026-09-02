@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 BACKUP_SCRIPT = ROOT / 'scripts' / 'production-backup.sh'
 BACKUP_SERVICE = ROOT / 'deploy' / 'systemd' / 'pos-backup.service'

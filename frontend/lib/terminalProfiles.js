@@ -66,7 +66,7 @@ export function buildConfiguredLine(item, profile, selectionState, localIdFactor
     target.push({ id: group.id, label: group.label, selections });
   });
   if (selectionState?.custom_note?.trim()) noteParts.push(selectionState.custom_note.trim());
-  return recalcLine({ local_id: localIdFactory(), catalog_item_id: item.id, name: item.display_name, customer_display_name: profile?.customer_display_name || item.display_name, sku_code: item.sku_code, base_price: basePrice, price: Math.round((basePrice + extra) * 100) / 100, quantity: Math.max(1, num(selectionState?.quantity, 1)), note: noteParts.join(' · '), metadata, manual_discount_amount: 0, promo_discount_amount: 0, discount_amount: 0 });
+  return recalcLine({ local_id: localIdFactory(), catalog_item_id: item.id, name: item.display_name, customer_display_name: profile?.customer_display_name || item.display_name, sku_code: item.sku_code, base_price: basePrice, price: Math.round((basePrice + extra) * 100) / 100, tax_rate: num(item.tax_rate), service_charge_rate: num(item.service_charge_rate), quantity: Math.max(1, num(selectionState?.quantity, 1)), note: noteParts.join(' · '), metadata, manual_discount_amount: 0, promo_discount_amount: 0, discount_amount: 0 });
 }
 
 export function recalcLine(line) {
@@ -115,10 +115,16 @@ export function resetPromotions(cart) {
 }
 
 export function serializeCustomerDisplay({ cart, totals, tableLabel, orderType, currentOrderNo }) {
+  const orderTypeLabels = {
+    dine_in: 'Dine-in',
+    takeout: 'Takeout',
+    delivery: 'Delivery',
+    room_service: 'Room service',
+  };
   return {
     updated_at: new Date().toISOString(),
     order_no: currentOrderNo || '',
-    table_label: tableLabel || orderType || '-',
+    table_label: tableLabel || orderTypeLabels[orderType] || 'Walk-in',
     cart: cart.map((line) => ({
       name: line.customer_display_name || line.name,
       quantity: num(line.quantity),

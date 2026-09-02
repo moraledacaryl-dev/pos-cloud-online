@@ -9,8 +9,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test:smoke": "node -e \"console.log('frontend smoke ok')\"",
-    "test:ui": "node --test tests/phase8_frontend.test.mjs tests/phase9_frontend.test.mjs tests/request-guards.test.mjs tests/kds-stream-security.test.mjs tests/browser-auth-security.test.mjs tests/customer-display-security.test.mjs tests/mobile-accessibility.test.mjs tests/pass7-audit-routing-integrity.test.mjs tests/pass14-observability-privacy.test.mjs",
+    "test:smoke": "node scripts/smoke.mjs",
+    "test:ui": "node --test tests/*.test.mjs",
+    "lint": "eslint app components lib scripts tests e2e",
+    "lint:source": "node scripts/source-audit.mjs",
+    "verify": "npm run lint:source && npm run lint && npm run test:ui && npm run build && npm run test:smoke",
     "test:e2e": "playwright test"
   },
   "dependencies": {
@@ -21,7 +24,9 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.10.2",
-    "@playwright/test": "^1.55.0"
+    "@playwright/test": "^1.55.0",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^16.3.3"
   },
   "overrides": {
     "nanoid": "3.3.18",

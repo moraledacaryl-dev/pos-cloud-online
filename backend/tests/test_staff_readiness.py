@@ -11,7 +11,14 @@ from app.db.database import Base
 from app.models.entities import Outlet, Register, SyncOutboxEvent, SystemSetting, User
 from app.schemas.common import RegisterSessionClose, RegisterSessionOpen
 from app.services.ops_service import _accounting_health_url, get_outbox_metrics, get_security_readiness
-from app.services.pos_service import close_register_session, ensure_default_outlet_registers, open_register_session, repair_accounting_sync_api_base, save_setting_json, setting_json
+from app.services.pos_service import (
+    close_register_session,
+    ensure_default_outlet_registers,
+    open_register_session,
+    repair_accounting_sync_api_base,
+    save_setting_json,
+    setting_json,
+)
 from app.services.sync_service import run_outbox_sync
 
 

@@ -8,8 +8,46 @@ export function buildReceiptHtml(receipt) {
   return `<!DOCTYPE html><html><head><meta charset="utf-8" /><title>${esc(receipt?.order_no || 'Receipt')}</title><style>body{font-family:Arial,Helvetica,sans-serif;padding:20px;color:#111}.wrap{max-width:320px;margin:0 auto}h1{font-size:18px;margin:0 0 8px}.muted{color:#666;font-size:12px}.line-row{display:flex;justify-content:space-between;gap:10px;padding:4px 0}.line-note{font-size:11px;color:#666;padding:0 0 4px}.rule{border-top:1px dashed #bbb;margin:10px 0}.total{font-size:16px;font-weight:700}</style></head><body><div class="wrap"><h1>Hidden Oasis POS</h1><div>${esc(receipt?.order_no || '')}</div><div class="muted">${esc(receipt?.business_date || '')} · ${esc(receipt?.guest_name || 'Walk-in')} · ${esc(receipt?.table_label || receipt?.order_type || '-')}</div><div class="muted">Status: ${esc(receipt?.status || '-')} · Settlement: ${esc(receipt?.settlement_state || '-')}</div><div class="rule"></div>${rows}<div class="rule"></div><div class="line-row"><div>Subtotal</div><div>${money(receipt?.subtotal_amount || 0)}</div></div><div class="line-row"><div>Discount</div><div>${money(receipt?.discount_amount || 0)}</div></div><div class="line-row total"><div>Total</div><div>${money(receipt?.total_amount || 0)}</div></div>${settlementRows.join('')}<div class="rule"></div>${payments || '<div class="muted">No payment rows found.</div>'}<div class="muted" style="margin-top:12px">${Number(receipt?.folio_pending_amount || 0) > 0 ? 'Awaiting folio posting / later settlement.' : 'Thank you.'}</div></div></body></html>`;
 }
 export function printReceipt(receipt) { if (typeof window === 'undefined' || !receipt) return; const popup = window.open('', '_blank', 'width=420,height=720'); if (!popup) return; popup.document.open(); popup.document.write(buildReceiptHtml(receipt)); popup.document.close(); popup.focus(); setTimeout(() => popup.print(), 180); }
-export function saveLastReceipt(receipt) { if (typeof window === 'undefined' || !receipt) return; localStorage.setItem('pos_last_receipt', JSON.stringify(receipt)); }
-export function loadLastReceipt() { if (typeof window === 'undefined') return null; try { return JSON.parse(localStorage.getItem('pos_last_receipt') || 'null'); } catch { return null; } }
+const LAST_RECEIPT_KEY = 'pos_last_receipt_v2';
+const LEGACY_LAST_RECEIPT_KEY = 'pos_last_receipt';
+const LAST_RECEIPT_TTL_MS = 12 * 60 * 60 * 1000;
+
+export function saveLastReceipt(receipt, { ownerId = null, registerId = null } = {}) {
+  if (typeof window === 'undefined' || !receipt) return;
+  const stored = {
+    schema_version: 2,
+    saved_at: new Date().toISOString(),
+    expires_at: new Date(Date.now() + LAST_RECEIPT_TTL_MS).toISOString(),
+    owner_id: ownerId,
+    register_id: registerId,
+    receipt,
+  };
+  localStorage.setItem(LAST_RECEIPT_KEY, JSON.stringify(stored));
+  localStorage.removeItem(LEGACY_LAST_RECEIPT_KEY);
+}
+
+export function loadLastReceipt({ ownerId = null, registerId = null } = {}) {
+  if (typeof window === 'undefined') return null;
+  try {
+    const stored = JSON.parse(localStorage.getItem(LAST_RECEIPT_KEY) || 'null');
+    if (!stored?.receipt || Date.parse(stored.expires_at || '') <= Date.now()) {
+      clearLastReceipt();
+      return null;
+    }
+    if (ownerId != null && stored.owner_id != null && String(ownerId) !== String(stored.owner_id)) return null;
+    if (registerId != null && stored.register_id != null && String(registerId) !== String(stored.register_id)) return null;
+    return stored.receipt;
+  } catch {
+    clearLastReceipt();
+    return null;
+  }
+}
+
+export function clearLastReceipt() {
+  if (typeof window === 'undefined') return;
+  localStorage.removeItem(LAST_RECEIPT_KEY);
+  localStorage.removeItem(LEGACY_LAST_RECEIPT_KEY);
+}
 
 
 export function buildRefundReceiptHtml(refund) {

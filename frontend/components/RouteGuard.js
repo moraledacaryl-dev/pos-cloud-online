@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { logoutSession } from '../lib/api';
+import { clearLastReceipt } from '../lib/receipt';
 import { useCurrentUser } from '../lib/useCurrentUser';
 import { defaultRouteForUser, getRouteMeta, normalizeRoutePath, routeCanAccess } from '../lib/routes';
 
@@ -37,6 +38,7 @@ export default function RouteGuard({ children }) {
     } catch {
       // Clearing the server session is best-effort here; login remains the safe destination.
     } finally {
+      clearLastReceipt();
       window.location.replace('/login');
     }
   }

@@ -15,7 +15,21 @@ Restart=always
 RestartSec=10
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectSystem=full
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0027
+TasksMax=256
+LimitNOFILE=32768
+MemoryMax=768M
 
 [Install]
 WantedBy=multi-user.target

@@ -2,11 +2,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.db.database import Base
-from app.models.entities import Outlet, Register
+from app.models.entities import Outlet, Register, User
 from app.schemas.common import CashMovementCreate, RegisterSessionClose, RegisterSessionOpen
 from app.services.auth_service import create_refresh_token, hash_password, revoke_all_sessions, rotate_refresh_token
-from app.models.entities import User
-from app.services.pos_service import create_cash_movement, open_register_session, close_register_session
+from app.services.pos_service import close_register_session, create_cash_movement, open_register_session
 
 
 def make_session():

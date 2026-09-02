@@ -4,8 +4,8 @@ import pytest
 from fastapi import HTTPException
 
 from app.core import rate_limit
-from app.core.settings import Settings, looks_like_placeholder_secret, settings as runtime_settings
-
+from app.core.settings import Settings, looks_like_placeholder_secret
+from app.core.settings import settings as runtime_settings
 
 ROOT = Path(__file__).resolve().parents[2]
 PRODUCTION_SAMPLE = ROOT / '.env.production.example'

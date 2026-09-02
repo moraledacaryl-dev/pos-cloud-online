@@ -2,13 +2,30 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.db.database import Base
-from app.models.entities import AuditLog, ManagerApproval, Outlet, Register, User, CatalogItem, RoomChargePosting
-from app.schemas.common import CashMovementCreate, InHouseBookingSnapshotCreate, OrderCreate, OrderPayPayload, OrderPaymentCreate, OrderVoidPayload, RegisterSessionOpen, RoomChargePostingStatusUpdate
+from app.models.entities import AuditLog, CatalogItem, ManagerApproval, Outlet, Register, RoomChargePosting, User
+from app.schemas.common import (
+    CashMovementCreate,
+    InHouseBookingSnapshotCreate,
+    OrderCreate,
+    OrderPaymentCreate,
+    OrderPayPayload,
+    OrderVoidPayload,
+    RegisterSessionOpen,
+    RoomChargePostingStatusUpdate,
+)
 from app.services.approval_guard import consume_protected_approval, protected_payload
 from app.services.approval_service import authorize_approval_with_credentials, list_manager_approvals
 from app.services.audit_service import list_audit_logs
 from app.services.auth_service import hash_password
-from app.services.pos_service import create_cash_movement, create_in_house_booking_snapshot, create_order, open_register_session, pay_order, update_room_charge_posting_status, void_order
+from app.services.pos_service import (
+    create_cash_movement,
+    create_in_house_booking_snapshot,
+    create_order,
+    open_register_session,
+    pay_order,
+    update_room_charge_posting_status,
+    void_order,
+)
 
 
 def make_session():

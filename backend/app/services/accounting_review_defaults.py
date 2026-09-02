@@ -8,7 +8,6 @@ from sqlalchemy.orm import Session
 
 from app.services.pos_service import save_setting_json, setting_json
 
-
 REVIEW_ROUTE_DEFAULTS = {
     'current_erp_cashflow_path': '/integrations/pos-review/cashflow',
     'current_erp_transfers_path': '/integrations/pos-review/transfer',

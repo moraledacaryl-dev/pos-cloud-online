@@ -1,7 +1,9 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { API_BASE, fetchCustomerDisplaySnapshot } from '../../lib/api';
+import { API_BASE, errorMessage, fetchCustomerDisplaySnapshot } from '../../lib/api';
+import { useCurrentUser } from '../../lib/useCurrentUser';
 
 const peso = new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' });
 
@@ -24,11 +26,12 @@ async function postJson(path, payload) {
   });
   let data = null;
   try { data = await res.json(); } catch { data = null; }
-  if (!res.ok) throw new Error(data?.detail || 'Request failed');
+  if (!res.ok) throw new Error(errorMessage(data));
   return data;
 }
 
 export default function CustomerDisplayPage() {
+  const { loaded: identityLoaded, user, can } = useCurrentUser();
   const [latest, setLatest] = useState(null);
   const [serverConnected, setServerConnected] = useState(false);
   const [needsPairing, setNeedsPairing] = useState(false);
@@ -104,8 +107,14 @@ export default function CustomerDisplayPage() {
   const totals = latest?.totals || {};
 
   if (managerSetup) {
+    if (!identityLoaded) {
+      return <main className="customer-display"><section className="customer-display-empty" aria-live="polite"><p className="customer-display-eyebrow">Hidden Oasis</p><h1>Checking manager access…</h1></section></main>;
+    }
+    if (!user || !can('approvals.manage')) {
+      return <main className="customer-display"><section className="customer-display-empty"><p className="customer-display-eyebrow">Hidden Oasis</p><h1>Manager sign-in required</h1><p>A manager or owner must sign in before creating a customer-display pairing code.</p><Link className="button-link" href={`/login?next=${encodeURIComponent(`/customer-display?setup=1&channel=${channel}`)}`}>Sign in as manager</Link></section></main>;
+    }
     return (
-      <div className="customer-display">
+      <main className="customer-display">
         <section className="customer-display-empty">
           <p className="customer-display-eyebrow">Hidden Oasis</p>
           <h1>Pair customer display</h1>
@@ -119,13 +128,13 @@ export default function CustomerDisplayPage() {
           )}
           {!!error && <p className="error-text">{error}</p>}
         </section>
-      </div>
+      </main>
     );
   }
 
   if (needsPairing) {
     return (
-      <div className="customer-display">
+      <main className="customer-display">
         <section className="customer-display-empty">
           <p className="customer-display-eyebrow">Hidden Oasis</p>
           <h1>Display pairing required</h1>
@@ -142,12 +151,12 @@ export default function CustomerDisplayPage() {
           </form>
           {!!error && <p className="error-text">{error}</p>}
         </section>
-      </div>
+      </main>
     );
   }
 
   return (
-    <div className="customer-display">
+    <main className="customer-display">
       <header className="customer-display-header">
         <div>
           <p className="customer-display-eyebrow">Hidden Oasis</p>
@@ -180,6 +189,6 @@ export default function CustomerDisplayPage() {
           </aside>
         </div>
       )}
-    </div>
+    </main>
   );
 }

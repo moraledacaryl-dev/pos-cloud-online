@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { approveApproval, fetchApprovals, fetchAuditLogs, rejectApproval } from '../../lib/api';
+import { auditActionLabel, humanizeCode } from '../../lib/displayLabels.mjs';
 
 const EMPTY_FILTERS = {
   q: '', action: '', entity_type: '', actor_user_id: '', date_from: '', date_to: '',
@@ -151,14 +152,14 @@ export default function AuditPage() {
           <div className="card">
             <div className="row" style={{ justifyContent: 'space-between' }}><strong>Approvals review queue</strong><span className="small muted">{approvals.length} rows</span></div>
             <div className="stack-tight" style={{ marginTop: 10 }}>
-              {approvals.map((row) => <button key={row.id} type="button" className={`list-row-button ${selectedApproval?.id === row.id ? 'active' : ''}`} onClick={() => setSelectedApprovalId(row.id)}><div><strong>{row.approval_type}</strong><div className="small muted">{row.status} · {row.entity_type} #{row.entity_id || '-'}</div></div></button>)}
+              {approvals.map((row) => <button key={row.id} type="button" className={`list-row-button ${selectedApproval?.id === row.id ? 'active' : ''}`} onClick={() => setSelectedApprovalId(row.id)}><div><strong>{auditActionLabel(row.approval_type)}</strong><div className="small muted">{humanizeCode(row.status)} · {humanizeCode(row.entity_type)} #{row.entity_id || '-'}</div></div></button>)}
               {!approvals.length && <div className="muted">No approvals found.</div>}
             </div>
           </div>
           <div className="card">
             {!selectedApproval && <div className="muted">Select an approval.</div>}
             {!!selectedApproval && <div className="stack-tight">
-              <div><strong>{selectedApproval.approval_type}</strong><div className="small muted">{selectedApproval.status} · {selectedApproval.entity_type} #{selectedApproval.entity_id || '-'}</div></div>
+              <div><strong>{auditActionLabel(selectedApproval.approval_type)}</strong><div className="small muted">{humanizeCode(selectedApproval.status)} · {humanizeCode(selectedApproval.entity_type)} #{selectedApproval.entity_id || '-'}</div></div>
               <div className="card"><div className="muted">Requested by</div><strong>{selectedApproval.requested_by_name || '-'}</strong></div>
               <div className="card"><div className="muted">Approved by</div><strong>{selectedApproval.approved_by_name || '-'}</strong></div>
               <div className="card"><div className="muted">Reason</div>{selectedApproval.requested_reason || '-'}</div>
@@ -179,17 +180,17 @@ export default function AuditPage() {
         <div className="two-column-layout audit-review-layout">
           <div className="card">
             <div className="stack-tight">
-              {rows.map((row) => <button key={row.id} type="button" className={`list-row-button ${selectedAudit?.id === row.id ? 'active' : ''}`} onClick={() => setSelectedAuditId(row.id)}><div><strong>{row.action}</strong><div className="small muted">{formatDateTime(row.created_at)} · {row.actor_name || row.actor_username || '-'}</div><div className="small muted">{row.entity_type} #{row.entity_id || '-'}</div></div></button>)}
+              {rows.map((row) => <button key={row.id} type="button" className={`list-row-button ${selectedAudit?.id === row.id ? 'active' : ''}`} onClick={() => setSelectedAuditId(row.id)}><div><strong>{auditActionLabel(row.action)}</strong><div className="small muted">{formatDateTime(row.created_at)} · {row.actor_name || row.actor_username || '-'}</div><div className="small muted">{humanizeCode(row.entity_type)} #{row.entity_id || '-'}</div></div></button>)}
               {!rows.length && <div className="muted">No audit rows found.</div>}
             </div>
           </div>
           <div className="card">
             {!selectedAudit && <div className="muted">Select an audit entry.</div>}
             {!!selectedAudit && <div className="stack-tight">
-              <div><strong>{selectedAudit.action}</strong><div className="small muted">{selectedAudit.entity_type} #{selectedAudit.entity_id || '-'}</div></div>
+              <div><strong>{auditActionLabel(selectedAudit.action)}</strong><div className="small muted">{humanizeCode(selectedAudit.entity_type)} #{selectedAudit.entity_id || '-'}</div></div>
               <div className="form-grid-3"><div className="card"><div className="muted">Actor</div><strong>{selectedAudit.actor_name || selectedAudit.actor_username || '-'}</strong></div><div className="card"><div className="muted">Time</div><strong>{formatDateTime(selectedAudit.created_at)}</strong></div><div className="card"><div className="muted">Method</div><strong>{selectedAudit.request_method || '-'}</strong></div></div>
               <div className="card"><div className="muted">Linked records</div>{renderLinks(selectedAudit)}</div>
-              <div className="card"><div className="muted">Details JSON</div><pre style={{ whiteSpace: 'pre-wrap', margin: 0, fontSize: 12 }}>{JSON.stringify(selectedAudit.details || {}, null, 2)}</pre></div>
+              <details className="card technical-details"><summary>Technical details</summary><pre>{JSON.stringify(selectedAudit.details || {}, null, 2)}</pre></details>
             </div>}
           </div>
         </div>

@@ -112,12 +112,12 @@ export default function CatalogPage() {
           </div>
           <div className="row wrap">
             <button className="primary" onClick={handleSync} disabled={busy}>{busy ? 'Working...' : 'Refresh Selling Catalog'}</button>
-            <select value={availabilityFilter} onChange={(e) => setAvailabilityFilter(e.target.value)}>
+            <select aria-label="Availability filter" value={availabilityFilter} onChange={(e) => setAvailabilityFilter(e.target.value)}>
               <option value="all">All items</option>
               <option value="available">Available only</option>
               <option value="sold_out">Sold out / hidden</option>
             </select>
-            <input placeholder="Search catalog" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 220 }} />
+            <input aria-label="Search catalog" placeholder="Search catalog" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 220 }} />
           </div>
         </div>
         {catalogStatus?.state === 'stale' && <p className="error-text" style={{ marginTop: 8 }}>The selling snapshot is more than 24 hours old. Refresh before relying on prices or item availability.</p>}
@@ -152,8 +152,8 @@ export default function CatalogPage() {
       {Object.entries(grouped).map(([group, rows]) => (
         <section className="section" key={group}>
           <h2>{group}</h2>
-          <table className="table" style={{ marginTop: 10 }}>
-            <thead><tr><th>Display</th><th>SKU / Variant</th><th>Station</th><th>Price</th><th>Master IDs</th><th>Status</th><th></th></tr></thead>
+          <table className="table" tabIndex={0} aria-label="Scrollable data table" style={{ marginTop: 10 }}>
+            <thead><tr><th>Display</th><th>SKU / Variant</th><th>Station</th><th>Price</th><th>Master IDs</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>
               {rows.map((row) => (
                 <tr key={row.id}><td>{row.display_name}</td><td>{row.sku_code || '-'}</td><td>{row.prep_station || '-'}</td><td>{money(row.price)}</td><td>{row.external_menu_item_id || '-'} / {row.external_sku_id || '-'}</td><td><span className={`badge ${row.is_available ? 'success' : 'warn'}`}>{row.is_available ? 'available' : 'sold out'}</span></td><td><div className="row wrap">{!row.external_menu_item_id && !row.external_sku_id && <button type="button" className="secondary" onClick={() => editItem(row)}>Edit fallback</button>}<button type="button" className={row.is_available ? 'secondary' : 'primary'} onClick={() => toggleAvailability(row)}>{row.is_available ? 'Mark Sold Out' : 'Restore to POS'}</button>{!row.external_menu_item_id && !row.external_sku_id && <button type="button" className="danger" onClick={() => setPendingDelete(row)}>Delete fallback</button>}</div></td></tr>

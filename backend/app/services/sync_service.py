@@ -9,7 +9,15 @@ from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.core.settings import settings
-from app.models.entities import CashMovement, CatalogItem, InHouseBookingSnapshot, PosOrder, Register, RegisterSession, RoomChargePosting, SyncOutboxEvent
+from app.models.entities import (
+    CashMovement,
+    CatalogItem,
+    InHouseBookingSnapshot,
+    PosOrder,
+    Register,
+    RoomChargePosting,
+    SyncOutboxEvent,
+)
 from app.services.pos_service import normalize_kds_station, now_iso, save_setting_json, setting_json
 
 

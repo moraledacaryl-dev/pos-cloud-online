@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import json
+
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.entities import AuditLog
-
 
 AUDIT_PAGE_SIZE_DEFAULT = 50
 AUDIT_PAGE_SIZE_MAX = 100

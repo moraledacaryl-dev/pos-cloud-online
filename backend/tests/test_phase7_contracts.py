@@ -6,11 +6,32 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.db.database import Base
-from app.models.entities import CatalogItem, Outlet, Register, SyncOutboxEvent, User, RoomChargePosting
-from app.schemas.common import OrderCreate, OrderPayPayload, OrderPaymentCreate, RefundCreate, RegisterSessionOpen, RoomChargePostingStatusUpdate
+from app.models.entities import CatalogItem, Outlet, Register, RoomChargePosting, SyncOutboxEvent, User
+from app.schemas.common import (
+    OrderCreate,
+    OrderPaymentCreate,
+    OrderPayPayload,
+    RefundCreate,
+    RegisterSessionOpen,
+    RoomChargePostingStatusUpdate,
+)
 from app.services.auth_service import hash_password
-from app.services.pos_service import create_order, create_refund, open_register_session, pay_order, save_setting_json, update_room_charge_posting_status, void_order
-from app.services.sync_service import _push_cash_movement, _push_order, _push_order_void, _push_payment_refund, _push_reconciliation, run_outbox_sync
+from app.services.pos_service import (
+    create_order,
+    create_refund,
+    open_register_session,
+    pay_order,
+    save_setting_json,
+    update_room_charge_posting_status,
+)
+from app.services.sync_service import (
+    _push_cash_movement,
+    _push_order,
+    _push_order_void,
+    _push_payment_refund,
+    _push_reconciliation,
+    run_outbox_sync,
+)
 
 
 class FakeResponse:

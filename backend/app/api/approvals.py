@@ -1,11 +1,16 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
 from app.api.deps import require_any_permissions
 from app.core.rate_limit import enforce_rate_limit
 from app.db.database import get_db
-from app.services.approval_service import authorize_approval_with_credentials, list_manager_approvals, approve_manager_approval, reject_manager_approval
+from app.services.approval_service import (
+    approve_manager_approval,
+    authorize_approval_with_credentials,
+    list_manager_approvals,
+    reject_manager_approval,
+)
 
 router = APIRouter()
 

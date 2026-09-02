@@ -2,6 +2,7 @@
 
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { fetchOutbox, fetchSyncStatus, runOutboxSync, retryOutboxEvent, unblockOutboxEvent, archiveOutboxEvent, resolveOutboxEvent } from '../../lib/api';
+import { humanizeCode } from '../../lib/displayLabels.mjs';
 import { explainSyncError, summarizeOutboxRows } from '../../lib/ui_contracts.mjs';
 import ActionModal from '../../components/ActionModal';
 
@@ -225,7 +226,7 @@ export default function SyncPage() {
             <div className="small muted" style={{ marginTop: 8 }}>Last seen: {formatDateTime(health?.sync_worker?.last_seen_at)}</div>
           </div>
           <div className="card">
-            <div className="row wrap"><span className="badge info">Reachability</span><span className="small muted">Redis: {health?.integration_reachability?.redis ? 'up' : 'down'}</span></div>
+            <div className="row wrap"><span className="badge info">Reachability</span><span className="small muted">Ticket store: {health?.integration_reachability?.redis == null ? `${health?.kds_stream_ticket_store?.backend || 'local'} (Redis not required)` : health.integration_reachability.redis ? 'Redis up' : 'Redis down'}</span></div>
             <div className="small muted" style={{ marginTop: 8 }}>Accounting reachable: {health?.integration_reachability?.accounting_api ? 'yes' : 'no'}</div>
           </div>
         </div>
@@ -247,7 +248,7 @@ export default function SyncPage() {
           <label className="field">
             Queue View
             <select value={filters.status} onChange={(e) => setFilters((prev) => ({ ...prev, status: e.target.value }))}>
-              {STATUS_VIEWS.map((status) => <option key={status} value={status}>{status}</option>)}
+              {STATUS_VIEWS.map((status) => <option key={status} value={status}>{humanizeCode(status)}</option>)}
             </select>
           </label>
           <label className="field-inline" style={{ alignSelf: 'end' }}>
@@ -261,7 +262,7 @@ export default function SyncPage() {
             <strong>{queueTitle}</strong>
             <span className="small muted">{filteredRows.length} rows</span>
           </div>
-          <table className="table" style={{ marginTop: 10 }}>
+          <table className="table sync-desktop-table" tabIndex={0} aria-label="Scrollable data table" style={{ marginTop: 10 }}>
             <thead><tr><th>ID</th><th>Type</th><th>Aggregate</th><th>Status</th><th>Retries</th><th>Last attempt</th><th>Error</th><th>Details</th><th>Actions</th></tr></thead>
             <tbody>
               {filteredRows.map((row) => {
@@ -270,9 +271,9 @@ export default function SyncPage() {
                 <Fragment key={row.id}>
                   <tr key={row.id}>
                     <td>{row.id}</td>
-                    <td>{row.event_type}</td>
-                    <td>{row.aggregate_type} #{row.aggregate_id}</td>
-                    <td><span className={`badge ${row.status === 'failed' ? 'danger' : row.status === 'blocked' ? 'warn' : row.status === 'resolved' ? 'success' : row.status === 'archived' ? 'info' : 'info'}`}>{row.status}</span></td>
+                    <td>{humanizeCode(row.event_type, 'Sync Event')}</td>
+                    <td>{humanizeCode(row.aggregate_type, 'Record')} #{row.aggregate_id}</td>
+                    <td><span className={`badge ${row.status === 'failed' ? 'danger' : row.status === 'blocked' ? 'warn' : row.status === 'resolved' ? 'success' : row.status === 'archived' ? 'info' : 'info'}`}>{humanizeCode(row.status)}</span></td>
                     <td>{row.retry_count}</td>
                     <td>{formatDateTime(row.last_attempt_at || row.next_retry_at)}</td>
                     <td><div className="small muted">{row.last_error ? explanation.summary : '-'}</div></td>
@@ -298,7 +299,7 @@ export default function SyncPage() {
                     <tr key={`details-${row.id}`}>
                       <td colSpan="9" style={{ padding: '8px 16px', background: 'var(--color-bg-secondary)' }}>
                         <div className="stack-tight">
-                          <div><strong>What this event is:</strong> {row.event_type} for {row.aggregate_type} #{row.aggregate_id}</div>
+                          <div><strong>What this event is:</strong> {humanizeCode(row.event_type, 'Sync Event')} for {humanizeCode(row.aggregate_type, 'Record')} #{row.aggregate_id}</div>
                           <div><strong>Why it failed:</strong> {explanation.summary}</div>
                           <div><strong>Recommended action:</strong> {explanation.action}</div>
                           <div><strong>Raw Error:</strong> {row.last_error || 'None'}</div>
@@ -313,6 +314,25 @@ export default function SyncPage() {
               {!filteredRows.length && <tr><td colSpan="9" className="muted">No rows in the current view.</td></tr>}
             </tbody>
           </table>
+          <div className="sync-mobile-list" aria-label="Sync queue mobile summary">
+            {filteredRows.map((row) => {
+              const explanation = explainSyncError(row);
+              return <article className="sync-mobile-card" key={`mobile-${row.id}`}>
+                <div className="sync-mobile-identity"><strong>Event #{row.id}</strong><span className={`badge ${row.status === 'failed' ? 'danger' : row.status === 'blocked' ? 'warn' : row.status === 'resolved' ? 'success' : 'info'}`}>{humanizeCode(row.status)}</span></div>
+                <div><strong>{humanizeCode(row.event_type, 'Sync Event')}</strong><div className="small muted">{humanizeCode(row.aggregate_type, 'Record')} #{row.aggregate_id}</div></div>
+                <div className="small"><strong>Last attempt:</strong> {formatDateTime(row.last_attempt_at || row.next_retry_at)}</div>
+                <div className="small"><strong>Summary:</strong> {row.last_error ? explanation.summary : 'No error recorded.'}</div>
+                <details className="technical-details"><summary>Technical details</summary><div className="stack-tight"><div><strong>Recommended action:</strong> {explanation.action}</div><div><strong>Raw error:</strong> {row.last_error || 'None'}</div><div><strong>Idempotency key:</strong> {row.idempotency_key || 'None'}</div><pre>{JSON.stringify(row.payload || {}, null, 2)}</pre></div></details>
+                <div className="row wrap">
+                  {['failed', 'blocked', 'pending'].includes(String(row.status || '').toLowerCase()) && <button type="button" className="secondary" onClick={() => handleRetry(row.id)}>Retry</button>}
+                  {String(row.status || '').toLowerCase() === 'blocked' && <button type="button" className="warn" onClick={() => setPendingAction({ kind: 'unblock', eventId: row.id })}>Unblock</button>}
+                  {['failed', 'blocked'].includes(String(row.status || '').toLowerCase()) && <button type="button" className="danger" onClick={() => setPendingAction({ kind: 'archive', eventId: row.id })}>Archive</button>}
+                  {['failed', 'blocked'].includes(String(row.status || '').toLowerCase()) && <button type="button" className="success" onClick={() => setPendingAction({ kind: 'resolve', eventId: row.id })}>Resolve</button>}
+                </div>
+              </article>;
+            })}
+            {!filteredRows.length && <p className="muted">No rows in the current view.</p>}
+          </div>
         </div>
       </section>
       <ActionModal

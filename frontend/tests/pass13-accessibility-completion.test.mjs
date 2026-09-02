@@ -6,17 +6,22 @@ function read(path) {
   return fs.readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 }
 
-test('Pass 13 central runtime repairs repeated Axe primitives', () => {
-  const runtime = read('components/AccessibilityRuntime.js');
-  assert.match(runtime, /aria-labelledby/);
-  assert.match(runtime, /aria-label', 'Actions'/);
-  assert.match(runtime, /Availability filter/);
-  assert.match(runtime, /Close mode/);
-  assert.match(runtime, /Point of Sale/);
-  assert.match(runtime, /main\.order-items-panel/);
-  assert.match(runtime, /setAttribute\('role', 'region'\)/);
-  assert.match(runtime, /Scrollable data table/);
-  assert.match(runtime, /scrollLeft !== 0/);
+test('Pass 22 accessibility semantics are rendered by source components', () => {
+  const layout = read('app/layout.js');
+  const catalog = read('app/catalog/page.js');
+  const sessions = read('app/sessions/page.js');
+  const pos = read('app/pos/page.js');
+  const dialogFocus = read('lib/useDialogFocus.js');
+  assert.doesNotMatch(layout, /AccessibilityRuntime/);
+  assert.match(catalog, /aria-label="Availability filter"/);
+  assert.match(catalog, /<th>Actions<\/th>/);
+  assert.match(sessions, /Close mode for/);
+  assert.match(pos, /<h1 className="sr-only">Point of Sale<\/h1>/);
+  assert.match(pos, /aria-label="Payment"/);
+  assert.match(pos, /aria-label="Money drop"/);
+  assert.match(pos, /useDialogFocus\(!!nativeDialogKey, closeNativeDialogs, nativeDialogKey\)/);
+  assert.match(dialogFocus, /event\.key !== 'Tab'/);
+  assert.match(dialogFocus, /previouslyFocused/);
 });
 
 test('Pass 13 sync banner is inside a named landmark', () => {
@@ -29,7 +34,7 @@ test('Pass 13 contrast and responsive overflow styles are active after prior pas
   const layout = read('app/layout.js');
   const css = read('app/pass13-accessibility.css');
   assert.match(layout, /pass12-runtime\.css';\s*import '\.\/pass13-accessibility\.css'/s);
-  assert.match(layout, /<AccessibilityRuntime \/>/);
+  assert.doesNotMatch(layout, /AccessibilityRuntime/);
   assert.match(css, /\.nav-group-label/);
   assert.match(css, /#626861/);
   assert.match(css, /\.list-row-button\.active \.muted/);

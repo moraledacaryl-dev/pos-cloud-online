@@ -2,6 +2,7 @@
 
 import { usePathname } from 'next/navigation';
 import { logoutSession } from '../lib/api';
+import { clearLastReceipt } from '../lib/receipt';
 import { getRouteTitle, getRouteSubtitle } from '../lib/routes';
 
 export default function Header({ menuButtonRef, menuOpen = false, onMenuToggle }) {
@@ -11,6 +12,7 @@ export default function Header({ menuButtonRef, menuOpen = false, onMenuToggle }
 
   async function handleLogout() {
     try { await logoutSession(); } catch {}
+    clearLastReceipt();
     if (typeof window !== 'undefined') window.location.href = '/login';
   }
 

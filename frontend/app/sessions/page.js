@@ -155,8 +155,8 @@ export default function SessionsPage() {
           <label className="field-inline" style={{ alignSelf: 'end' }}><input type="checkbox" checked={filters.showArchived} onChange={(e) => setFilters((prev) => ({ ...prev, showArchived: e.target.checked }))} /> Show archived closed sessions</label>
         </div>
 
-        <table className="table" style={{ marginTop: 10 }}>
-          <thead><tr><th>Session</th><th>Register</th><th>Status</th><th>Opening</th><th>Expected</th><th>Actual</th><th>Variance</th><th></th></tr></thead>
+        <table className="table" tabIndex={0} aria-label="Scrollable data table" style={{ marginTop: 10 }}>
+          <thead><tr><th>Session</th><th>Register</th><th>Status</th><th>Opening</th><th>Expected</th><th>Actual</th><th>Variance</th><th>Actions</th></tr></thead>
           <tbody>
             {filteredSessions.map((row) => {
               const state = closeForm[row.id] || {};
@@ -178,9 +178,9 @@ export default function SessionsPage() {
                         <div className="row wrap"><button className="secondary" disabled={!hasDrawerMapping} onClick={() => ensureCloseState(row.id)}>Prepare Count</button></div>
                         {closeForm[row.id] && (
                           <div className="stack-tight" style={{ minWidth: 300 }}>
-                            <input type="number" step="0.01" placeholder="Counted cash" value={state.closing_actual_cash || ''} onChange={(e) => setCloseForm((prev) => ({ ...prev, [row.id]: { ...prev[row.id], closing_actual_cash: Number(e.target.value || 0) } }))} />
+                            <input aria-label={`Counted cash for ${row.session_code}`} type="number" step="0.01" placeholder="Counted cash" value={state.closing_actual_cash || ''} onChange={(e) => setCloseForm((prev) => ({ ...prev, [row.id]: { ...prev[row.id], closing_actual_cash: Number(e.target.value || 0) } }))} />
                             <div className="row wrap">
-                              <select value={state.close_mode || 'verified'} onChange={(e) => setCloseForm((prev) => ({ ...prev, [row.id]: { ...prev[row.id], close_mode: e.target.value, blind_close: e.target.value === 'blind' } }))}><option value="verified">Verified close</option><option value="blind">Blind close</option></select>
+                              <select aria-label={`Close mode for ${row.session_code}`} value={state.close_mode || 'verified'} onChange={(e) => setCloseForm((prev) => ({ ...prev, [row.id]: { ...prev[row.id], close_mode: e.target.value, blind_close: e.target.value === 'blind' } }))}><option value="verified">Verified close</option><option value="blind">Blind close</option></select>
                               <label className="field-inline"><input type="checkbox" checked={!!state.blind_close} onChange={(e) => setCloseForm((prev) => ({ ...prev, [row.id]: { ...prev[row.id], blind_close: e.target.checked, close_mode: e.target.checked ? 'blind' : 'verified' } }))} /> Blind close</label>
                             </div>
                             <textarea placeholder="Close note" value={state.closing_note || ''} onChange={(e) => setCloseForm((prev) => ({ ...prev, [row.id]: { ...prev[row.id], closing_note: e.target.value } }))} />

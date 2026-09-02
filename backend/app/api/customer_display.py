@@ -11,6 +11,7 @@ from app.db.database import get_db
 from app.models.customer_display import CustomerDisplayDevice
 from app.services.customer_display_security import (
     SNAPSHOT_TTL_SECONDS,
+    CustomerDisplayStoreUnavailable,
     activate_pairing_code,
     create_pairing_code,
     require_display_device,
@@ -20,6 +21,17 @@ from app.services.pos_service import save_setting_json, setting_json
 
 router = APIRouter()
 CHANNEL_PATTERN = re.compile(r'^[a-zA-Z0-9_-]{1,40}$')
+
+
+def _store_unavailable() -> HTTPException:
+    return HTTPException(
+        status_code=503,
+        detail={
+            'code': CustomerDisplayStoreUnavailable.code,
+            'message': 'Customer display pairing is temporarily unavailable. Try again shortly.',
+            'retryable': True,
+        },
+    )
 
 
 def _now() -> datetime:
@@ -106,12 +118,18 @@ def new_pairing_code(
             register_id = int(register_id)
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail='register_id must be numeric') from exc
-    return create_pairing_code(channel=channel, register_id=register_id, requester_user_id=int(user.id))
+    try:
+        return create_pairing_code(channel=channel, register_id=register_id, requester_user_id=int(user.id))
+    except CustomerDisplayStoreUnavailable as exc:
+        raise _store_unavailable() from exc
 
 
 @router.post('/activate')
 def activate(payload: dict, request: Request, response: Response, db: Session = Depends(get_db)):
-    device = activate_pairing_code(db, request, response, str(payload.get('pairing_code') or ''))
+    try:
+        device = activate_pairing_code(db, request, response, str(payload.get('pairing_code') or ''))
+    except CustomerDisplayStoreUnavailable as exc:
+        raise _store_unavailable() from exc
     return {'ok': True, 'device_uuid': device.device_uuid, 'channel': device.channel, 'register_id': device.register_id}
 
 

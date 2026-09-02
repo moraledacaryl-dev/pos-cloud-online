@@ -7,6 +7,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+import app.models  # noqa: F401
 from app.api import api_router
 from app.core.logging_config import configure_logging, log_json, set_request_id
 from app.core.migrations import ensure_database_ready
@@ -19,7 +20,6 @@ from app.services.auth_service import ensure_admin_user
 from app.services.ops_service import build_health_report
 from app.services.permission_service import ensure_permissions_seed
 from app.services.pos_service import ensure_default_outlet_registers
-import app.models  # noqa: F401
 
 configure_logging(settings.log_level)
 logger = logging.getLogger(__name__)

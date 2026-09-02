@@ -1,9 +1,8 @@
-from pathlib import Path
 import re
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SQLITE_PATH = BACKEND_ROOT / 'pos.db'

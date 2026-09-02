@@ -188,7 +188,7 @@ export default function OrdersPage() {
       <div className="card-grid card-grid-double">
         <section className="section">
           <h2>Order List</h2>
-          <table className="table" style={{ marginTop: 12 }}>
+          <table className="table" tabIndex={0} aria-label="Scrollable data table" style={{ marginTop: 12 }}>
             <thead>
               <tr><th>Order</th><th>Session</th><th>Status</th><th>Guest / Ref</th><th>Total</th><th>Tender</th></tr>
             </thead>
@@ -301,7 +301,7 @@ export default function OrdersPage() {
       </div>
 
       {refundModalOpen && (
-        <div className="modal-backdrop" role="dialog" aria-modal="true">
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Order action dialog" tabIndex={-1}>
           <div className="modal-card modal-card-medium">
             <div className="modal-header">
               <div>

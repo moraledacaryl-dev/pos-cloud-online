@@ -10,7 +10,6 @@ from app.core.settings import settings
 from app.models.entities import SyncOutboxEvent
 from app.services.pos_service import create_outbox_event
 
-
 INVENTORY_EVENT_TYPES = {
     'sale_completed': 'inventory.sale_completed',
     'sale_voided': 'inventory.sale_voided',

@@ -4,11 +4,46 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.db.database import Base
-from app.models.entities import AuditLog, CashMovement, CatalogItem, InHouseBookingSnapshot, Outlet, PosOrder, Register, RegisterSession, RoomChargePosting, SyncOutboxEvent
-from app.schemas.common import CashMovementCreate, CatalogItemUpdate, InHouseBookingSnapshotCreate, OrderCreate, OrderPayPayload, OrderPaymentCreate, OrderUpdate, RefundCreate, RegisterSessionOpen, RoomChargePostingStatusUpdate
 import app.services.pos_service as pos_service
-from app.services.pos_service import create_cash_movement, create_in_house_booking_snapshot, create_order, create_outbox_event, create_refund, merge_order_table, open_register_session, pay_order, set_order_status, transfer_order_table, update_catalog_item, update_order, update_room_charge_posting_status, void_order
+from app.db.database import Base
+from app.models.entities import (
+    AuditLog,
+    CashMovement,
+    CatalogItem,
+    Outlet,
+    PosOrder,
+    Register,
+    RoomChargePosting,
+    SyncOutboxEvent,
+)
+from app.schemas.common import (
+    CashMovementCreate,
+    CatalogItemUpdate,
+    InHouseBookingSnapshotCreate,
+    OrderCreate,
+    OrderPaymentCreate,
+    OrderPayPayload,
+    OrderUpdate,
+    RefundCreate,
+    RegisterSessionOpen,
+    RoomChargePostingStatusUpdate,
+)
+from app.services.pos_service import (
+    create_cash_movement,
+    create_in_house_booking_snapshot,
+    create_order,
+    create_outbox_event,
+    create_refund,
+    merge_order_table,
+    open_register_session,
+    pay_order,
+    set_order_status,
+    transfer_order_table,
+    update_catalog_item,
+    update_order,
+    update_room_charge_posting_status,
+    void_order,
+)
 
 
 def make_session():

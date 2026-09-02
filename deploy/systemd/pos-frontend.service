@@ -15,7 +15,22 @@ Restart=always
 RestartSec=5
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectSystem=full
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0027
+TasksMax=512
+LimitNOFILE=65536
+MemoryMax=1G
+ReadWritePaths=/opt/pos-cloud-online/frontend/.next/cache
 
 [Install]
 WantedBy=multi-user.target

@@ -2,18 +2,96 @@ name: Deploy POS
 
 on:
   workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Full 40-character commit SHA to deploy
+        required: true
+        type: string
+      target_environment:
+        description: Protected GitHub environment
+        required: true
+        default: staging
+        type: choice
+        options:
+          - staging
+          - production
+
+concurrency:
+  group: pos-deploy-${{ inputs.target_environment }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  deployments: write
 
 jobs:
-  deploy:
+  verify-release:
     runs-on: ubuntu-latest
-
+    outputs:
+      release_sha: ${{ steps.release.outputs.sha }}
     steps:
-      - name: Run deploy script on server
-        uses: appleboy/ssh-action@v1.0.3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - id: release
+        name: Validate exact release commit
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+        run: |
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git cat-file -e "$RELEASE_SHA^{commit}"
+          echo "sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
+      - name: Frontend contract tests and build
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run test:ui
+          npm run build
+      - name: Backend contract tests
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.lock
+          ruff check app tests
+          PYTHONPATH=. pytest -q
+
+  deploy:
+    needs: verify-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: ${{ inputs.target_environment }}
+    steps:
+      - name: Deploy and certify exact SHA
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262 # v1.0.3
+        env:
+          EXPECTED_COMMIT: ${{ needs.verify-release.outputs.release_sha }}
+          TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
+          PUBLIC_BASE: ${{ vars.PUBLIC_BASE }}
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: ${{ secrets.SERVER_PORT }}
+          envs: EXPECTED_COMMIT,TARGET_ENVIRONMENT,PUBLIC_BASE
+          command_timeout: 25m
           script: |
-            bash /root/deploy-pos.sh
+            cd /opt/pos-cloud-online
+            CONFIRM_DEPLOY=YES EXPECTED_COMMIT="$EXPECTED_COMMIT" TARGET_ENVIRONMENT="$TARGET_ENVIRONMENT" PUBLIC_BASE="$PUBLIC_BASE" bash scripts/deploy-release.sh
+      - name: Download non-sensitive deployment evidence
+        uses: appleboy/scp-action@917f8b81dfc1ccd331fef9e2d61bdc6c8be94634 # v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: ${{ secrets.SERVER_PORT }}
+          source: /var/lib/hiddenoasis-pos/deploy-evidence/${{ needs.verify-release.outputs.release_sha }}.txt
+          target: deployment-evidence
+          strip_components: 4
+      - name: Upload deployment evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pos-deployment-${{ inputs.target_environment }}-${{ needs.verify-release.outputs.release_sha }}
+          path: deployment-evidence
+          if-no-files-found: error
+          retention-days: 90

@@ -2,12 +2,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
-from fastapi import HTTPException, Request
-import pytest
+from fastapi import Request
 
 from app.api import approvals, auth
 from app.services import customer_display_security as display_security
-
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = BACKEND_ROOT.parent

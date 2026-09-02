@@ -5,7 +5,6 @@ from sqlalchemy.orm import Session, selectinload
 from app.models.entities import Permission, Role, RolePermission, User, UserPermissionOverride, UserRole
 from app.schemas.permissions import RoleCreate, RoleUpdate
 
-
 DEFAULT_PERMISSION_DEFS = [
     ('dashboard.view', 'View Dashboard', 'Main'),
     ('pos.use', 'Use POS Terminal', 'POS'),

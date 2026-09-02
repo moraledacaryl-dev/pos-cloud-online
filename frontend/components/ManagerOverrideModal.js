@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useId, useState } from 'react';
+import { useDialogFocus } from '../lib/useDialogFocus';
 
 export default function ManagerOverrideModal({ open, title = 'Manager Override', subtitle = '', actionLabel = 'Approve', onApprove, onClose }) {
   const titleId = useId();
@@ -17,14 +18,7 @@ export default function ManagerOverrideModal({ open, title = 'Manager Override',
     setLoading(false);
   }, [open]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onKeyDown = (event) => {
-      if (event.key === 'Escape' && !loading) onClose?.();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [loading, onClose, open]);
+  useDialogFocus(open, () => { if (!loading) onClose?.(); });
 
   if (!open) return null;
 
@@ -48,7 +42,7 @@ export default function ManagerOverrideModal({ open, title = 'Manager Override',
   }
 
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}>
       <div className="modal-card" style={{ maxWidth: 440 }}>
         <div className="modal-header">
           <div><h2 id={titleId}>{title}</h2>{!!subtitle && <p className="muted">{subtitle}</p>}</div>

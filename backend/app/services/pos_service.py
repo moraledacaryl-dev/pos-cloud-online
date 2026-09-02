@@ -6,6 +6,7 @@ import logging
 import re
 import uuid
 from datetime import UTC, datetime
+
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, selectinload
 
@@ -22,11 +23,11 @@ from app.models.entities import (
     RefundLine,
     RefundPayment,
     Register,
-    RoomChargePosting,
-    User,
     RegisterSession,
+    RoomChargePosting,
     SyncOutboxEvent,
     SystemSetting,
+    User,
 )
 from app.schemas.common import (
     CashMovementCreate,
@@ -37,9 +38,9 @@ from app.schemas.common import (
     OrderCreate,
     OrderPayPayload,
     OrderUpdate,
-    RefundCreate,
     OutletCreate,
     OutletUpdate,
+    RefundCreate,
     RegisterCreate,
     RegisterSessionClose,
     RegisterSessionOpen,
@@ -51,7 +52,6 @@ from app.services.approval_service import create_manager_approval
 from app.services.audit_service import write_audit_log
 from app.services.kds_stream import publish_kds_event
 from app.services.permission_service import get_user_permission_keys
-
 
 logger = logging.getLogger(__name__)
 
@@ -1243,7 +1243,13 @@ def _rebuild_order_lines(db: Session, row: PosOrder, line_payloads):
         unit_price_value = getattr(item, 'unit_price', None)
         if unit_price_value is None and isinstance(item, dict):
             unit_price_value = item.get('unit_price')
-        unit_price = float(unit_price_value if unit_price_value is not None else catalog.price)
+        catalog_price = float(catalog.price or 0)
+        unit_price = float(unit_price_value if unit_price_value is not None else catalog_price)
+        if abs(unit_price - catalog_price) >= 0.01:
+            raise ValueError(
+                f'{catalog.display_name or catalog.menu_item_name} price does not match the current catalog price. '
+                'Refresh the catalog and use the discount workflow for an authorized reduction.'
+            )
         discount_value = getattr(item, 'discount_amount', None)
         if discount_value is None and isinstance(item, dict):
             discount_value = item.get('discount_amount')
@@ -1796,7 +1802,6 @@ def _next_refund_no(db: Session, business_date: str):
 def _approval_user_for_refund(db: Session, approved_by_user_id: int | None):
     if not approved_by_user_id:
         raise ValueError('A manager approval is required before a refund can be processed.')
-    from app.models.entities import UserRole
     approved_user = db.get(__import__('app.models.entities', fromlist=['User']).User, int(approved_by_user_id))
     if not approved_user or not approved_user.is_active:
         raise ValueError('Approving user not found.')
