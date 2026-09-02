@@ -26,7 +26,7 @@ The release-blocking application defects found in the latest browser and source 
 - Customer-display store outages produce a typed 503 instead of an unhandled server error.
 - Password hashing uses PBKDF2-SHA256 with constant-time verification while retaining legacy-hash migration support; the obsolete passlib/bcrypt runtime dependency was removed.
 - Production services now use strict filesystem protection, home/device isolation, kernel/control-group protection, restricted address families, empty capability sets, restrictive umasks, and explicit task/file/memory limits.
-- Deployment uses an exact release SHA, protected environments, pre-deploy test/build/lint gates, a release artifact, service-aware replacement, health certification, and rollback installation from the locked dependency set.
+- Deployment uses an exact release SHA, protected environments, pre-deploy test/build/lint gates, a release artifact, service-aware replacement, readiness waits, health certification, and rollback installation from the locked dependency set.
 
 ### Usability and accessibility
 

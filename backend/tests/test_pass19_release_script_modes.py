@@ -30,3 +30,5 @@ def test_deploy_installs_and_rolls_back_canonical_systemd_units():
     assert '/etc/systemd/system/pos-frontend.service' in text
     assert '/etc/systemd/system/pos-sync-worker.service' in text
     assert 'install -d -o hiddenoasis -g hiddenoasis -m 0750 frontend/.next/cache' in text
+    assert "wait_for_http 'http://127.0.0.1:8100/healthz'" in text
+    assert "wait_for_http 'http://127.0.0.1:3100/login'" in text

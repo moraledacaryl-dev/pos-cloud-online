@@ -9,6 +9,19 @@ EVIDENCE_DIR="${EVIDENCE_DIR:-/var/lib/hiddenoasis-pos/deploy-evidence}"
 PUBLIC_BASE="${PUBLIC_BASE:-}"
 
 fail() { echo "DEPLOY FAIL: $*" >&2; exit 1; }
+wait_for_http() {
+  local url="$1"
+  local attempts="${2:-60}"
+  local attempt
+  for ((attempt = 1; attempt <= attempts; attempt += 1)); do
+    if curl -fsS --max-time 3 "$url" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  fail "$url did not become ready after $attempts attempts"
+}
+
 install_systemd_units() {
   install -o root -g root -m 0644 deploy/systemd/pos-backend.service /etc/systemd/system/pos-backend.service
   install -o root -g root -m 0644 deploy/systemd/pos-frontend.service /etc/systemd/system/pos-frontend.service
@@ -89,6 +102,8 @@ install_systemd_units
 systemctl restart pos-backend
 systemctl restart pos-sync-worker
 systemctl restart pos-frontend
+wait_for_http 'http://127.0.0.1:8100/healthz'
+wait_for_http 'http://127.0.0.1:3100/login'
 
 EXPECTED_COMMIT="$EXPECTED_COMMIT" PUBLIC_BASE="$PUBLIC_BASE" bash scripts/production-certify.sh
 
