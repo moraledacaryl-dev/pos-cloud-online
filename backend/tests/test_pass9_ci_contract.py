@@ -42,7 +42,7 @@ def test_browser_e2e_keeps_axe_and_security_workflows():
         'pass9-route-that-does-not-exist',
         '/customer-display/pairing-code',
         '/customer-display/activate',
-        '/revoke',
+        "getByRole('button', { name: 'Revoke' })",
         "['serious', 'critical']",
     ]:
         assert required in text
