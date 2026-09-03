@@ -9,7 +9,7 @@ export const ROUTE_ITEMS = [
   { href: '/kitchen-board', label: 'Kitchen Board', title: 'Kitchen', subtitle: 'One KDS for active work, held items, ready orders, stations, and all-day totals', permissionsAny: ['kitchen.view'], group: 'Main', hidden: true },
   { href: '/bar', label: 'Bar', title: 'Kitchen', subtitle: 'Bar station view inside the unified KDS', permissionsAny: ['kitchen.view'], group: 'Main', hidden: true },
   { href: '/expo', label: 'Expo / Pass', title: 'Kitchen', subtitle: 'Expo/pass view inside the unified KDS', permissionsAny: ['kitchen.view'], group: 'Main', hidden: true },
-  { href: '/customer-display', label: 'Customer Display', title: 'Customer Display', subtitle: 'Mirror order totals and payment progress for guests', permissionsAny: ['pos.use'], group: 'Main' },
+  { href: '/customer-display', navigationHref: '/customer-display?setup=1&channel=main', label: 'Customer Display Setup', title: 'Customer Display', subtitle: 'Pair an optional guest screen for live order totals', permissionsAny: ['approvals.manage'], group: 'Main' },
   { href: '/orders', label: 'Orders', title: 'Orders', subtitle: 'Search, review, and control POS orders across shifts', permissionsAny: ['orders.manage', 'pos.use'], group: 'Main' },
   { href: '/registers', label: 'Registers', title: 'Registers', subtitle: 'Outlets, register mapping, and drawer ownership', permissionsAny: ['registers.view'], group: 'Operations' },
   { href: '/sessions', label: 'Sessions', title: 'Sessions', subtitle: 'Open and close shifts with drawer reconciliation', permissionsAny: ['registers.view'], group: 'Operations' },

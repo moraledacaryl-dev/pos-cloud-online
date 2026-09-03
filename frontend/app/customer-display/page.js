@@ -7,6 +7,21 @@ import { useCurrentUser } from '../../lib/useCurrentUser';
 
 const peso = new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' });
 
+function SetupCard({ mode, children }) {
+  return (
+    <section className="customer-display-empty customer-display-setup">
+      <div className="customer-display-setup-card">
+        <div className="customer-display-setup-brand" aria-hidden="true">HO</div>
+        <div className="customer-display-setup-heading">
+          <p className="customer-display-eyebrow">Hidden Oasis · Display setup</p>
+          <span className="customer-display-mode">{mode}</span>
+        </div>
+        {children}
+      </div>
+    </section>
+  );
+}
+
 function csrfToken() {
   if (typeof document === 'undefined') return '';
   const row = document.cookie.split('; ').find((part) => part.startsWith('pos_csrf='));
@@ -108,26 +123,48 @@ export default function CustomerDisplayPage() {
 
   if (managerSetup) {
     if (!identityLoaded) {
-      return <main className="customer-display"><section className="customer-display-empty" aria-live="polite"><p className="customer-display-eyebrow">Hidden Oasis</p><h1>Checking manager access…</h1></section></main>;
+      return <main className="customer-display"><SetupCard mode="Manager setup"><div aria-live="polite" aria-busy="true"><h1>Checking manager access…</h1><p className="customer-display-setup-copy">Confirming that this account can create a secure pairing code.</p></div></SetupCard></main>;
     }
     if (!user || !can('approvals.manage')) {
-      return <main className="customer-display"><section className="customer-display-empty"><p className="customer-display-eyebrow">Hidden Oasis</p><h1>Manager sign-in required</h1><p>A manager or owner must sign in before creating a customer-display pairing code.</p><Link className="button-link" href={`/login?next=${encodeURIComponent(`/customer-display?setup=1&channel=${channel}`)}`}>Sign in as manager</Link></section></main>;
+      return (
+        <main className="customer-display">
+          <SetupCard mode="Manager setup">
+            <h1>Manager sign-in required</h1>
+            <p className="customer-display-setup-copy">Only a manager or owner can connect a new customer-facing screen.</p>
+            <div className="customer-display-actions">
+              <Link className="button-link" href={`/login?next=${encodeURIComponent(`/customer-display?setup=1&channel=${channel}`)}`}>Sign in as manager</Link>
+              <Link className="customer-display-text-link" href="/pos">Return to POS</Link>
+            </div>
+          </SetupCard>
+        </main>
+      );
     }
     return (
       <main className="customer-display">
-        <section className="customer-display-empty">
-          <p className="customer-display-eyebrow">Hidden Oasis</p>
-          <h1>Pair customer display</h1>
-          <p>Channel: <strong>{channel}</strong></p>
-          <button type="button" className="primary" onClick={generatePairingCode} disabled={busy}>Generate one-time pairing code</button>
-          {generatedCode && (
-            <div>
-              <h2>{generatedCode.pairing_code}</h2>
-              <p>Enter this code on the customer display within {generatedCode.expires_in_seconds} seconds. It works once only.</p>
+        <SetupCard mode="Manager setup">
+          <h1>Connect a customer screen</h1>
+          <p className="customer-display-setup-copy">This optional screen shows guests their order and total. It is separate from the cashier POS.</p>
+          <ol className="customer-display-steps">
+            <li><span>1</span><div><strong>Open the customer screen</strong><small>Use a second monitor, tablet, or browser window.</small></div></li>
+            <li><span>2</span><div><strong>Generate a temporary code</strong><small>The code can be used once and expires quickly.</small></div></li>
+            <li><span>3</span><div><strong>Enter the code there</strong><small>The screen will then follow channel <b>{channel}</b>.</small></div></li>
+          </ol>
+          {generatedCode ? (
+            <div className="customer-display-code-panel" aria-live="polite">
+              <span>One-time pairing code</span>
+              <strong>{generatedCode.pairing_code}</strong>
+              <small>Enter it within {generatedCode.expires_in_seconds} seconds. It works once only.</small>
             </div>
+          ) : (
+            <button type="button" className="primary customer-display-primary-action" onClick={generatePairingCode} disabled={busy}>{busy ? 'Generating code…' : 'Generate pairing code'}</button>
           )}
-          {!!error && <p className="error-text">{error}</p>}
-        </section>
+          {!!generatedCode && <button type="button" className="secondary customer-display-primary-action" onClick={generatePairingCode} disabled={busy}>{busy ? 'Generating code…' : 'Generate a new code'}</button>}
+          {!!error && <p className="customer-display-error" role="alert">{error}</p>}
+          <div className="customer-display-footer-actions">
+            <a className="customer-display-text-link" href={`/customer-display?channel=${encodeURIComponent(channel)}`} target="_blank" rel="noreferrer">Open customer screen ↗</a>
+            <Link className="customer-display-text-link" href="/pos">Not using a customer display? Return to POS</Link>
+          </div>
+        </SetupCard>
       </main>
     );
   }
@@ -135,22 +172,33 @@ export default function CustomerDisplayPage() {
   if (needsPairing) {
     return (
       <main className="customer-display">
-        <section className="customer-display-empty">
-          <p className="customer-display-eyebrow">Hidden Oasis</p>
-          <h1>Display pairing required</h1>
-          <p>This screen must be paired by a manager before it can show an order.</p>
-          <form onSubmit={activateDisplay} style={{ display: 'grid', gap: 12, width: 'min(420px, 100%)' }}>
+        <SetupCard mode="Customer screen">
+          <h1>Connect this display</h1>
+          <p className="customer-display-setup-copy">This is the optional guest-facing screen—not the cashier terminal. Ask a manager to generate a pairing code.</p>
+          <form className="customer-display-pair-form" onSubmit={activateDisplay}>
+            <label htmlFor="customer-display-pairing-code">One-time pairing code</label>
             <input
+              id="customer-display-pairing-code"
               aria-label="Pairing code"
               autoComplete="one-time-code"
+              inputMode="text"
+              maxLength={24}
               value={pairingCode}
               onChange={(event) => setPairingCode(event.target.value.toUpperCase())}
-              placeholder="Enter pairing code"
+              placeholder="Enter the code from your manager"
             />
             <button type="submit" className="primary" disabled={busy || pairingCode.trim().length < 8}>{busy ? 'Pairing…' : 'Pair display'}</button>
           </form>
-          {!!error && <p className="error-text">{error}</p>}
-        </section>
+          {!!error && <p className="customer-display-error" role="alert">{error}</p>}
+          <div className="customer-display-help">
+            <strong>Need a code?</strong>
+            <span>On a manager device, open Customer Display Setup and choose Generate pairing code.</span>
+          </div>
+          <div className="customer-display-footer-actions">
+            {user && can('approvals.manage') && <Link className="customer-display-text-link" href={`/customer-display?setup=1&channel=${encodeURIComponent(channel)}`}>Open manager setup</Link>}
+            {user && <Link className="customer-display-text-link" href="/pos">Return to POS</Link>}
+          </div>
+        </SetupCard>
       </main>
     );
   }

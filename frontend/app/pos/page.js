@@ -1111,7 +1111,7 @@ export default function PosPage() {
               )}
               <button type="button" className="secondary" onClick={() => setAvailabilityOpen(true)}>Menu Availability</button>
               <button type="button" className="secondary" onClick={openMapManager}>Manage Service Map</button>
-              <button type="button" className="secondary" onClick={openCustomerDisplay}>Customer Display</button>
+              <button type="button" className="secondary" onClick={openCustomerDisplay}>Open Customer Screen</button>
               <button type="button" className="secondary" onClick={requestFullScreen}>Full Screen</button>
               {renderOfflineDraftTools()}
               {!!lastReceipt && (
@@ -1195,7 +1195,7 @@ export default function PosPage() {
                   <button type="button" className="secondary" onClick={() => setNotice('Choose the target order from Spaces, then use Merge from its action sheet.')}>Merge Orders</button>
                   <button type="button" className="secondary" onClick={clearCart}>Clear Order</button>
                   <button type="button" className="secondary" onClick={() => setAvailabilityOpen(true)}>Menu Availability</button>
-                  <button type="button" className="secondary" onClick={openCustomerDisplay}>Customer Display</button>
+                  <button type="button" className="secondary" onClick={openCustomerDisplay}>Open Customer Screen</button>
                   <button type="button" className="secondary" onClick={requestFullScreen}>Full Screen</button>
                   {renderOfflineDraftTools()}
                 </div>

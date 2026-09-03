@@ -67,7 +67,7 @@ const Sidebar = forwardRef(function Sidebar({ mobileOpen = false, onNavigate, on
               return (
                 <Link
                   key={item.href}
-                  href={item.href}
+                  href={item.navigationHref || item.href}
                   className={active ? 'active' : ''}
                   aria-current={active ? 'page' : undefined}
                   title={collapsed ? item.label : undefined}

@@ -109,6 +109,8 @@ export default function AppShell({ children }) {
     );
   }
 
+  const ContentElement = isStandalone ? 'div' : 'main';
+
   return (
     <div className={isStandalone ? 'app-shell standalone-shell' : isTerminal ? 'app-shell terminal-shell' : 'app-shell'}>
       {showAppChrome && (
@@ -132,9 +134,9 @@ export default function AppShell({ children }) {
           />
         )}
         {showAppChrome && <SyncHealthBanner />}
-        <main className={isStandalone ? 'main standalone-main' : isTerminal ? 'main terminal-main' : 'main'}>
+        <ContentElement className={isStandalone ? 'main standalone-main' : isTerminal ? 'main terminal-main' : 'main'}>
           <RouteGuard>{children}</RouteGuard>
-        </main>
+        </ContentElement>
       </div>
     </div>
   );

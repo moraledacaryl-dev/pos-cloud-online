@@ -25,3 +25,11 @@ test('customer display UI does not render guest name or internal local ids', () 
   assert.equal(page.includes('guest_name'), false);
   assert.equal(page.includes('local_id'), false);
 });
+
+test('customer display pairing explains the optional two-screen workflow', () => {
+  assert.match(page, /This is the optional guest-facing screen—not the cashier terminal/);
+  assert.match(page, /One-time pairing code/);
+  assert.match(page, /Open manager setup/);
+  assert.match(page, /Not using a customer display\? Return to POS/);
+  assert.match(page, /customer-display-pair-form/);
+});

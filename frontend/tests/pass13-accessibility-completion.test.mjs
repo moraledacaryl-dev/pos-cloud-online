@@ -30,6 +30,12 @@ test('Pass 13 sync banner is inside a named landmark', () => {
   assert.match(banner, /aria-label="POS sync status"/);
 });
 
+test('standalone pages do not create nested main landmarks', () => {
+  const shell = read('components/AppShell.js');
+  assert.match(shell, /const ContentElement = isStandalone \? 'div' : 'main'/);
+  assert.match(shell, /<ContentElement className=/);
+});
+
 test('Pass 13 contrast and responsive overflow styles are active after prior pass styles', () => {
   const layout = read('app/layout.js');
   const css = read('app/pass13-accessibility.css');
