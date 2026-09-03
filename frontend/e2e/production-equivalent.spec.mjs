@@ -118,7 +118,7 @@ test.describe.serial('production-equivalent browser acceptance', () => {
     const displayContext = await browser.newContext();
     const displayPage = await displayContext.newPage();
     await displayPage.goto('/customer-display?channel=ci-display');
-    await expect(displayPage.getByRole('heading', { name: 'Display pairing required' })).toBeVisible();
+    await expect(displayPage.getByRole('heading', { name: 'Connect this display' })).toBeVisible();
     await displayPage.getByLabel('Pairing code').fill(pairing.data.pairing_code);
     await displayPage.getByRole('button', { name: 'Pair display' }).click();
     await expect(displayPage.getByRole('heading', { name: 'Ready when you are' })).toBeVisible();
