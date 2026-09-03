@@ -2687,6 +2687,88 @@ button.danger {
   font-weight: 700;
 }
 
+.customer-display-devices {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid rgba(255, 255, 255, 0.11);
+}
+
+.customer-display-devices-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.customer-display-devices-heading h2 {
+  margin: 0;
+  color: #fff;
+  font-size: 21px;
+}
+
+.customer-display-devices-heading p {
+  max-width: 48ch;
+  margin: 5px 0 0;
+  color: #aebdb4;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.customer-display-no-devices {
+  margin: 16px 0 0;
+  padding: 16px;
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+  border-radius: 14px;
+  color: #aebdb4;
+  text-align: center;
+}
+
+.customer-display-device-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.customer-display-device {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.13);
+}
+
+.customer-display-device-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+
+.customer-display-device-title span {
+  padding: 3px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.customer-display-device-title span.active {
+  color: #bce3cd;
+  background: rgba(31, 106, 71, 0.28);
+}
+
+.customer-display-device-title span.inactive {
+  color: #c6d1ca;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.customer-display-device small {
+  color: #aebdb4;
+}
+
 .customer-display-layout {
   align-items: flex-start;
   margin-top: 28px;
@@ -2743,9 +2825,15 @@ button.danger {
 
   .customer-display-setup-heading,
   .customer-display-actions,
-  .customer-display-footer-actions {
+  .customer-display-footer-actions,
+  .customer-display-devices-heading,
+  .customer-display-device {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .customer-display-device button {
+    width: 100%;
   }
 
   .customer-display-setup-card {

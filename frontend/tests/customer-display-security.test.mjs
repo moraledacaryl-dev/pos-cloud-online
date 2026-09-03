@@ -33,3 +33,10 @@ test('customer display pairing explains the optional two-screen workflow', () =>
   assert.match(page, /Not using a customer display\? Return to POS/);
   assert.match(page, /customer-display-pair-form/);
 });
+
+test('manager setup lists and revokes paired displays', () => {
+  assert.match(page, /customer-display\/devices/);
+  assert.match(page, /Paired displays/);
+  assert.match(page, /Last seen/);
+  assert.match(page, /revokeDisplay/);
+});

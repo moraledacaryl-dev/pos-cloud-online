@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { API_BASE, errorMessage, fetchCustomerDisplaySnapshot } from '../../lib/api';
+import { API_BASE, errorMessage, fetchCustomerDisplaySnapshot, request } from '../../lib/api';
 import { useCurrentUser } from '../../lib/useCurrentUser';
 
 const peso = new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' });
@@ -20,6 +20,13 @@ function SetupCard({ mode, children }) {
       </div>
     </section>
   );
+}
+
+function displayTime(value) {
+  if (!value) return 'Never';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Unknown';
+  return date.toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' });
 }
 
 function csrfToken() {
@@ -56,6 +63,8 @@ export default function CustomerDisplayPage() {
   const [busy, setBusy] = useState(false);
   const [channel, setChannel] = useState('main');
   const [managerSetup, setManagerSetup] = useState(false);
+  const [devices, setDevices] = useState([]);
+  const [devicesBusy, setDevicesBusy] = useState(false);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -87,6 +96,27 @@ export default function CustomerDisplayPage() {
     };
   }, [channel]);
 
+  async function loadDevices() {
+    setDevicesBusy(true);
+    try {
+      const rows = await request('/customer-display/devices');
+      const now = Date.now();
+      setDevices(Array.isArray(rows) ? rows.map((device) => ({
+        ...device,
+        display_active: !!device.is_active && (!device.expires_at || new Date(device.expires_at).getTime() > now),
+      })) : []);
+    } catch (err) {
+      setError(err.message || 'Could not load paired displays.');
+    } finally {
+      setDevicesBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!managerSetup || !identityLoaded || !user || !can('approvals.manage')) return;
+    loadDevices().catch(() => {});
+  }, [managerSetup, identityLoaded, user]);
+
   async function activateDisplay(event) {
     event.preventDefault();
     setBusy(true);
@@ -115,6 +145,19 @@ export default function CustomerDisplayPage() {
       setError(err.message || 'Manager authorization is required to create a pairing code.');
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function revokeDisplay(device) {
+    if (!device?.device_uuid) return;
+    setDevicesBusy(true);
+    setError('');
+    try {
+      await postJson(`/customer-display/devices/${encodeURIComponent(device.device_uuid)}/revoke`, {});
+      await loadDevices();
+    } catch (err) {
+      setError(err.message || 'Could not revoke this display.');
+      setDevicesBusy(false);
     }
   }
 
@@ -164,6 +207,32 @@ export default function CustomerDisplayPage() {
             <a className="customer-display-text-link" href={`/customer-display?channel=${encodeURIComponent(channel)}`} target="_blank" rel="noreferrer">Open customer screen ↗</a>
             <Link className="customer-display-text-link" href="/pos">Not using a customer display? Return to POS</Link>
           </div>
+          <section className="customer-display-devices" aria-labelledby="paired-displays-heading">
+            <div className="customer-display-devices-heading">
+              <div>
+                <h2 id="paired-displays-heading">Paired displays</h2>
+                <p>Review connected screens and revoke any device you no longer recognize or use.</p>
+              </div>
+              <button type="button" className="secondary" onClick={() => loadDevices()} disabled={devicesBusy}>{devicesBusy ? 'Refreshing…' : 'Refresh'}</button>
+            </div>
+            {!devicesBusy && !devices.length && <p className="customer-display-no-devices">No displays have been paired yet.</p>}
+            {!!devices.length && (
+              <div className="customer-display-device-list">
+                {devices.map((device) => {
+                  const active = device.display_active;
+                  return (
+                    <article className="customer-display-device" key={device.device_uuid}>
+                      <div>
+                        <div className="customer-display-device-title"><strong>{device.channel || 'main'}</strong><span className={active ? 'active' : 'inactive'}>{active ? 'Active' : device.revoked_at ? 'Revoked' : 'Expired'}</span></div>
+                        <small>Device {String(device.device_uuid).slice(0, 8)} · Last seen {displayTime(device.last_seen_at)}</small>
+                      </div>
+                      <button type="button" className="secondary" disabled={!active || devicesBusy} onClick={() => revokeDisplay(device)}>{active ? 'Revoke' : 'Unavailable'}</button>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </section>
         </SetupCard>
       </main>
     );

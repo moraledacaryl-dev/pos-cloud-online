@@ -152,8 +152,13 @@ test.describe.serial('production-equivalent browser acceptance', () => {
     expect(devices.status).toBe(200);
     const device = devices.data.find((row) => row.channel === 'ci-display' && row.is_active);
     expect(device?.device_uuid).toBeTruthy();
-    const revoked = await browserJson(page, 'POST', `/customer-display/devices/${device.device_uuid}/revoke`, {});
-    expect(revoked.status).toBe(200);
+
+    await page.goto('/customer-display?setup=1&channel=ci-display');
+    await expect(page.getByRole('heading', { name: 'Paired displays' })).toBeVisible();
+    const deviceCard = page.locator('.customer-display-device').filter({ hasText: 'ci-display' }).first();
+    await expect(deviceCard).toBeVisible();
+    await deviceCard.getByRole('button', { name: 'Revoke' }).click();
+    await expect(deviceCard.getByText('Revoked')).toBeVisible();
 
     const afterRevoke = await displayPage.evaluate(async () => {
       const response = await fetch('/api/customer-display/ci-display', { credentials: 'same-origin', cache: 'no-store' });
