@@ -115,7 +115,7 @@ allow_accounting_unavailable = os.environ["ALLOW_ACCOUNTING_UNAVAILABLE"] == "tr
 certification_phase = os.environ["CERTIFICATION_PHASE"]
 reported_integration_reasons = set(ready.get("reasons") or [])
 accounting_api = health.get("accounting_api", {})
-accounting_is_unavailable = not bool(accounting_api.get("reachable"))
+accounting_is_unavailable = not bool(accounting_api.get("ok"))
 allowed_integration_reasons = (
     {"accounting_unreachable", "outbox_failed_events", "outbox_blocked_events"}
     if allow_accounting_unavailable and accounting_is_unavailable
