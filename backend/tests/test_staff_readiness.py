@@ -204,6 +204,28 @@ def test_worker_skips_failed_event_until_retry_time_is_due():
     assert metrics['due_now'] == 0
 
 
+def test_local_only_order_is_excluded_from_outbox_alert_counts():
+    db = make_session()
+    row = SyncOutboxEvent(
+        event_uuid='local-only-order',
+        aggregate_type='order',
+        aggregate_id='1001',
+        event_type='order.finalized',
+        idempotency_key='order.finalized:1001',
+        payload_json='{"lines":[{"item_name_snapshot":"OPERATIONAL TEST","external_menu_item_id":null}]}',
+        status='blocked',
+        last_error='Order has a line without external_menu_item_id.',
+    )
+    db.add(row)
+    db.commit()
+
+    metrics = get_outbox_metrics(db)
+
+    assert metrics['blocked'] == 0
+    assert metrics['attention_required'] == 0
+    assert metrics['suppressed'] == 1
+
+
 def test_accounting_health_path_uses_origin_not_api_prefix():
     assert _accounting_health_url('https://accounting.hiddenoasis.app/api', '/healthz') == 'https://accounting.hiddenoasis.app/healthz'
     assert _accounting_health_url('https://accounting.hiddenoasis.app/api', 'healthz') == 'https://accounting.hiddenoasis.app/api/healthz'

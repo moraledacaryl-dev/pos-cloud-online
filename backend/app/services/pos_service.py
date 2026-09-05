@@ -867,12 +867,30 @@ def _serialize_cash_movement(row: CashMovement) -> dict:
 
 
 
+def outbox_suppression_reason(event_type: str | None, payload: dict | str | None) -> str | None:
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload or '{}')
+        except Exception:
+            payload = {}
+    payload = payload if isinstance(payload, dict) else {}
+    if str(event_type or '') in {'order.finalized', 'order.voided'}:
+        lines = payload.get('lines') or []
+        if lines and any(not (line or {}).get('external_menu_item_id') for line in lines):
+            return 'Order contains a POS-local catalog line, so no Accounting sale delivery was attempted.'
+    return None
+
+
 def _serialize_outbox(row: SyncOutboxEvent) -> dict:
-    is_suppressed = (
+    local_only_reason = outbox_suppression_reason(row.event_type, row.payload_json)
+    suppressible_statuses = {'pending', 'failed', 'error', 'blocked', 'inventory_pending', 'inventory_retry', 'suppressed'}
+    inventory_reason = (
         not settings.inventory_integration_enabled
         and str(row.event_type or '').startswith('inventory.')
-        and row.status in {'pending', 'failed', 'error', 'blocked', 'inventory_pending', 'inventory_retry', 'suppressed'}
+        and row.status in suppressible_statuses
     )
+    is_suppressed = (bool(local_only_reason) and row.status in suppressible_statuses) or inventory_reason
+    suppressed_reason = local_only_reason if local_only_reason else ('Inventory integration is not enabled.' if inventory_reason else None)
     return {
         'id': row.id,
         'event_uuid': row.event_uuid,
@@ -883,7 +901,7 @@ def _serialize_outbox(row: SyncOutboxEvent) -> dict:
         'payload_json': row.payload_json,
         'status': 'suppressed' if is_suppressed else row.status,
         'stored_status': row.status,
-        'suppressed_reason': 'Inventory integration is not enabled.' if is_suppressed else None,
+        'suppressed_reason': suppressed_reason if is_suppressed else None,
         'retry_count': row.retry_count,
         'next_retry_at': row.next_retry_at,
         'last_attempt_at': row.last_attempt_at,
@@ -1044,10 +1062,14 @@ def _next_session_code(db: Session, register: Register, business_date: str):
 
 def create_outbox_event(db: Session, *, aggregate_type: str, aggregate_id: int, event_type: str, payload: dict, idempotency_key: str | None = None):
     key = idempotency_key or f'{event_type}:{aggregate_id}'
+    suppression_reason = outbox_suppression_reason(event_type, payload)
     existing = db.query(SyncOutboxEvent).filter(SyncOutboxEvent.idempotency_key == key).first()
     if existing:
         existing.payload_json = json.dumps(payload, ensure_ascii=False)
-        if existing.status in {'failed', 'blocked'}:
+        if suppression_reason:
+            existing.status = 'suppressed'
+            existing.last_error = suppression_reason
+        elif existing.status in {'failed', 'blocked', 'suppressed'}:
             existing.status = 'pending'
             existing.last_error = None
         db.add(existing)
@@ -1060,7 +1082,8 @@ def create_outbox_event(db: Session, *, aggregate_type: str, aggregate_id: int, 
         event_type=event_type,
         idempotency_key=key,
         payload_json=json.dumps(payload, ensure_ascii=False),
-        status='pending',
+        status='suppressed' if suppression_reason else 'pending',
+        last_error=suppression_reason,
     )
     db.add(event)
     db.flush()

@@ -469,6 +469,20 @@ def test_create_outbox_event_does_not_commit_inside_larger_workflow():
     assert db.query(SyncOutboxEvent).count() == 0
 
 
+def test_local_only_order_outbox_is_suppressed_instead_of_blocked():
+    db = make_session()
+    row = create_outbox_event(
+        db,
+        aggregate_type='order',
+        aggregate_id=124,
+        event_type='order.finalized',
+        payload={'lines': [{'item_name_snapshot': 'OPERATIONAL TEST', 'external_menu_item_id': None}]},
+    )
+
+    assert row.status == 'suppressed'
+    assert 'POS-local catalog line' in row.last_error
+
+
 def test_discount_order_rolls_back_if_approval_record_fails(monkeypatch):
     db = make_session()
     register = seed_register(db)

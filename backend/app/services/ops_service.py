@@ -13,7 +13,7 @@ from app.core.rate_limit import get_rate_limit_status
 from app.core.settings import settings
 from app.models.entities import SyncOutboxEvent
 from app.services.kds_stream_security import get_stream_ticket_store_status
-from app.services.pos_service import setting_json
+from app.services.pos_service import outbox_suppression_reason, setting_json
 from app.services.reliability_policy import evaluate_operational_readiness
 from app.services.sync_service import get_sync_config
 
@@ -58,6 +58,7 @@ def get_sync_worker_status(db: Session) -> dict:
 def get_outbox_metrics(db: Session) -> dict:
     grouped = dict(db.query(SyncOutboxEvent.status, func.count(SyncOutboxEvent.id)).group_by(SyncOutboxEvent.status).all())
     suppressed_counts: dict[str, int] = {}
+    suppressed_ids: list[int] = []
     if not settings.inventory_integration_enabled:
         suppressed_counts = {
             str(status): int(count or 0)
@@ -66,6 +67,22 @@ def get_outbox_metrics(db: Session) -> dict:
                 SyncOutboxEvent.status.in_(['pending', 'failed', 'error', 'blocked', 'inventory_pending', 'inventory_retry', 'suppressed']),
             ).group_by(SyncOutboxEvent.status).all()
         }
+        suppressed_ids.extend(
+            int(row_id)
+            for (row_id,) in db.query(SyncOutboxEvent.id).filter(
+                SyncOutboxEvent.event_type.like('inventory.%'),
+                SyncOutboxEvent.status.in_(['pending', 'failed', 'error', 'blocked', 'inventory_pending', 'inventory_retry', 'suppressed']),
+            ).all()
+        )
+    local_only_rows = db.query(SyncOutboxEvent).filter(
+        SyncOutboxEvent.event_type.in_(['order.finalized', 'order.voided']),
+        SyncOutboxEvent.status.in_(['pending', 'failed', 'error', 'blocked', 'suppressed']),
+    ).all()
+    for row in local_only_rows:
+        if outbox_suppression_reason(row.event_type, row.payload_json):
+            status = str(row.status)
+            suppressed_counts[status] = suppressed_counts.get(status, 0) + 1
+            suppressed_ids.append(int(row.id))
     suppressed = sum(suppressed_counts.values())
     pending = max(0, int(grouped.get('pending', 0)) - suppressed_counts.get('pending', 0))
     failed = max(
@@ -76,8 +93,8 @@ def get_outbox_metrics(db: Session) -> dict:
     blocked = max(0, int(grouped.get('blocked', 0)) - suppressed_counts.get('blocked', 0))
     synced = int(grouped.get('synced', 0))
     retrying_query = db.query(SyncOutboxEvent).filter(SyncOutboxEvent.retry_count > 0, SyncOutboxEvent.status != 'synced')
-    if not settings.inventory_integration_enabled:
-        retrying_query = retrying_query.filter(~SyncOutboxEvent.event_type.like('inventory.%'))
+    if suppressed_ids:
+        retrying_query = retrying_query.filter(SyncOutboxEvent.id.notin_(suppressed_ids))
     retrying = retrying_query.count()
     current_time = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0).isoformat()
     due_query = db.query(SyncOutboxEvent).filter(
@@ -89,16 +106,16 @@ def get_outbox_metrics(db: Session) -> dict:
             ),
         )
     )
-    if not settings.inventory_integration_enabled:
-        due_query = due_query.filter(~SyncOutboxEvent.event_type.like('inventory.%'))
+    if suppressed_ids:
+        due_query = due_query.filter(SyncOutboxEvent.id.notin_(suppressed_ids))
     due_now = due_query.count()
 
     unresolved_statuses = ['pending', 'failed', 'error', 'blocked']
     oldest_query = db.query(SyncOutboxEvent).filter(SyncOutboxEvent.status.in_(unresolved_statuses))
     max_retry_query = db.query(func.max(SyncOutboxEvent.retry_count)).filter(SyncOutboxEvent.status.in_(unresolved_statuses))
-    if not settings.inventory_integration_enabled:
-        oldest_query = oldest_query.filter(~SyncOutboxEvent.event_type.like('inventory.%'))
-        max_retry_query = max_retry_query.filter(~SyncOutboxEvent.event_type.like('inventory.%'))
+    if suppressed_ids:
+        oldest_query = oldest_query.filter(SyncOutboxEvent.id.notin_(suppressed_ids))
+        max_retry_query = max_retry_query.filter(SyncOutboxEvent.id.notin_(suppressed_ids))
     oldest = oldest_query.order_by(SyncOutboxEvent.created_at.asc(), SyncOutboxEvent.id.asc()).first()
     max_retry_count = max_retry_query.scalar() or 0
     oldest_age_seconds = _age_seconds(getattr(oldest, 'created_at', None)) if oldest else None
