@@ -114,10 +114,11 @@ ready = json.loads(os.environ["INTEGRATION_JSON"])
 allow_accounting_unavailable = os.environ["ALLOW_ACCOUNTING_UNAVAILABLE"] == "true"
 certification_phase = os.environ["CERTIFICATION_PHASE"]
 reported_integration_reasons = set(ready.get("reasons") or [])
-accounting_is_unreachable = "accounting_unreachable" in reported_integration_reasons
+accounting_api = health.get("accounting_api", {})
+accounting_is_unavailable = not bool(accounting_api.get("reachable"))
 allowed_integration_reasons = (
     {"accounting_unreachable", "outbox_failed_events", "outbox_blocked_events"}
-    if allow_accounting_unavailable and accounting_is_unreachable
+    if allow_accounting_unavailable and accounting_is_unavailable
     else set()
 )
 disallowed_integration_reasons = reported_integration_reasons - allowed_integration_reasons
@@ -140,7 +141,7 @@ if certification_phase == "postdeploy" and not health.get("accounting_api", {}).
 
 outbox = health.get("outbox", {})
 for key in ("failed", "blocked", "attention_required") if certification_phase == "postdeploy" else ():
-    if allow_accounting_unavailable and accounting_is_unreachable:
+    if allow_accounting_unavailable and accounting_is_unavailable:
         # Every non-Inventory SyncOutboxEvent is delivered by run_outbox_sync to
         # Accounting. Inventory events are removed from these alerting counts
         # when that integration is disabled, so this backlog is the expected
@@ -171,7 +172,7 @@ if errors:
 
 if certification_phase == "predeploy":
     print("PASS: pre-deploy core baseline is ready; integration readiness is evaluated after the candidate starts")
-elif allow_accounting_unavailable and accounting_is_unreachable and not disallowed_integration_reasons:
+elif allow_accounting_unavailable and accounting_is_unavailable and not disallowed_integration_reasons:
     print("PASS: production core is ready with explicitly accepted Accounting unavailability and Accounting outbox backlog")
 else:
     print("PASS: production health payload is fully ready on local-only monitoring surface")
