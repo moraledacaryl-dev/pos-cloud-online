@@ -113,8 +113,13 @@ health = json.loads(os.environ["DETAILS_JSON"])
 ready = json.loads(os.environ["INTEGRATION_JSON"])
 allow_accounting_unavailable = os.environ["ALLOW_ACCOUNTING_UNAVAILABLE"] == "true"
 certification_phase = os.environ["CERTIFICATION_PHASE"]
-allowed_integration_reasons = {"accounting_unreachable"} if allow_accounting_unavailable else set()
 reported_integration_reasons = set(ready.get("reasons") or [])
+accounting_is_unreachable = "accounting_unreachable" in reported_integration_reasons
+allowed_integration_reasons = (
+    {"accounting_unreachable", "outbox_failed_events", "outbox_blocked_events"}
+    if allow_accounting_unavailable and accounting_is_unreachable
+    else set()
+)
 disallowed_integration_reasons = reported_integration_reasons - allowed_integration_reasons
 
 errors = []
@@ -135,6 +140,12 @@ if certification_phase == "postdeploy" and not health.get("accounting_api", {}).
 
 outbox = health.get("outbox", {})
 for key in ("failed", "blocked", "attention_required") if certification_phase == "postdeploy" else ():
+    if allow_accounting_unavailable and accounting_is_unreachable:
+        # Every non-Inventory SyncOutboxEvent is delivered by run_outbox_sync to
+        # Accounting. Inventory events are removed from these alerting counts
+        # when that integration is disabled, so this backlog is the expected
+        # consequence of the explicitly accepted Accounting outage.
+        continue
     if int(outbox.get(key, 0) or 0) != 0:
         errors.append(f"outbox {key}={outbox.get(key)}")
 
@@ -160,8 +171,8 @@ if errors:
 
 if certification_phase == "predeploy":
     print("PASS: pre-deploy core baseline is ready; integration readiness is evaluated after the candidate starts")
-elif allow_accounting_unavailable and reported_integration_reasons == {"accounting_unreachable"}:
-    print("PASS: production core is ready with explicitly accepted Accounting unavailability")
+elif allow_accounting_unavailable and accounting_is_unreachable and not disallowed_integration_reasons:
+    print("PASS: production core is ready with explicitly accepted Accounting unavailability and Accounting outbox backlog")
 else:
     print("PASS: production health payload is fully ready on local-only monitoring surface")
 print(

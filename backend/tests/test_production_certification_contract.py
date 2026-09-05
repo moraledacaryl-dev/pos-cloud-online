@@ -56,7 +56,8 @@ def test_production_certification_checks_required_health_surfaces():
 def test_accounting_outage_override_is_explicit_and_narrow():
     text = SCRIPT.read_text()
     assert 'ALLOW_ACCOUNTING_UNAVAILABLE' in text
-    assert 'allowed_integration_reasons = {"accounting_unreachable"}' in text
+    assert '{"accounting_unreachable", "outbox_failed_events", "outbox_blocked_events"}' in text
+    assert 'allow_accounting_unavailable and accounting_is_unreachable' in text
     assert 'disallowed_integration_reasons' in text
     assert 'value is False' in text
     assert 'key == "accounting_api"' in text
