@@ -37,3 +37,15 @@ def test_deploy_installs_and_rolls_back_canonical_systemd_units():
     assert 'systemctl start pos-backup.service' in text
     assert 'systemctl show pos-backup.service --property=Result --value' in text
     assert 'bash scripts/production-backup.sh' not in text
+
+
+def test_deploy_propagates_the_narrow_accounting_outage_override():
+    text = (REPO_ROOT / 'scripts' / 'deploy-release.sh').read_text()
+    workflow = (REPO_ROOT / '.github/workflows/deploy-pos.yml').read_text()
+    assert 'ALLOW_ACCOUNTING_UNAVAILABLE' in text
+    assert 'CERTIFICATION_SCRIPT' in text
+    assert 'CERTIFICATION_PHASE=predeploy' in text
+    assert 'CERTIFICATION_PHASE=postdeploy' in text
+    assert 'allow_accounting_unavailable' in workflow
+    assert 'git show "$EXPECTED_COMMIT:scripts/deploy-release.sh"' in workflow
+    assert 'git show "$EXPECTED_COMMIT:scripts/production-certify.sh"' in workflow

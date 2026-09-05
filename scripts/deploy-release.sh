@@ -7,6 +7,8 @@ TARGET_ENVIRONMENT="${TARGET_ENVIRONMENT:-}"
 CONFIRM_DEPLOY="${CONFIRM_DEPLOY:-}"
 EVIDENCE_DIR="${EVIDENCE_DIR:-/var/lib/hiddenoasis-pos/deploy-evidence}"
 PUBLIC_BASE="${PUBLIC_BASE:-}"
+ALLOW_ACCOUNTING_UNAVAILABLE="${ALLOW_ACCOUNTING_UNAVAILABLE:-false}"
+CERTIFICATION_SCRIPT="${CERTIFICATION_SCRIPT:-scripts/production-certify.sh}"
 
 fail() { echo "DEPLOY FAIL: $*" >&2; exit 1; }
 wait_for_http() {
@@ -41,6 +43,8 @@ run_production_backup() {
 [[ "$CONFIRM_DEPLOY" == "YES" ]] || fail 'CONFIRM_DEPLOY must be exactly YES'
 [[ "$EUID" -eq 0 ]] || fail 'deployment must run as root to manage canonical systemd units'
 [[ "$TARGET_ENVIRONMENT" == "staging" || "$TARGET_ENVIRONMENT" == "production" ]] || fail 'TARGET_ENVIRONMENT must be staging or production'
+[[ "$ALLOW_ACCOUNTING_UNAVAILABLE" == "true" || "$ALLOW_ACCOUNTING_UNAVAILABLE" == "false" ]] \
+  || fail 'ALLOW_ACCOUNTING_UNAVAILABLE must be true or false'
 if [[ -z "$PUBLIC_BASE" && "$TARGET_ENVIRONMENT" == "production" ]]; then
   PUBLIC_BASE='https://pos.hiddenoasis.app'
 fi
@@ -49,6 +53,7 @@ fi
 [[ -d "$APP_DIR/.git" ]] || fail "not a Git checkout: $APP_DIR"
 
 cd "$APP_DIR"
+[[ -f "$CERTIFICATION_SCRIPT" ]] || fail "certification script not found: $CERTIFICATION_SCRIPT"
 [[ -z "$(git status --porcelain)" ]] || fail 'deployment checkout is not clean'
 git fetch --prune origin
 git cat-file -e "$EXPECTED_COMMIT^{commit}" || fail 'release commit is not available from the configured repository'
@@ -81,7 +86,8 @@ rollback_code() {
 }
 trap rollback_code ERR
 
-EXPECTED_COMMIT="$PREVIOUS_COMMIT" PUBLIC_BASE="$PUBLIC_BASE" bash scripts/production-certify.sh
+EXPECTED_COMMIT="$PREVIOUS_COMMIT" PUBLIC_BASE="$PUBLIC_BASE" \
+  ALLOW_ACCOUNTING_UNAVAILABLE="$ALLOW_ACCOUNTING_UNAVAILABLE" CERTIFICATION_PHASE=predeploy bash "$CERTIFICATION_SCRIPT"
 run_production_backup
 
 git switch --detach "$EXPECTED_COMMIT"
@@ -115,7 +121,8 @@ systemctl restart pos-frontend
 wait_for_http 'http://127.0.0.1:8100/healthz'
 wait_for_http 'http://127.0.0.1:3100/login'
 
-EXPECTED_COMMIT="$EXPECTED_COMMIT" PUBLIC_BASE="$PUBLIC_BASE" bash scripts/production-certify.sh
+EXPECTED_COMMIT="$EXPECTED_COMMIT" PUBLIC_BASE="$PUBLIC_BASE" \
+  ALLOW_ACCOUNTING_UNAVAILABLE="$ALLOW_ACCOUNTING_UNAVAILABLE" CERTIFICATION_PHASE=postdeploy bash "$CERTIFICATION_SCRIPT"
 
 {
   echo "result=passed"
@@ -126,6 +133,7 @@ EXPECTED_COMMIT="$EXPECTED_COMMIT" PUBLIC_BASE="$PUBLIC_BASE" bash scripts/produ
   echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "units=pos-backend,pos-sync-worker,pos-frontend"
   echo "certification=passed"
+  echo "accounting_unavailable_accepted=$ALLOW_ACCOUNTING_UNAVAILABLE"
   echo "backup=completed-before-deploy"
 } > "$EVIDENCE_FILE"
 

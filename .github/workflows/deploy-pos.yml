@@ -15,6 +15,11 @@ on:
         options:
           - staging
           - production
+      allow_accounting_unavailable:
+        description: Permit only the known Accounting reachability degradation; all core and other integration checks remain strict
+        required: true
+        default: false
+        type: boolean
 
 concurrency:
   group: pos-deploy-${{ inputs.target_environment }}
@@ -68,16 +73,25 @@ jobs:
           EXPECTED_COMMIT: ${{ needs.verify-release.outputs.release_sha }}
           TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
           PUBLIC_BASE: ${{ vars.PUBLIC_BASE }}
+          ALLOW_ACCOUNTING_UNAVAILABLE: ${{ inputs.allow_accounting_unavailable }}
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: ${{ secrets.SERVER_PORT }}
-          envs: EXPECTED_COMMIT,TARGET_ENVIRONMENT,PUBLIC_BASE
+          envs: EXPECTED_COMMIT,TARGET_ENVIRONMENT,PUBLIC_BASE,ALLOW_ACCOUNTING_UNAVAILABLE
           command_timeout: 25m
           script: |
             cd /opt/pos-cloud-online
-            CONFIRM_DEPLOY=YES EXPECTED_COMMIT="$EXPECTED_COMMIT" TARGET_ENVIRONMENT="$TARGET_ENVIRONMENT" PUBLIC_BASE="$PUBLIC_BASE" bash scripts/deploy-release.sh
+            git fetch --prune origin
+            git cat-file -e "$EXPECTED_COMMIT^{commit}"
+            DEPLOY_SCRIPT="$(mktemp /tmp/pos-deploy-release.XXXXXX)"
+            CERTIFICATION_SCRIPT="$(mktemp /tmp/pos-production-certify.XXXXXX)"
+            trap 'rm -f "$DEPLOY_SCRIPT" "$CERTIFICATION_SCRIPT"' EXIT
+            git show "$EXPECTED_COMMIT:scripts/deploy-release.sh" > "$DEPLOY_SCRIPT"
+            git show "$EXPECTED_COMMIT:scripts/production-certify.sh" > "$CERTIFICATION_SCRIPT"
+            chmod 0700 "$DEPLOY_SCRIPT" "$CERTIFICATION_SCRIPT"
+            CONFIRM_DEPLOY=YES EXPECTED_COMMIT="$EXPECTED_COMMIT" TARGET_ENVIRONMENT="$TARGET_ENVIRONMENT" PUBLIC_BASE="$PUBLIC_BASE" ALLOW_ACCOUNTING_UNAVAILABLE="$ALLOW_ACCOUNTING_UNAVAILABLE" CERTIFICATION_SCRIPT="$CERTIFICATION_SCRIPT" bash "$DEPLOY_SCRIPT"
       - id: evidence
         name: Capture non-sensitive deployment evidence
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5

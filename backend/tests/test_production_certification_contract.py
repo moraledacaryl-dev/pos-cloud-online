@@ -51,3 +51,20 @@ def test_production_certification_checks_required_health_surfaces():
         'Accounting API is not reachable',
     ):
         assert signal in text
+
+
+def test_accounting_outage_override_is_explicit_and_narrow():
+    text = SCRIPT.read_text()
+    assert 'ALLOW_ACCOUNTING_UNAVAILABLE' in text
+    assert 'allowed_integration_reasons = {"accounting_unreachable"}' in text
+    assert 'disallowed_integration_reasons' in text
+    assert 'value is False' in text
+    assert 'key == "accounting_api"' in text
+
+
+def test_predeploy_checks_core_and_postdeploy_checks_integrations():
+    text = SCRIPT.read_text()
+    assert 'CERTIFICATION_PHASE' in text
+    assert 'predeploy' in text
+    assert 'postdeploy' in text
+    assert 'integration readiness is evaluated after the candidate starts' in text
