@@ -11,7 +11,7 @@ function formatDateTime(value) {
   try { return new Date(value).toLocaleString(); } catch { return String(value); }
 }
 
-const STATUS_VIEWS = ['all', 'pending', 'failed', 'blocked', 'resolved', 'archived', 'synced'];
+const STATUS_VIEWS = ['all', 'pending', 'failed', 'blocked', 'suppressed', 'resolved', 'archived', 'synced'];
 
 export default function SyncPage() {
   const [rows, setRows] = useState([]);
@@ -53,7 +53,7 @@ export default function SyncPage() {
     });
   }, [rows, filters]);
 
-  const retryRows = useMemo(() => filteredRows.filter((row) => ['failed', 'blocked', 'pending'].includes(String(row.status || '').toLowerCase())), [filteredRows]);
+  const retryRows = useMemo(() => filteredRows.filter((row) => ['failed', 'pending', 'inventory_retry'].includes(String(row.status || '').toLowerCase())), [filteredRows]);
 
   const queueTitle = filters.status === 'all' ? 'All Queue' : filters.status === 'synced' ? 'Synced' : `${filters.status.charAt(0).toUpperCase() + filters.status.slice(1)}`;
 
@@ -137,7 +137,7 @@ export default function SyncPage() {
     setError('');
     setNotice('');
     const failedIds = retryRows.map((row) => row.id);
-    if (!failedIds.length) return setError('No failed events to retry.');
+    if (!failedIds.length) return setError('No retryable events in this view.');
     try {
       let synced = 0, failed = 0, blocked = 0;
       for (const id of failedIds) {
@@ -188,7 +188,7 @@ export default function SyncPage() {
           <div className="row wrap">
             <button className="secondary" onClick={() => handleRun(25)}>Run 25</button>
             <button className="primary" onClick={() => handleRun(100)}>Run 100</button>
-            <button className="warn" onClick={handleRetryAllFailed} disabled={!retryRows.length}>Retry All Failed ({retryRows.length})</button>
+            <button className="warn" onClick={handleRetryAllFailed} disabled={!retryRows.length}>Retry Retryable ({retryRows.length})</button>
           </div>
         </div>
         {!!notice && <p className="notice-text" style={{ marginTop: 8 }}>{notice}</p>}
@@ -200,6 +200,7 @@ export default function SyncPage() {
           <div className="card"><div className="muted">Pending</div><div className="kpi">{summary.pending}</div><div className="small muted">Ready to send</div></div>
           <div className="card"><div className="muted">Failed</div><div className="kpi">{summary.failed}</div><div className="small muted">Need recovery</div></div>
           <div className="card"><div className="muted">Blocked</div><div className="kpi">{summary.blocked}</div><div className="small muted">Dependency or rule block</div></div>
+          <div className="card"><div className="muted">Optional / Suppressed</div><div className="kpi">{summary.suppressed}</div><div className="small muted">No delivery attempted</div></div>
           <div className="card"><div className="muted">Retrying</div><div className="kpi">{summary.retrying}</div><div className="small muted">Already attempted</div></div>
         </div>
       </section>
@@ -273,15 +274,15 @@ export default function SyncPage() {
                     <td>{row.id}</td>
                     <td>{humanizeCode(row.event_type, 'Sync Event')}</td>
                     <td>{humanizeCode(row.aggregate_type, 'Record')} #{row.aggregate_id}</td>
-                    <td><span className={`badge ${row.status === 'failed' ? 'danger' : row.status === 'blocked' ? 'warn' : row.status === 'resolved' ? 'success' : row.status === 'archived' ? 'info' : 'info'}`}>{humanizeCode(row.status)}</span></td>
+                    <td><span className={`badge ${row.status === 'failed' ? 'danger' : row.status === 'blocked' ? 'warn' : row.status === 'suppressed' ? 'muted' : row.status === 'resolved' ? 'success' : 'info'}`}>{humanizeCode(row.status)}</span></td>
                     <td>{row.retry_count}</td>
                     <td>{formatDateTime(row.last_attempt_at || row.next_retry_at)}</td>
                     <td><div className="small muted">{row.last_error ? explanation.summary : '-'}</div></td>
                     <td><button type="button" className="small secondary" onClick={() => toggleExpanded(row.id)}>{expandedRows.has(row.id) ? 'Hide' : 'Show'}</button></td>
                     <td>
                       <div className="row wrap" style={{ gap: 4 }}>
-                        {['failed', 'blocked', 'pending'].includes(String(row.status || '').toLowerCase()) && (
-                          <button type="button" className="small secondary" onClick={() => handleRetry(row.id)}>Retry</button>
+                        {['failed', 'pending', 'inventory_retry'].includes(String(row.status || '').toLowerCase()) && (
+                          <button type="button" className="small secondary" onClick={() => handleRetry(row.id)}>Retry now</button>
                         )}
                         {String(row.status || '').toLowerCase() === 'blocked' && (
                           <button type="button" className="small warn" onClick={() => setPendingAction({ kind: 'unblock', eventId: row.id })}>Unblock</button>
@@ -318,13 +319,13 @@ export default function SyncPage() {
             {filteredRows.map((row) => {
               const explanation = explainSyncError(row);
               return <article className="sync-mobile-card" key={`mobile-${row.id}`}>
-                <div className="sync-mobile-identity"><strong>Event #{row.id}</strong><span className={`badge ${row.status === 'failed' ? 'danger' : row.status === 'blocked' ? 'warn' : row.status === 'resolved' ? 'success' : 'info'}`}>{humanizeCode(row.status)}</span></div>
+                <div className="sync-mobile-identity"><strong>Event #{row.id}</strong><span className={`badge ${row.status === 'failed' ? 'danger' : row.status === 'blocked' ? 'warn' : row.status === 'suppressed' ? 'muted' : row.status === 'resolved' ? 'success' : 'info'}`}>{humanizeCode(row.status)}</span></div>
                 <div><strong>{humanizeCode(row.event_type, 'Sync Event')}</strong><div className="small muted">{humanizeCode(row.aggregate_type, 'Record')} #{row.aggregate_id}</div></div>
                 <div className="small"><strong>Last attempt:</strong> {formatDateTime(row.last_attempt_at || row.next_retry_at)}</div>
                 <div className="small"><strong>Summary:</strong> {row.last_error ? explanation.summary : 'No error recorded.'}</div>
                 <details className="technical-details"><summary>Technical details</summary><div className="stack-tight"><div><strong>Recommended action:</strong> {explanation.action}</div><div><strong>Raw error:</strong> {row.last_error || 'None'}</div><div><strong>Idempotency key:</strong> {row.idempotency_key || 'None'}</div><pre>{JSON.stringify(row.payload || {}, null, 2)}</pre></div></details>
                 <div className="row wrap">
-                  {['failed', 'blocked', 'pending'].includes(String(row.status || '').toLowerCase()) && <button type="button" className="secondary" onClick={() => handleRetry(row.id)}>Retry</button>}
+                  {['failed', 'pending', 'inventory_retry'].includes(String(row.status || '').toLowerCase()) && <button type="button" className="secondary" onClick={() => handleRetry(row.id)}>Retry now</button>}
                   {String(row.status || '').toLowerCase() === 'blocked' && <button type="button" className="warn" onClick={() => setPendingAction({ kind: 'unblock', eventId: row.id })}>Unblock</button>}
                   {['failed', 'blocked'].includes(String(row.status || '').toLowerCase()) && <button type="button" className="danger" onClick={() => setPendingAction({ kind: 'archive', eventId: row.id })}>Archive</button>}
                   {['failed', 'blocked'].includes(String(row.status || '').toLowerCase()) && <button type="button" className="success" onClick={() => setPendingAction({ kind: 'resolve', eventId: row.id })}>Resolve</button>}

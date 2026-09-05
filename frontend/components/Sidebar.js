@@ -36,7 +36,7 @@ const Sidebar = forwardRef(function Sidebar({ mobileOpen = false, onNavigate, on
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
-    document.documentElement.style.setProperty('--sidebar-width', collapsed ? '94px' : '286px');
+    document.documentElement.style.setProperty('--sidebar-width', collapsed ? '80px' : '240px');
     if (typeof window !== 'undefined') window.localStorage.setItem(SIDEBAR_KEY, collapsed ? '1' : '0');
   }, [collapsed]);
 
@@ -47,12 +47,10 @@ const Sidebar = forwardRef(function Sidebar({ mobileOpen = false, onNavigate, on
     <aside ref={ref} id="primary-navigation" className={className} aria-label="Primary navigation">
       <div className="brand">
         <div className="brand-badge" aria-hidden="true">PO</div>
-        {!collapsed && (
-          <div>
-            <h2>Dedicated POS</h2>
-            <div className="small muted-on-dark">Fast sales and drawer control</div>
-          </div>
-        )}
+        <div className="brand-copy">
+          <h2>Dedicated POS</h2>
+          <div className="small muted-on-dark">Fast sales and drawer control</div>
+        </div>
         <button type="button" className="drawer-close" aria-label="Close navigation menu" onClick={onClose}>×</button>
         <button type="button" className="sidebar-toggle" aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} onClick={() => setCollapsed((v) => !v)}>
           {collapsed ? '>' : '<'}
@@ -61,7 +59,7 @@ const Sidebar = forwardRef(function Sidebar({ mobileOpen = false, onNavigate, on
       <nav aria-label="POS sections">
         {visibleGroups.map((group) => (
           <div key={group.label} className="nav-group">
-            {!collapsed && <div className="nav-group-label">{group.label}</div>}
+            <div className="nav-group-label">{group.label}</div>
             {group.items.map((item) => {
               const active = pathname === item.href || pathname.startsWith(item.href + '/');
               return (
@@ -73,7 +71,8 @@ const Sidebar = forwardRef(function Sidebar({ mobileOpen = false, onNavigate, on
                   title={collapsed ? item.label : undefined}
                   onClick={onNavigate}
                 >
-                  {collapsed ? collapsedLabel(item.label) : item.label}
+                  <span className="nav-abbr" aria-hidden="true">{collapsedLabel(item.label)}</span>
+                  <span className="nav-label">{item.label}</span>
                 </Link>
               );
             })}
@@ -81,15 +80,25 @@ const Sidebar = forwardRef(function Sidebar({ mobileOpen = false, onNavigate, on
         ))}
         {connectedApps.length > 0 && (
           <div className="nav-group">
-            {!collapsed && <div className="nav-group-label">Connected Apps</div>}
+            <div className="nav-group-label">Connected Apps</div>
             {connectedApps.map((item) => (
               <a key={item.label} href={item.href} rel="noreferrer" title={collapsed ? item.label : undefined} onClick={onNavigate}>
-                {collapsed ? collapsedLabel(item.label) : item.label}
+                <span className="nav-abbr" aria-hidden="true">{collapsedLabel(item.label)}</span>
+                <span className="nav-label">{item.label}</span>
               </a>
             ))}
           </div>
         )}
       </nav>
+      <div className="sidebar-footer">
+        <div className="sidebar-user-avatar" aria-hidden="true">
+          {String(user?.full_name || user?.display_name || user?.username || 'U').slice(0, 1).toUpperCase()}
+        </div>
+        <div className="sidebar-user-copy">
+          <strong>{user?.full_name || user?.display_name || user?.username || 'POS user'}</strong>
+          <span>{String(user?.role || 'staff').replaceAll('_', ' ')}</span>
+        </div>
+      </div>
     </aside>
   );
 });

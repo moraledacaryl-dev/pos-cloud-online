@@ -34,6 +34,7 @@ from app.services.pos_service import (
     create_order,
     create_outbox_event,
     create_refund,
+    list_kitchen_lines,
     merge_order_table,
     open_register_session,
     pay_order,
@@ -114,6 +115,31 @@ def test_hold_resume_update_and_pay_same_order():
     assert paid['id'] == order['id']
     assert paid['status'] == 'paid'
     assert paid['total_amount'] == 200
+    assert order['created_at'].endswith('Z')
+    assert paid['updated_at'].endswith('Z')
+
+
+def test_strict_environment_rejects_order_on_stale_business_date(monkeypatch):
+    db = make_session()
+    register = seed_register(db)
+    item = seed_catalog(db)
+    monkeypatch.setattr(pos_service.settings, 'environment', 'staging')
+    monkeypatch.setattr(pos_service, 'today_iso', lambda: '2026-09-03')
+    session = open_register_session(
+        db,
+        RegisterSessionOpen(register_id=register.id, business_date='2026-09-02', shift_name='AM', opening_float=0),
+    )
+
+    assert session['is_stale'] is True
+    assert session['session_age_days'] >= 1
+    with pytest.raises(ValueError, match='session is stale'):
+        create_order(
+            db,
+            OrderCreate(
+                register_session_id=session['id'],
+                lines=[{'catalog_item_id': item.id, 'quantity': 1, 'unit_price': 100, 'discount_amount': 0}],
+            ),
+        )
 
 
 def test_non_cash_payment_creates_settlement_outbox():
@@ -156,6 +182,8 @@ def test_full_cash_refund_creates_cash_out_and_refund_record():
     assert refund['refunded_amount'] == 200
     assert refund['approved_by_user_id'] == manager.id
     assert refund['payments'][0]['tender_type'] == 'cash'
+    assert db.get(PosOrder, order['id']).kitchen_status == 'voided'
+    assert list_kitchen_lines(db, station='kitchen') == []
     events = db.query(SyncOutboxEvent).all()
     assert any(e.event_type == 'cash_movement.created' for e in events)
 
@@ -174,8 +202,41 @@ def test_partial_line_refund_allocates_non_cash_refund_event():
 
     assert refund['refunded_amount'] == 100
     assert refund['lines'][0]['quantity'] == 1
+    kitchen_rows = list_kitchen_lines(db, station='kitchen')
+    assert kitchen_rows[0]['quantity'] == 1
+    assert kitchen_rows[0]['refunded_quantity'] == 1
     events = db.query(SyncOutboxEvent).all()
     assert any(e.event_type == 'payment.refunded' for e in events)
+
+
+def test_full_amount_refund_removes_order_from_active_kitchen_queue():
+    db = make_session()
+    register = seed_register(db)
+    item = seed_catalog(db)
+    manager = seed_manager(db)
+    session = open_register_session(
+        db,
+        RegisterSessionOpen(register_id=register.id, business_date='2026-04-19', shift_name='AM', opening_float=0, opening_note='open'),
+    )
+    order = create_order(
+        db,
+        OrderCreate(
+            register_session_id=session['id'],
+            guest_name='Guest',
+            lines=[{'catalog_item_id': item.id, 'quantity': 1, 'unit_price': 100, 'discount_amount': 0}],
+        ),
+    )
+    pay_order(db, order['id'], OrderPayPayload(payments=[OrderPaymentCreate(tender_type='cash', amount_applied=100, amount_received=100)]))
+
+    create_refund(
+        db,
+        order['id'],
+        RefundCreate(refund_mode='amount', amount=100, reason_code='guest_request', approved_by_user_id=manager.id),
+        cashier_user_id=manager.id,
+    )
+
+    assert db.get(PosOrder, order['id']).kitchen_status == 'voided'
+    assert list_kitchen_lines(db, station='kitchen') == []
 
 
 def test_room_charge_marks_order_as_folio_pending_and_not_paid():

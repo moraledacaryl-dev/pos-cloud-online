@@ -16,7 +16,8 @@ function summarizeHealth(health, requestError) {
   if (Number(health.outbox?.failed || 0) > 0) issues.push(`${health.outbox.failed} failed sync event(s)`);
   if (Number(health.outbox?.blocked || 0) > 0) issues.push(`${health.outbox.blocked} blocked sync event(s)`);
   if (issues.length) return { tone: issues.some((item) => item.includes('unreachable') || item.includes('migration')) ? 'danger' : 'warn', label: 'POS sync needs attention', detail: issues.join(' / '), degraded: true };
-  return { tone: 'success', label: 'POS sync healthy', detail: `${Number(health.outbox?.due_now || 0)} queued now / worker active`, degraded: false };
+  const setupNote = Number(health.outbox?.suppressed || 0) > 0 ? ` / ${health.outbox.suppressed} optional Inventory event(s) suppressed` : '';
+  return { tone: 'success', label: 'POS sync healthy', detail: `${Number(health.outbox?.due_now || 0)} queued now / worker active${setupNote}`, degraded: false };
 }
 
 export default function SyncHealthBanner() {
@@ -59,6 +60,7 @@ export default function SyncHealthBanner() {
   }, [loaded, user, summary]);
 
   if (!loaded || !user) return null;
+  if (!requestError && (!health || !summary.degraded)) return null;
 
   const canViewDiagnostics = can('sync.view');
   const label = canViewDiagnostics || !summary.degraded ? summary.label : 'Sync delayed';

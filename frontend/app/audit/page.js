@@ -125,21 +125,26 @@ export default function AuditPage() {
       </section>
 
       <section className="section">
-        <div className="card-grid" style={{ marginBottom: 14 }}>
+        <div className="card-grid compact-kpis" style={{ marginBottom: 14 }}>
           <div className="card"><div className="muted">Rows on page</div><div className="kpi">{rows.length}</div></div>
-          <div className="card"><div className="muted">Potential exceptions</div><div className="kpi">{exceptions}</div></div>
+          <div className="card"><div className="muted">High-risk events</div><div className="kpi">{exceptions}</div></div>
           <div className="card"><div className="muted">Pending approvals</div><div className="kpi">{approvals.filter((row) => row.status === 'pending').length}</div></div>
         </div>
         <form className="form-grid audit-filter-grid" onSubmit={(e) => { e.preventDefault(); loadAll(filters, null, true).catch(console.error); }}>
           <label className="field">Search<input value={filters.q} onChange={(e) => setField('q', e.target.value)} /></label>
           <label className="field">Action<input value={filters.action} onChange={(e) => setField('action', e.target.value)} /></label>
           <label className="field">Entity<input value={filters.entity_type} onChange={(e) => setField('entity_type', e.target.value)} /></label>
-          <label className="field">Actor User ID<input value={filters.actor_user_id} onChange={(e) => setField('actor_user_id', e.target.value)} /></label>
-          <label className="field">Approval Status<select value={filters.approval_status} onChange={(e) => setField('approval_status', e.target.value)}><option value="">All</option><option value="pending">pending</option><option value="approved">approved</option><option value="rejected">rejected</option></select></label>
-          <label className="field">Approval Type<input value={filters.approval_type} onChange={(e) => setField('approval_type', e.target.value)} /></label>
-          <label className="field">Date From<input type="date" value={filters.date_from} onChange={(e) => setField('date_from', e.target.value)} /></label>
-          <label className="field">Date To<input type="date" value={filters.date_to} onChange={(e) => setField('date_to', e.target.value)} /></label>
-          <label className="field">Page Size<select value={filters.limit} onChange={(e) => setField('limit', Number(e.target.value))}><option value={25}>25</option><option value={50}>50</option><option value={100}>100</option></select></label>
+          <details className="filter-disclosure" style={{ gridColumn: '1 / -1' }}>
+            <summary>More filters</summary>
+            <div className="form-grid">
+              <label className="field">Actor User ID<input inputMode="numeric" value={filters.actor_user_id} onChange={(e) => setField('actor_user_id', e.target.value)} /></label>
+              <label className="field">Approval Status<select value={filters.approval_status} onChange={(e) => setField('approval_status', e.target.value)}><option value="">All</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select></label>
+              <label className="field">Approval Type<input value={filters.approval_type} onChange={(e) => setField('approval_type', e.target.value)} /></label>
+              <label className="field">Date From<input type="date" value={filters.date_from} onChange={(e) => setField('date_from', e.target.value)} /></label>
+              <label className="field">Date To<input type="date" value={filters.date_to} onChange={(e) => setField('date_to', e.target.value)} /></label>
+              <label className="field">Page Size<select value={filters.limit} onChange={(e) => setField('limit', Number(e.target.value))}><option value={25}>25</option><option value={50}>50</option><option value={100}>100</option></select></label>
+            </div>
+          </details>
           <div className="row wrap" style={{ gridColumn: '1 / -1' }}>
             <button type="submit" className="primary">Apply Filters</button>
             <button type="button" className="secondary" onClick={() => { setFilters(EMPTY_FILTERS); loadAll(EMPTY_FILTERS, null, true).catch(console.error); }}>Reset</button>

@@ -129,6 +129,7 @@ export default function RoomChargesPage() {
     return Array.from(new Set([current, ...(ALLOWED_STATUS_TRANSITIONS[current] || [])])).filter(Boolean);
   }, [selected?.posting_status]);
   const isFinalSelectedStatus = !!selected && (ALLOWED_STATUS_TRANSITIONS[String(selected.posting_status || '').toLowerCase()] || []).length === 0;
+  const canSaveBooking = !!String(bookingForm.stay_date || '').trim() && !!String(bookingForm.room_number || '').trim();
 
   useEffect(() => {
     if (!queueRows.length) {
@@ -231,20 +232,14 @@ export default function RoomChargesPage() {
             <h1>Room Charge Queue</h1>
             <p className="muted">Front desk can track each charge from pending, to manually posted, to settled. Marking a charge posted records staff confirmation only; it does not call Beds24.</p>
           </div>
-          <div className="row wrap">
-            <span className="badge warn">Pending: {summary.pending_frontdesk_post}</span>
-            <span className="badge info">Manually posted: {summary.posted_to_beds24}</span>
-            <span className="badge success">Settled: {summary.settled_at_frontdesk}</span>
-            {!!summary.attention && <span className="badge danger">Needs review: {summary.attention}</span>}
-            {loading && <span className="badge info">Loading…</span>}
-          </div>
+          {loading && <span className="badge info">Loading…</span>}
         </div>
         {!!notice && <p className="notice-text" style={{ marginTop: 8 }}>{notice}</p>}
         {!!error && <p className="error-text" style={{ marginTop: 8 }}>{error}</p>}
       </section>
 
       <section className="section">
-        <div className="card-grid" style={{ marginBottom: 14 }}>
+        <div className="segmented-summary" role="group" aria-label="Room charge status filters">
           {STATUS_VIEWS.map((view) => {
             const countMap = {
               all: summary.all,
@@ -258,12 +253,12 @@ export default function RoomChargesPage() {
               <button
                 key={view.key}
                 type="button"
-                className={`summary-card-button ${filters.view === view.key ? 'active' : ''}`}
+                className={`summary-segment ${filters.view === view.key ? 'active' : ''}`}
+                aria-pressed={filters.view === view.key}
                 onClick={() => setFilters((prev) => ({ ...prev, view: view.key }))}
               >
-                <span className={`badge ${toneMap[view.key]}`}>{view.label}</span>
-                <strong>{countMap[view.key] || 0}</strong>
-                <span className="small muted">{view.key === 'all' ? 'Visible for stay date' : `${view.label} items`}</span>
+                <span>{view.label}</span>
+                <strong className={`badge ${toneMap[view.key]}`}>{countMap[view.key] || 0}</strong>
               </button>
             );
           })}
@@ -319,7 +314,7 @@ export default function RoomChargesPage() {
                   </button>
                 );
               })}
-              {!queueRows.length && <div className="muted">No room charges found for this date and filter.</div>}
+              {!queueRows.length && <div className="empty-state"><strong>No room charges found</strong><span>Refresh the PMS feed, change the stay date, or add a manual booking below.</span><button type="button" className="secondary" onClick={() => loadData()}>Refresh PMS data</button></div>}
             </div>
           </div>
 
@@ -445,14 +440,13 @@ export default function RoomChargesPage() {
         </div>
 
         <div className="two-column-layout" style={{ marginTop: 14 }}>
-          <form className="card form-stack" onSubmit={handleBookingSubmit}>
-            <div className="row" style={{ justifyContent: 'space-between' }}>
-              <strong>{editingBookingId ? 'Edit' : 'Add'} Snapshot Booking</strong>
-              {editingBookingId && <button type="button" className="secondary" onClick={() => { setBookingForm(emptyBooking); setEditingBookingId(null); }}>Cancel Edit</button>}
-            </div>
+          <details className="card admin-create-disclosure" open={!!editingBookingId}>
+            <summary><span><strong>{editingBookingId ? 'Edit manual booking' : 'Add manual booking'}</strong><small>Use only when the live reservation lookup is unavailable</small></span><span className="summary-action">{editingBookingId ? 'Editing' : 'Open form'}</span></summary>
+            <form className="form-stack" onSubmit={handleBookingSubmit}>
+            {editingBookingId && <div className="row" style={{ justifyContent: 'flex-end' }}><button type="button" className="secondary" onClick={() => { setBookingForm(emptyBooking); setEditingBookingId(null); }}>Cancel Edit</button></div>}
             <div className="form-grid">
-              <label className="field">Stay Date<input type="date" value={bookingForm.stay_date} onChange={(e) => setBookingForm((prev) => ({ ...prev, stay_date: e.target.value }))} /></label>
-              <label className="field">Room Number<input value={bookingForm.room_number} onChange={(e) => setBookingForm((prev) => ({ ...prev, room_number: e.target.value }))} placeholder="201" /></label>
+              <label className="field">Stay Date<input required type="date" value={bookingForm.stay_date} onChange={(e) => setBookingForm((prev) => ({ ...prev, stay_date: e.target.value }))} /></label>
+              <label className="field">Room Number<input required value={bookingForm.room_number} onChange={(e) => setBookingForm((prev) => ({ ...prev, room_number: e.target.value }))} placeholder="201" /></label>
               <label className="field">Guest Name<input value={bookingForm.guest_name} onChange={(e) => setBookingForm((prev) => ({ ...prev, guest_name: e.target.value }))} /></label>
               <label className="field">Guest Label<input value={bookingForm.guest_label} onChange={(e) => setBookingForm((prev) => ({ ...prev, guest_label: e.target.value }))} placeholder="Rm 201 · John Santos" /></label>
             </div>
@@ -461,14 +455,15 @@ export default function RoomChargesPage() {
               <div className="form-grid">
                 <label className="field">Arrival<input type="date" value={bookingForm.arrival_date} onChange={(e) => setBookingForm((prev) => ({ ...prev, arrival_date: e.target.value }))} /></label>
                 <label className="field">Departure<input type="date" value={bookingForm.departure_date} onChange={(e) => setBookingForm((prev) => ({ ...prev, departure_date: e.target.value }))} /></label>
-                <label className="field">Booking Status<input value={bookingForm.booking_status} onChange={(e) => setBookingForm((prev) => ({ ...prev, booking_status: e.target.value }))} /></label>
-                <label className="field">Beds24 Booking ID<input value={bookingForm.beds24_booking_id} onChange={(e) => setBookingForm((prev) => ({ ...prev, beds24_booking_id: e.target.value }))} /></label>
-                <label className="field">Source<input value={bookingForm.source} onChange={(e) => setBookingForm((prev) => ({ ...prev, source: e.target.value }))} /></label>
+                <label className="field">Booking Status<select value={bookingForm.booking_status} onChange={(e) => setBookingForm((prev) => ({ ...prev, booking_status: e.target.value }))}><option value="in_house">In house</option><option value="confirmed">Confirmed</option><option value="checked_out">Checked out</option><option value="cancelled">Cancelled</option></select></label>
+                <label className="field">Reservation Reference<input value={bookingForm.beds24_booking_id} onChange={(e) => setBookingForm((prev) => ({ ...prev, beds24_booking_id: e.target.value }))} placeholder="Optional PMS or front-desk reference" /></label>
+                <label className="field">Source<input value="Manual front-desk entry" readOnly aria-readonly="true" /></label>
               </div>
               <label className="field">Notes<textarea value={bookingForm.notes} onChange={(e) => setBookingForm((prev) => ({ ...prev, notes: e.target.value }))} /></label>
             </details>
-            <div className="row wrap"><button type="submit" className="primary">{editingBookingId ? 'Update Snapshot' : 'Add Snapshot'}</button></div>
-          </form>
+            <div className="row wrap"><button type="submit" className="primary" disabled={!canSaveBooking}>{editingBookingId ? 'Update Snapshot' : 'Add Snapshot'}</button></div>
+            </form>
+          </details>
 
           <div className="card">
             <div className="row" style={{ justifyContent: 'space-between' }}>

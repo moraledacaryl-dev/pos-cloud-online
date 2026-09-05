@@ -60,10 +60,12 @@ test("outbox summary counts retries separately from status totals", () => {
     { status: 'pending', retry_count: 0 },
     { status: 'failed', retry_count: 2 },
     { status: 'synced', retry_count: 1 },
+    { status: 'suppressed', retry_count: 3 },
   ]);
   assert.equal(summary.pending, 1);
   assert.equal(summary.failed, 1);
   assert.equal(summary.synced, 1);
+  assert.equal(summary.suppressed, 1);
   assert.equal(summary.retrying, 1);
 });
 

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { createUser, fetchRoles, fetchUsers, request, updateUser } from '../../lib/api';
+import ActionModal from '../../components/ActionModal';
 
 const blankForm = { id: null, username: '', password: '', full_name: '', role: 'cashier', role_ids: [], is_active: true, staff_identity_id: '' };
 
@@ -14,6 +15,7 @@ export default function UsersPage() {
   const [form, setForm] = useState(blankForm);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
+  const [pendingArchive, setPendingArchive] = useState(null);
 
   async function loadAll() {
     try {
@@ -37,11 +39,21 @@ export default function UsersPage() {
       return [row.username, row.full_name, row.role, linked?.employee_code, linked?.display_name, ...(row.roles || []).map((r) => r.name)].some((v) => String(v || '').toLowerCase().includes(needle));
     });
   }, [users, userLinks, q]);
+  const primaryRoleId = useMemo(() => roles.find((row) => row.name === form.role)?.id || null, [roles, form.role]);
+  const canSaveUser = !!form.username.trim()
+    && (!!form.id || !!form.password.trim())
+    && (form.role_ids || []).length > 0;
+
+  useEffect(() => {
+    if (!primaryRoleId || (form.role_ids || []).includes(primaryRoleId)) return;
+    setForm((prev) => ({ ...prev, role_ids: [...(prev.role_ids || []), primaryRoleId] }));
+  }, [primaryRoleId, form.role_ids]);
 
   async function handleSubmit(event) {
     event.preventDefault();
     setError(''); setNotice('');
     try {
+      if (!(form.role_ids || []).length) return setError('Assign at least one permission role before saving.');
       const payload = { ...form, role_ids: (form.role_ids || []).map(Number) };
       if (!payload.password) delete payload.password;
       delete payload.staff_identity_id;
@@ -65,6 +77,7 @@ export default function UsersPage() {
   function toggleRole(roleId) {
     setForm((prev) => {
       const exists = (prev.role_ids || []).includes(roleId);
+      if (exists && roleId === primaryRoleId) return prev;
       return { ...prev, role_ids: exists ? prev.role_ids.filter((id) => id !== roleId) : [...prev.role_ids, roleId] };
     });
   }
@@ -98,11 +111,11 @@ export default function UsersPage() {
         {!!error && <p className="error-text" style={{ marginTop: 8 }}>{error}</p>}
       </section>
 
-      <section className="section">
-        <h2>{form.id ? 'Edit User' : 'Create User'}</h2>
+      <details className="section admin-create-disclosure" open={!!form.id}>
+        <summary><span><strong>{form.id ? 'Edit user' : 'Add a POS user'}</strong><small>Credentials, staff link, and permissions</small></span><span className="summary-action">{form.id ? 'Editing' : 'Open form'}</span></summary>
         <form className="form-grid" style={{ marginTop: 12 }} onSubmit={handleSubmit}>
-          <label className="field">Username<input value={form.username} disabled={!!form.id} onChange={(e) => setForm((prev) => ({ ...prev, username: e.target.value }))} /></label>
-          <label className="field">Password<input type="password" placeholder={form.id ? 'Leave blank to keep current password' : ''} value={form.password} onChange={(e) => setForm((prev) => ({ ...prev, password: e.target.value }))} /></label>
+          <label className="field">Username<input required value={form.username} disabled={!!form.id} onChange={(e) => setForm((prev) => ({ ...prev, username: e.target.value }))} /></label>
+          <label className="field">Password<input required={!form.id} type="password" placeholder={form.id ? 'Leave blank to keep current password' : ''} value={form.password} onChange={(e) => setForm((prev) => ({ ...prev, password: e.target.value }))} /></label>
           <label className="field">Full Name<input value={form.full_name} onChange={(e) => setForm((prev) => ({ ...prev, full_name: e.target.value }))} /></label>
           <label className="field">Primary Role<select value={form.role} onChange={(e) => setForm((prev) => ({ ...prev, role: e.target.value }))}>{['owner', 'manager', 'cashier', 'kitchen'].map((role) => <option key={role} value={role}>{role}</option>)}</select></label>
           <label className="field">Staff Identity<select value={form.staff_identity_id} onChange={(e) => setForm((prev) => ({ ...prev, staff_identity_id: e.target.value }))}><option value="">Not linked</option>{staffIdentities.map((identity) => { const taken = identity.linked_user_id && identity.linked_user_id !== form.id; return <option key={identity.id} value={identity.id} disabled={taken}>{identity.employee_code} · {identity.display_name}{identity.department ? ` · ${identity.department}` : ''}{!identity.active ? ' · inactive' : ''}{taken ? ' · linked' : ''}</option>; })}</select></label>
@@ -111,13 +124,13 @@ export default function UsersPage() {
             <div className="small muted" style={{ marginBottom: 8 }}>Assigned roles</div>
             <div className="row wrap">
               {roles.map((row) => (
-                <button key={row.id} type="button" className={`stat-chip ${(form.role_ids || []).includes(row.id) ? 'stat-chip-active' : ''}`} onClick={() => toggleRole(row.id)}>{row.name}</button>
+                <button key={row.id} type="button" className={`stat-chip ${(form.role_ids || []).includes(row.id) ? 'active' : ''}`} aria-pressed={(form.role_ids || []).includes(row.id)} disabled={row.id === primaryRoleId} title={row.id === primaryRoleId ? 'The primary role is always assigned.' : undefined} onClick={() => toggleRole(row.id)}>{row.name}</button>
               ))}
             </div>
           </div>
-          <div className="row wrap"><button className="primary" type="submit">{form.id ? 'Update User' : 'Save User'}</button>{form.id && <button type="button" className="secondary" onClick={() => setForm(blankForm)}>Cancel Edit</button>}</div>
+          <div className="row wrap"><button className="primary" type="submit" disabled={!canSaveUser}>{form.id ? 'Update User' : 'Save User'}</button>{form.id && <button type="button" className="secondary" onClick={() => setForm(blankForm)}>Cancel Edit</button>}</div>
         </form>
-      </section>
+      </details>
 
       <section className="section">
         <h2>Current Users</h2>
@@ -132,13 +145,22 @@ export default function UsersPage() {
                 <td>{row.role}</td>
                 <td>{(row.roles || []).map((role) => role.name).join(', ') || '-'}</td>
                 <td><span className={`badge ${row.is_active ? 'success' : 'warn'}`}>{row.is_active ? 'active' : 'inactive'}</span></td>
-                <td><div className="row wrap"><button type="button" className="secondary" onClick={() => editUser(row)}>Edit</button><button type="button" className="secondary" onClick={() => archiveUser(row)}>{row.is_active ? 'Archive' : 'Reactivate'}</button></div></td>
+                <td><div className="row wrap"><button type="button" className="secondary" onClick={() => editUser(row)}>Edit</button><button type="button" className="secondary" onClick={() => setPendingArchive(row)}>{row.is_active ? 'Archive' : 'Reactivate'}</button></div></td>
               </tr>
             ))}
             {!filteredUsers.length && <tr><td colSpan="7" className="muted">No users found.</td></tr>}
           </tbody>
         </table>
       </section>
+      <ActionModal
+        open={!!pendingArchive}
+        title={`${pendingArchive?.is_active ? 'Archive' : 'Reactivate'} ${pendingArchive?.full_name || pendingArchive?.username || 'this user'}?`}
+        description={pendingArchive?.is_active ? 'This immediately prevents the user from signing in. Historical records remain intact.' : 'This restores sign-in access with the user’s existing roles.'}
+        confirmLabel={pendingArchive?.is_active ? 'Archive user' : 'Reactivate user'}
+        tone={pendingArchive?.is_active ? 'danger' : 'normal'}
+        onClose={() => setPendingArchive(null)}
+        onConfirm={async () => { await archiveUser(pendingArchive); setPendingArchive(null); }}
+      />
     </div>
   );
 }

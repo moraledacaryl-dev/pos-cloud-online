@@ -104,11 +104,19 @@ def _mark_blocked(db: Session, row: SyncOutboxEvent, error: str) -> None:
     db.commit()
 
 
+def _mark_suppressed(db: Session, row: SyncOutboxEvent) -> None:
+    row.status = 'suppressed'
+    row.last_error = 'Inventory integration is not enabled; no delivery was attempted.'
+    row.next_retry_at = None
+    db.add(row)
+    db.commit()
+
+
 async def run_inventory_outbox_sync(db: Session, limit: int = 25) -> dict:
     rows = (
         db.query(SyncOutboxEvent)
         .filter(SyncOutboxEvent.event_type.in_(list(INVENTORY_EVENT_TYPES.values())))
-        .filter(SyncOutboxEvent.status.in_(['inventory_pending', 'inventory_retry', 'pending']))
+        .filter(SyncOutboxEvent.status.in_(['inventory_pending', 'inventory_retry', 'pending', 'suppressed']))
         .order_by(SyncOutboxEvent.id.asc())
         .limit(max(int(limit or 1), 1))
         .all()
@@ -117,6 +125,11 @@ async def run_inventory_outbox_sync(db: Session, limit: int = 25) -> dict:
     processed = synced = retried = blocked = skipped = 0
     now_text = _now_text()
     for row in rows:
+        if not settings.inventory_integration_enabled:
+            if row.status != 'suppressed':
+                _mark_suppressed(db, row)
+            skipped += 1
+            continue
         if row.next_retry_at and row.next_retry_at > now_text:
             skipped += 1
             continue
@@ -142,11 +155,6 @@ async def run_inventory_outbox_sync(db: Session, limit: int = 25) -> dict:
             _mark_blocked(db, row, 'Inventory handoff blocked: sale contains no Inventory-mapped lines.')
             blocked += 1
             continue
-        if not settings.inventory_integration_enabled:
-            _mark_blocked(db, row, 'Inventory integration is disabled in POS configuration.')
-            blocked += 1
-            continue
-
         base = (settings.inventory_api_base or '').strip()
         token = (settings.inventory_integration_token or '').strip()
         if not base or not token:

@@ -122,6 +122,7 @@ export default function CatalogPage() {
         </div>
         {catalogStatus?.state === 'stale' && <p className="error-text" style={{ marginTop: 8 }}>The selling snapshot is more than 24 hours old. Refresh before relying on prices or item availability.</p>}
         {catalogStatus?.state === 'never_synced' && <p className="error-text" style={{ marginTop: 8 }}>This POS has not completed a catalog refresh. Do not treat local fallback items as master products.</p>}
+        {catalogStatus && Number(catalogStatus.imported_rows || 0) === 0 && <div className="integration-status danger" role="alert"><strong>Selling setup incomplete</strong><p>No upstream selling items were imported. Local-only fallbacks do not update Inventory or the Accounting catalog. Refresh the catalog and resolve the upstream connection before normal service.</p></div>}
         {!!notice && <p className="notice-text" style={{ marginTop: 8 }}>{notice}</p>}
         {!!error && <p className="error-text" style={{ marginTop: 8 }}>{error}</p>}
       </section>
@@ -153,16 +154,16 @@ export default function CatalogPage() {
         <section className="section" key={group}>
           <h2>{group}</h2>
           <table className="table" tabIndex={0} aria-label="Scrollable data table" style={{ marginTop: 10 }}>
-            <thead><tr><th>Display</th><th>SKU / Variant</th><th>Station</th><th>Price</th><th>Master IDs</th><th>Status</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Display</th><th>SKU / Variant</th><th>Station</th><th>Price</th><th>Source</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>
               {rows.map((row) => (
-                <tr key={row.id}><td>{row.display_name}</td><td>{row.sku_code || '-'}</td><td>{row.prep_station || '-'}</td><td>{money(row.price)}</td><td>{row.external_menu_item_id || '-'} / {row.external_sku_id || '-'}</td><td><span className={`badge ${row.is_available ? 'success' : 'warn'}`}>{row.is_available ? 'available' : 'sold out'}</span></td><td><div className="row wrap">{!row.external_menu_item_id && !row.external_sku_id && <button type="button" className="secondary" onClick={() => editItem(row)}>Edit fallback</button>}<button type="button" className={row.is_available ? 'secondary' : 'primary'} onClick={() => toggleAvailability(row)}>{row.is_available ? 'Mark Sold Out' : 'Restore to POS'}</button>{!row.external_menu_item_id && !row.external_sku_id && <button type="button" className="danger" onClick={() => setPendingDelete(row)}>Delete fallback</button>}</div></td></tr>
+                <tr key={row.id}><td><strong>{row.display_name}</strong>{!row.external_menu_item_id && !row.external_sku_id && <div className="small error-text">Local only — will not sync</div>}</td><td>{row.sku_code || '-'}</td><td>{row.prep_station || '-'}</td><td>{money(row.price)}</td><td>{row.external_menu_item_id || row.external_sku_id ? <span className="badge info">Upstream catalog</span> : <span className="badge warn">Emergency fallback</span>}</td><td><span className={`badge ${row.is_available ? 'success' : 'warn'}`}>{row.is_available ? 'available' : 'sold out'}</span></td><td><div className="row wrap">{!row.external_menu_item_id && !row.external_sku_id && <button type="button" className="secondary" onClick={() => editItem(row)}>Edit fallback</button>}<button type="button" className={row.is_available ? 'secondary' : 'primary'} onClick={() => toggleAvailability(row)}>{row.is_available ? 'Mark Sold Out' : 'Restore to POS'}</button>{!row.external_menu_item_id && !row.external_sku_id && <button type="button" className="danger" onClick={() => setPendingDelete(row)}>Delete fallback</button>}</div></td></tr>
               ))}
             </tbody>
           </table>
         </section>
       ))}
-      {!visibleItems.length && <section className="section"><p className="muted">No catalog items match this filter.</p></section>}
+      {!visibleItems.length && <section className="section"><div className="empty-state"><strong>No catalog items match</strong><span>Clear the search or refresh the upstream selling catalog.</span><button type="button" className="primary" onClick={handleSync} disabled={busy}>Refresh selling catalog</button></div></section>}
       <ActionModal
         open={!!pendingDelete}
         title={`Delete ${pendingDelete?.display_name || pendingDelete?.menu_item_name || 'local-only item'}?`}

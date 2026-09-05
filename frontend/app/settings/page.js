@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { fetchAccountingHealth, getSystemSettings, seedDefaults, updateSystemSettings } from '../../lib/api';
+import ActionModal from '../../components/ActionModal';
 
 const PATH_FIELDS = [
   ['integration_token_path', 'Integration Token Path', '/auth/integration/token'],
@@ -18,17 +19,21 @@ const PATH_FIELDS = [
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState({ accounting_sync: {}, ui_preferences: {} });
+  const [savedSettings, setSavedSettings] = useState({ accounting_sync: {}, ui_preferences: {} });
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [healthStatus, setHealthStatus] = useState('');
   const [healthError, setHealthError] = useState('');
   const [healthDetails, setHealthDetails] = useState(null);
   const [busy, setBusy] = useState('');
+  const [confirmDefaults, setConfirmDefaults] = useState(false);
 
   async function loadSettings() {
     try {
       const data = await getSystemSettings();
-      setSettings(data || { accounting_sync: {}, ui_preferences: {} });
+      const next = data || { accounting_sync: {}, ui_preferences: {} };
+      setSettings(next);
+      setSavedSettings(next);
     } catch (e) {
       setError(e.message || 'Failed to load settings.');
     }
@@ -44,6 +49,14 @@ export default function SettingsPage() {
     event.preventDefault();
     setError(''); setNotice(''); setBusy('save');
     try {
+      const base = String(settings.accounting_sync?.api_base || '').trim();
+      if (!base) throw new Error('Enter the Accounting API base URL.');
+      const parsed = new URL(base);
+      if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Accounting API URL must use http or https.');
+      for (const [key, label] of PATH_FIELDS) {
+        const value = String(settings.accounting_sync?.[key] || '').trim();
+        if (value && !value.startsWith('/')) throw new Error(`${label} must start with /.`);
+      }
       await updateSystemSettings({ ...settings, accounting_sync: { ...(settings.accounting_sync || {}), mode: 'current_erp' } });
       setNotice('Settings saved. Stored secrets remain masked.');
       await loadSettings();
@@ -88,6 +101,7 @@ export default function SettingsPage() {
   }
 
   const sync = settings.accounting_sync || {};
+  const dirty = useMemo(() => JSON.stringify(settings) !== JSON.stringify(savedSettings), [settings, savedSettings]);
 
   return (
     <div className="stack">
@@ -98,7 +112,7 @@ export default function SettingsPage() {
             <p className="muted">Connect this POS to the Accounting ERP receiver.</p>
           </div>
           <div className="row wrap" style={{ gap: 10 }}>
-            <button className="secondary" onClick={handleSeed} disabled={!!busy}>{busy === 'seed' ? 'Ensuring...' : 'Ensure defaults'}</button>
+            <button className="secondary" onClick={() => setConfirmDefaults(true)} disabled={!!busy}>{busy === 'seed' ? 'Creating...' : 'Create missing POS defaults'}</button>
             <button className="secondary" onClick={handleTestConnection} disabled={!!busy}>{busy === 'health' ? 'Testing...' : 'Test accounting connection'}</button>
           </div>
         </div>
@@ -132,7 +146,7 @@ export default function SettingsPage() {
         )}
         <p className="muted">Accounting owns menu items, categories, pricing, recipes, and SKUs. POS consumes that catalog for sales and keeps only operational availability overrides. Saved secrets are never displayed again.</p>
         <form className="form-grid" style={{ marginTop: 12 }} onSubmit={handleSave}>
-          <label className="field">Mode<select value="current_erp" disabled><option value="current_erp">current_erp</option></select></label>
+          <label className="field">Accounting Connector<select value="current_erp" disabled><option value="current_erp">Hidden Oasis Accounting</option></select></label>
           <label className="field">Accounting API Base<input value={sync.api_base || ''} onChange={(e) => setSyncField('api_base', e.target.value)} placeholder="https://accounting.hiddenoasis.app/api" /></label>
           <label className="field">Integration Secret<input type="password" value={sync.integration_secret || ''} onChange={(e) => setSyncField('integration_secret', e.target.value)} placeholder={sync.integration_secret_configured ? 'Saved - enter a new secret only to replace it' : 'Enter integration secret'} /></label>
 
@@ -147,9 +161,18 @@ export default function SettingsPage() {
             </div>
           </details>
 
-          <div className="row wrap"><button type="submit" className="primary" disabled={!!busy}>{busy === 'save' ? 'Saving...' : 'Save Settings'}</button></div>
+          <div className="settings-save-bar"><span className={`small ${dirty ? 'notice-text' : 'muted'}`}>{dirty ? 'Unsaved changes' : 'All changes saved'}</span><div className="row wrap">{dirty && <button type="button" className="secondary" onClick={() => setSettings(savedSettings)}>Discard changes</button>}<button type="submit" className="primary" disabled={!!busy || !dirty}>{busy === 'save' ? 'Saving...' : 'Save Settings'}</button></div></div>
         </form>
       </section>
+      <ActionModal
+        open={confirmDefaults}
+        title="Create missing POS defaults?"
+        description="This creates only missing default outlet, register, and synchronization settings. Existing records are preserved. Review Registers afterward before opening a session."
+        showField={false}
+        confirmLabel="Create missing defaults"
+        onClose={() => setConfirmDefaults(false)}
+        onConfirm={async () => { await handleSeed(); setConfirmDefaults(false); }}
+      />
     </div>
   );
 }

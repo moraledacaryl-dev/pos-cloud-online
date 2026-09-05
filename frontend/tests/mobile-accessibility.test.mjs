@@ -6,6 +6,7 @@ const appShell = readFileSync(new URL('../components/AppShell.js', import.meta.u
 const header = readFileSync(new URL('../components/Header.js', import.meta.url), 'utf8');
 const sidebar = readFileSync(new URL('../components/Sidebar.js', import.meta.url), 'utf8');
 const css = readFileSync(new URL('../app/mobile-accessibility.css', import.meta.url), 'utf8');
+const globals = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
 const layout = readFileSync(new URL('../app/layout.js', import.meta.url), 'utf8');
 
 test('mobile navigation is a real controlled off-canvas drawer', () => {
@@ -50,4 +51,11 @@ test('responsive overrides are loaded after global styles', () => {
 test('navigation exposes current page and drawer close controls', () => {
   assert.match(sidebar, /aria-current=\{active \? 'page' : undefined\}/);
   assert.match(sidebar, /aria-label="Close navigation menu"/);
+});
+
+test('desktop shell keeps the sidebar pinned while only content scrolls', () => {
+  assert.match(globals, /\.sidebar\s*\{[\s\S]*position:\s*sticky;[\s\S]*overflow:\s*hidden;/);
+  assert.match(globals, /\.sidebar nav\s*\{[\s\S]*min-height:\s*0;[\s\S]*overflow-y:\s*auto;/);
+  assert.match(globals, /\.app-shell:not\(\.standalone-shell\):not\(\.terminal-shell\)\s*\{[\s\S]*grid-template-columns:\s*var\(--sidebar-width\) minmax\(0, 1fr\);[\s\S]*height:\s*100dvh;[\s\S]*overflow:\s*hidden;/);
+  assert.match(globals, /\.app-shell:not\(\.standalone-shell\):not\(\.terminal-shell\) \.main\s*\{[\s\S]*overflow-y:\s*auto;/);
 });

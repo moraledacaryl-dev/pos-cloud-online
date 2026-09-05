@@ -69,6 +69,7 @@ export default function KitchenPage({ initialStation = '', initialView = '' }) {
   const [newTicketCount, setNewTicketCount] = useState(0);
   const [partialLine, setPartialLine] = useState(null);
   const [soundEnabled, setSoundEnabled] = useState(false);
+  const [lastRefreshAt, setLastRefreshAt] = useState(null);
   const seenRef = useRef(new Set());
   const audioRef = useRef(null);
   const streamRef = useRef(null);
@@ -83,6 +84,10 @@ export default function KitchenPage({ initialStation = '', initialView = '' }) {
     const requestedView = params.get('view');
     if (STATIONS.some((item) => item.key === requestedStation)) setStation(requestedStation || '');
     if (VIEWS.some((item) => item.key === requestedView)) setView(requestedView);
+  }, []);
+
+  useEffect(() => {
+    try { setSoundEnabled(window.localStorage.getItem('pos_kds_sound_enabled_v1') === '1'); } catch { /* preference storage is optional */ }
   }, []);
 
   async function playAlert() {
@@ -105,6 +110,7 @@ export default function KitchenPage({ initialStation = '', initialView = '' }) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
       setSoundEnabled(true);
+      try { window.localStorage.setItem('pos_kds_sound_enabled_v1', '1'); } catch { /* preference storage is optional */ }
       setNotice('Kitchen sound alerts enabled.');
     } catch {
       setSoundEnabled(false);
@@ -123,6 +129,7 @@ export default function KitchenPage({ initialStation = '', initialView = '' }) {
         await playAlert();
       }
       setTickets(safeRows);
+      setLastRefreshAt(new Date());
       setError('');
     } catch (e) {
       setError(e.message || 'Failed to load kitchen tickets.');
@@ -130,6 +137,10 @@ export default function KitchenPage({ initialStation = '', initialView = '' }) {
   }
 
   useEffect(() => { loadTickets().catch(console.error); }, [station, view, soundEnabled]);
+  useEffect(() => {
+    const timer = window.setInterval(() => loadTickets().catch(() => {}), 10000);
+    return () => window.clearInterval(timer);
+  }, [station, view, soundEnabled]);
 
   useEffect(() => {
     let cancelled = false;
@@ -148,7 +159,7 @@ export default function KitchenPage({ initialStation = '', initialView = '' }) {
           setConnectionState('connected');
           loadTickets().catch(() => {});
         };
-        ['ticket_created', 'ticket_updated', 'ticket_status_updated', 'ticket_finalized', 'ticket_line_updated'].forEach((eventName) => es.addEventListener(eventName, refresh));
+        ['ticket_created', 'ticket_updated', 'ticket_status_updated', 'ticket_finalized', 'ticket_line_updated', 'ticket_cancelled'].forEach((eventName) => es.addEventListener(eventName, refresh));
         es.addEventListener('stream_expiring', () => {
           es?.close();
           if (!cancelled) reconnectTimer = window.setTimeout(() => connect().catch(() => {}), 250);
@@ -264,7 +275,8 @@ export default function KitchenPage({ initialStation = '', initialView = '' }) {
           <p className="muted">One kitchen screen for active work, held items, ready orders, and all-day totals.</p>
         </div>
         <div className="kds-top-actions">
-          <span className={`badge ${connectionState === 'connected' ? 'success' : connectionState === 'connecting' ? 'warn' : 'danger'}`}>{connectionState}</span>
+          <span className={`badge ${connectionState === 'connected' ? 'success' : connectionState === 'connecting' ? 'warn' : 'danger'}`}>{connectionState === 'connected' ? 'Live updates connected' : connectionState === 'connecting' ? 'Connecting · polling active' : 'Live updates offline · polling active'}</span>
+          <span className="small muted">Last refreshed {lastRefreshAt ? lastRefreshAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—'}</span>
           <span className={`badge ${newTicketCount ? 'warn' : 'info'}`}>{newTicketCount ? `${newTicketCount} new` : 'No new'}</span>
           <button type="button" className="secondary" aria-pressed={soundEnabled} onClick={() => enableSound().catch(() => {})}>{soundEnabled ? 'Sound enabled' : 'Enable sound'}</button>
           <button type="button" className="secondary" onClick={() => { setNewTicketCount(0); loadTickets().catch(() => {}); }}>Refresh</button>

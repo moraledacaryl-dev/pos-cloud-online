@@ -152,11 +152,11 @@ export function applyKeypadInput(currentValue, key) {
 }
 
 export function summarizeOutboxRows(rows = []) {
-  const summary = { all: rows.length, pending: 0, failed: 0, blocked: 0, synced: 0, retrying: 0 };
+  const summary = { all: rows.length, pending: 0, failed: 0, blocked: 0, suppressed: 0, synced: 0, retrying: 0 };
   for (const row of rows) {
     const status = String(row.status || '').toLowerCase();
     if (status in summary) summary[status] += 1;
-    if (moneyNumber(row.retry_count) > 0 && status !== 'synced') summary.retrying += 1;
+    if (moneyNumber(row.retry_count) > 0 && !['synced', 'suppressed'].includes(status)) summary.retrying += 1;
   }
   return summary;
 }
@@ -207,7 +207,7 @@ export function summarizeTerminalHealth(health = null, { online = true, error = 
   const severe = issues.some((item) => /database|Accounting|blocked/.test(item));
   return {
     tone: severe ? 'danger' : 'warn',
-    label: severe ? 'Manager review' : 'Watch',
+    label: severe ? 'Sync attention' : 'Sync watch',
     detail: issues.join(' / '),
     action: severe ? 'Open Sync Queue before closing or posting room charges.' : 'Continue service, then clear the queue during the next quiet moment.',
   };

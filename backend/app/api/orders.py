@@ -2,6 +2,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_permissions
+from app.core.settings import settings
 from app.db.database import get_db
 from app.models.entities import PosOrder
 from app.schemas.common import (
@@ -139,7 +140,8 @@ def settle_order(order_id: int, payload: OrderPayPayload, background_tasks: Back
         order_snapshot = get_order(db, order_id)
         validate_payment_control(order_snapshot, payload.payments)
         result = pay_order(db, order_id, payload, user_id=getattr(current_user, 'id', None))
-        enqueue_inventory_event(db, result, 'sale_completed')
+        if settings.inventory_integration_enabled:
+            enqueue_inventory_event(db, result, 'sale_completed')
         background_tasks.add_task(
             publish_operations_event,
             'order.finalized',
@@ -192,7 +194,7 @@ def cancel_order(order_id: int, payload: OrderVoidPayload, background_tasks: Bac
             requested_reason=payload.reason,
         ) as grant:
             result = void_order(db, order_id, payload.reason, user_id=getattr(current_user, 'id', None), approved_by_user_id=grant['approved_by_user_id'])
-        if should_reverse_inventory_for_void(pre_void):
+        if settings.inventory_integration_enabled and should_reverse_inventory_for_void(pre_void):
             enqueue_inventory_event(db, result, 'sale_voided')
         background_tasks.add_task(
             publish_operations_event,
@@ -235,7 +237,7 @@ def refund_order(order_id: int, payload: RefundCreate, background_tasks: Backgro
         ):
             result = create_refund(db, order_id, payload, cashier_user_id=getattr(current_user, 'id', None))
         order_after_refund = get_order(db, order_id)
-        if should_reverse_inventory_for_refund(order_after_refund):
+        if settings.inventory_integration_enabled and should_reverse_inventory_for_refund(order_after_refund):
             enqueue_inventory_event(db, order_after_refund, 'sale_refunded')
         refund_id = result.get('id') if isinstance(result, dict) else getattr(result, 'id', order_id)
         background_tasks.add_task(

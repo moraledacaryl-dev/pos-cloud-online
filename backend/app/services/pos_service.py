@@ -6,6 +6,7 @@ import logging
 import re
 import uuid
 from datetime import UTC, datetime
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, selectinload
@@ -126,11 +127,40 @@ CASH_EVENT_TYPES_OUT = {'paid_out', 'refund', 'safe_drop', 'owner_withdrawal', '
 
 
 def now_iso() -> str:
-    return datetime.now(UTC).replace(tzinfo=None).replace(microsecond=0).isoformat()
+    return datetime.now(UTC).replace(microsecond=0).isoformat().replace('+00:00', 'Z')
+
+
+def utc_iso(value: datetime | None) -> str | None:
+    """Serialize database timestamps as unambiguous UTC for browser clients."""
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    else:
+        value = value.astimezone(UTC)
+    return value.isoformat().replace('+00:00', 'Z')
+
+
+def parse_utc_iso(value: str | None) -> datetime | None:
+    """Parse current or legacy naive ISO timestamps as UTC-aware values."""
+    if not value:
+        return None
+    parsed = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def business_now() -> datetime:
+    try:
+        return datetime.now(ZoneInfo(settings.business_timezone))
+    except (ZoneInfoNotFoundError, ValueError):
+        logger.warning('Invalid business timezone %s; falling back to UTC.', settings.business_timezone)
+        return datetime.now(UTC)
 
 
 def today_iso() -> str:
-    return datetime.now(UTC).replace(tzinfo=None).date().isoformat()
+    return business_now().date().isoformat()
 
 
 def _actor_username(db: Session, user_id: int | None) -> str | None:
@@ -311,8 +341,8 @@ def _serialize_in_house_booking_snapshot(row: InHouseBookingSnapshot) -> dict:
         'source': row.source,
         'is_active': bool(row.is_active),
         'notes': row.notes,
-        'created_at': row.created_at.isoformat() if row.created_at else None,
-        'updated_at': row.updated_at.isoformat() if row.updated_at else None,
+        'created_at': utc_iso(row.created_at),
+        'updated_at': utc_iso(row.updated_at),
     }
 
 
@@ -352,8 +382,8 @@ def _serialize_room_charge_posting(row: RoomChargePosting) -> dict:
         'rejected_reason': row.rejected_reason,
         'synced_to_accounting': bool(row.synced_to_accounting),
         'last_sync_at': row.last_sync_at,
-        'created_at': row.created_at.isoformat() if row.created_at else None,
-        'updated_at': row.updated_at.isoformat() if row.updated_at else None,
+        'created_at': utc_iso(row.created_at),
+        'updated_at': utc_iso(row.updated_at),
         'booking_snapshot': _serialize_in_house_booking_snapshot(row.booking_snapshot) if row.booking_snapshot else None,
     }
 
@@ -609,6 +639,11 @@ def _serialize_session(row: RegisterSession) -> dict:
             denomination_lines = json.loads(row.denomination_json)
         except Exception:
             denomination_lines = []
+    try:
+        session_age_days = max((business_now().date() - datetime.fromisoformat(str(row.business_date)).date()).days, 0)
+    except (TypeError, ValueError):
+        session_age_days = None
+    is_stale = bool(row.status == 'open' and row.business_date != today_iso())
     return {
         'id': row.id,
         'session_code': row.session_code,
@@ -638,6 +673,11 @@ def _serialize_session(row: RegisterSession) -> dict:
         'reopen_note': row.reopen_note,
         'opened_at_text': row.opened_at_text,
         'closed_at_text': row.closed_at_text,
+        'created_at': utc_iso(row.created_at),
+        'updated_at': utc_iso(row.updated_at),
+        'session_age_days': session_age_days,
+        'is_stale': is_stale,
+        'stale_reason': f'Business date is {row.business_date}; today is {today_iso()}.' if is_stale else None,
         'orders_count': orders_count,
     }
 
@@ -665,8 +705,8 @@ def _serialize_refund(row: Refund, include_details: bool = True) -> dict:
         'refunded_amount': row.refunded_amount,
         'synced_to_accounting': bool(row.synced_to_accounting),
         'last_sync_at': row.last_sync_at,
-        'created_at': row.created_at.isoformat() if row.created_at else None,
-        'updated_at': row.updated_at.isoformat() if row.updated_at else None,
+        'created_at': utc_iso(row.created_at),
+        'updated_at': utc_iso(row.updated_at),
     }
     if include_details:
         data['lines'] = [
@@ -764,6 +804,8 @@ def _serialize_order(row: PosOrder, include_lines: bool = True, db: Session | No
         'void_reason': row.void_reason,
         'synced_to_accounting': bool(row.synced_to_accounting),
         'last_sync_at': row.last_sync_at,
+        'created_at': utc_iso(row.created_at),
+        'updated_at': utc_iso(row.updated_at),
         'refunded_total': refunded_total,
         'refundable_balance': refundable_balance,
         'refund_status': refund_status,
@@ -826,6 +868,11 @@ def _serialize_cash_movement(row: CashMovement) -> dict:
 
 
 def _serialize_outbox(row: SyncOutboxEvent) -> dict:
+    is_suppressed = (
+        not settings.inventory_integration_enabled
+        and str(row.event_type or '').startswith('inventory.')
+        and row.status in {'pending', 'failed', 'error', 'blocked', 'inventory_pending', 'inventory_retry', 'suppressed'}
+    )
     return {
         'id': row.id,
         'event_uuid': row.event_uuid,
@@ -834,13 +881,15 @@ def _serialize_outbox(row: SyncOutboxEvent) -> dict:
         'event_type': row.event_type,
         'idempotency_key': row.idempotency_key,
         'payload_json': row.payload_json,
-        'status': row.status,
+        'status': 'suppressed' if is_suppressed else row.status,
+        'stored_status': row.status,
+        'suppressed_reason': 'Inventory integration is not enabled.' if is_suppressed else None,
         'retry_count': row.retry_count,
         'next_retry_at': row.next_retry_at,
         'last_attempt_at': row.last_attempt_at,
         'last_error': row.last_error,
         'synced_at': row.synced_at,
-        'created_at': row.created_at.isoformat() if row.created_at else None,
+        'created_at': utc_iso(row.created_at),
     }
 
 
@@ -1187,6 +1236,10 @@ def create_order(db: Session, payload: OrderCreate, user_id: int | None = None):
         raise ValueError('Register session not found.')
     if session.status != 'open':
         raise ValueError('Order can only be created on an open session.')
+    if settings.is_strict_environment and session.business_date != today_iso():
+        raise ValueError(
+            f'This register session is stale ({session.business_date}). Close or roll forward the session before creating an order for {today_iso()}.'
+        )
     if not payload.lines:
         raise ValueError('Order must contain at least one line.')
     row = PosOrder(
@@ -2002,6 +2055,26 @@ def create_refund(db: Session, order_id: int, payload: RefundCreate, cashier_use
 
     for line in refund_lines_payload:
         refund_row.lines.append(RefundLine(**line))
+
+    kitchen_changed = False
+    refunded_qty_after = dict(refunded_qty_by_line)
+    for refund_line in refund_lines_payload:
+        source_line_id = refund_line.get('order_line_id')
+        if not source_line_id:
+            continue
+        refunded_qty_after[source_line_id] = refunded_qty_after.get(source_line_id, 0) + float(refund_line.get('quantity') or 0)
+    for source_line in (row.lines or []):
+        remaining_qty = max(float(source_line.quantity or 0) - float(refunded_qty_after.get(source_line.id, 0) or 0), 0)
+        if remaining_qty <= 0.0001 and source_line.kitchen_status not in {'voided', 'cancelled', 'served'}:
+            source_line.kitchen_status = 'voided'
+            source_line.item_readiness = 'not_ready'
+            source_line.ready_quantity = 0
+            db.add(source_line)
+            kitchen_changed = True
+    if refundable_remaining - refund_amount <= 0.009 and row.kitchen_status not in {'voided', 'cancelled', 'served'}:
+        row.kitchen_status = 'voided'
+        db.add(row)
+        kitchen_changed = True
     for alloc in allocations:
         refund_payment = RefundPayment(
             tender_type=alloc['tender_type'],
@@ -2127,6 +2200,8 @@ def create_refund(db: Session, order_id: int, payload: RefundCreate, cashier_use
             )
 
     db.commit()
+    if kitchen_changed:
+        _publish_kds_refresh(_order_stations(row), reason='ticket_cancelled', payload={'order_id': row.id, 'order_no': row.order_no, 'refund_id': refund_row.id})
     return _serialize_refund(refund_row, include_details=True)
 
 
@@ -2301,7 +2376,14 @@ def list_cash_movements(db: Session, session_id: int | None = None, limit: int =
 def list_kitchen_lines(db: Session, station: str | None = None, statuses: list[str] | None = None):
     statuses = statuses or ['queued', 'acknowledged', 'in_progress', 'ready']
     station = normalize_kds_station(station) if station else None
-    query = db.query(PosOrderLine).options(selectinload(PosOrderLine.order), selectinload(PosOrderLine.acknowledged_by)).filter(PosOrderLine.kitchen_status.in_(statuses))
+    query = db.query(PosOrderLine).options(
+        selectinload(PosOrderLine.order).selectinload(PosOrder.refunds).selectinload(Refund.lines),
+        selectinload(PosOrderLine.acknowledged_by),
+    ).join(PosOrder, PosOrder.id == PosOrderLine.order_id).filter(
+        PosOrderLine.kitchen_status.in_(statuses),
+        PosOrder.status.notin_(['voided', 'cancelled']),
+        PosOrder.kitchen_status.notin_(['voided', 'cancelled']),
+    )
     if station and station not in {'expo', 'pass'}:
         if station in KDS_STATION_FILTER_ALIASES:
             aliases = KDS_STATION_FILTER_ALIASES[station]
@@ -2313,19 +2395,29 @@ def list_kitchen_lines(db: Session, station: str | None = None, statuses: list[s
     query = query.order_by(PosOrderLine.id.asc())
     rows = []
     for line in query.all():
-        created = line.created_at.isoformat() if getattr(line, 'created_at', None) else None
-        updated = line.updated_at.isoformat() if getattr(line, 'updated_at', None) else None
+        refunded_quantity = sum(
+            float(refund_line.quantity or 0)
+            for refund in (line.order.refunds or [])
+            for refund_line in (refund.lines or [])
+            if refund_line.order_line_id == line.id
+        ) if line.order else 0
+        active_quantity = max(float(line.quantity or 0) - refunded_quantity, 0)
+        if active_quantity <= 0.0001:
+            continue
+        created = utc_iso(getattr(line, 'created_at', None))
+        updated = utc_iso(getattr(line, 'updated_at', None))
         priority = 'normal'
         escalation = 'normal'
         age_mins = None
         prep_mins = None
         cycle_to_ready_mins = None
         try:
-            created_dt = datetime.fromisoformat(created.replace('Z', '+00:00')) if created else None
-            started_dt = datetime.fromisoformat(line.prep_started_at_text.replace('Z', '+00:00')) if getattr(line, 'prep_started_at_text', None) else None
-            ready_dt = datetime.fromisoformat(line.ready_at_text.replace('Z', '+00:00')) if getattr(line, 'ready_at_text', None) else None
+            created_dt = parse_utc_iso(created)
+            started_dt = parse_utc_iso(getattr(line, 'prep_started_at_text', None))
+            ready_dt = parse_utc_iso(getattr(line, 'ready_at_text', None))
+            current_utc = datetime.now(UTC)
             if created_dt:
-                age_mins = max(0, round((datetime.now(UTC).replace(tzinfo=None) - created_dt.replace(tzinfo=None)).total_seconds() / 60))
+                age_mins = max(0, round((current_utc - created_dt).total_seconds() / 60))
                 if age_mins >= 25:
                     priority = 'critical'
                     escalation = 'critical'
@@ -2336,10 +2428,10 @@ def list_kitchen_lines(db: Session, station: str | None = None, statuses: list[s
                     priority = 'watch'
                     escalation = 'watch'
             if started_dt:
-                end_dt = ready_dt or datetime.now(UTC).replace(tzinfo=None).replace(tzinfo=None)
-                prep_mins = max(0, round((end_dt - started_dt.replace(tzinfo=None)).total_seconds() / 60))
+                end_dt = ready_dt or current_utc
+                prep_mins = max(0, round((end_dt - started_dt).total_seconds() / 60))
             if created_dt and ready_dt:
-                cycle_to_ready_mins = max(0, round((ready_dt.replace(tzinfo=None) - created_dt.replace(tzinfo=None)).total_seconds() / 60))
+                cycle_to_ready_mins = max(0, round((ready_dt - created_dt).total_seconds() / 60))
         except Exception:
             pass
         rows.append({
@@ -2350,7 +2442,9 @@ def list_kitchen_lines(db: Session, station: str | None = None, statuses: list[s
             'guest_name': line.order.guest_name if line.order else None,
             'prep_station': normalize_kds_station(line.prep_station),
             'item_name_snapshot': line.item_name_snapshot,
-            'quantity': line.quantity,
+            'quantity': active_quantity,
+            'original_quantity': line.quantity,
+            'refunded_quantity': refunded_quantity,
             'note': line.note,
             'kitchen_status': line.kitchen_status,
             'acknowledgement_state': line.acknowledgement_state,
@@ -2360,7 +2454,7 @@ def list_kitchen_lines(db: Session, station: str | None = None, statuses: list[s
             'ready_at': line.ready_at_text,
             'served_at': line.served_at_text,
             'item_readiness': line.item_readiness,
-            'ready_quantity': line.ready_quantity,
+            'ready_quantity': min(float(line.ready_quantity or 0), active_quantity),
             'order_status': line.order.status if line.order else None,
             'created_at': created,
             'updated_at': updated,
@@ -2443,14 +2537,18 @@ def update_kitchen_line_status(db: Session, line_id: int, payload, user_id: int 
 
 def list_outbox_events(db: Session, status: str | None = None, limit: int = 200):
     query = db.query(SyncOutboxEvent).order_by(SyncOutboxEvent.id.desc())
-    if status:
+    if status and status != 'suppressed':
         query = query.filter(SyncOutboxEvent.status == status)
-    return [_serialize_outbox(row) for row in query.limit(limit).all()]
+    rows = [_serialize_outbox(row) for row in query.limit(limit).all()]
+    return [row for row in rows if not status or row['status'] == status]
 
 
 def dashboard_summary(db: Session):
     open_sessions = db.query(RegisterSession).filter(RegisterSession.status == 'open').count()
-    pending_sync = db.query(SyncOutboxEvent).filter(SyncOutboxEvent.status.in_(['pending', 'failed', 'blocked'])).count()
+    pending_query = db.query(SyncOutboxEvent).filter(SyncOutboxEvent.status.in_(['pending', 'failed', 'blocked']))
+    if not settings.inventory_integration_enabled:
+        pending_query = pending_query.filter(~SyncOutboxEvent.event_type.like('inventory.%'))
+    pending_sync = pending_query.count()
     today = today_iso()
     sales_today = db.query(func.coalesce(func.sum(PosOrder.total_amount), 0)).filter(PosOrder.business_date == today, PosOrder.status.in_(['paid', 'folio_pending'])).scalar() or 0
     cash_today = db.query(func.coalesce(func.sum(CashMovement.amount), 0)).filter(CashMovement.event_date == today, CashMovement.direction == 'in').scalar() or 0

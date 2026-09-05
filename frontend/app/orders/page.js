@@ -32,6 +32,16 @@ function refundedQtyByLine(order) {
   return map;
 }
 
+function orderDisplayState(order) {
+  if (order?.refund_status === 'fully_refunded') return { label: 'Fully Refunded', tone: 'danger' };
+  if (order?.refund_status === 'partially_refunded') return { label: 'Partially Refunded', tone: 'warn' };
+  if (order?.status === 'paid') return { label: 'Paid', tone: 'success' };
+  if (order?.status === 'folio_pending') return { label: 'Folio Pending', tone: 'warn' };
+  if (order?.status === 'voided') return { label: 'Voided', tone: 'danger' };
+  if (order?.status === 'held') return { label: 'Held', tone: 'warn' };
+  return { label: String(order?.status || 'Unknown').replaceAll('_', ' '), tone: 'info' };
+}
+
 export default function OrdersPage() {
   const [orders, setOrders] = useState([]);
   const [sessions, setSessions] = useState([]);
@@ -79,7 +89,7 @@ export default function OrdersPage() {
     const folioPending = orders.filter((row) => row.status === 'folio_pending');
     return {
       paidCount: paid.length,
-      paidSales: paid.reduce((sum, row) => sum + Number(row.total_amount || 0), 0),
+      paidSales: paid.reduce((sum, row) => sum + Math.max(Number(row.total_amount || 0) - Number(row.refunded_total || 0), 0), 0),
       folioPendingCount: folioPending.length,
       folioPendingSales: folioPending.reduce((sum, row) => sum + Number(row.folio_pending_amount || row.total_amount || 0), 0),
       heldCount: orders.filter((row) => row.status === 'held').length,
@@ -114,6 +124,7 @@ export default function OrdersPage() {
     setError('');
     setNotice('');
     if (!selectedOrder?.id) return;
+    if (refundForm.reason_code === 'other' && !String(refundForm.reason_text || '').trim()) return setError('Explain the refund reason when Other is selected.');
     try {
       const payload = {
         refund_mode: refundForm.refund_mode,
@@ -156,7 +167,7 @@ export default function OrdersPage() {
       <section className="section">
         <div className="metric-rail">
           <div className="metric-card"><div className="muted">Paid Orders</div><div className="metric-value">{summary.paidCount}</div></div>
-          <div className="metric-card"><div className="muted">Paid Sales</div><div className="metric-value">{money(summary.paidSales)}</div></div>
+          <div className="metric-card"><div className="muted">Net Paid Sales</div><div className="metric-value">{money(summary.paidSales)}</div></div>
           <div className="metric-card"><div className="muted">Folio Pending</div><div className="metric-value">{summary.folioPendingCount}</div></div>
           <div className="metric-card"><div className="muted">Held</div><div className="metric-value">{summary.heldCount}</div></div>
           <div className="metric-card"><div className="muted">Drafts</div><div className="metric-value">{summary.draftCount}</div></div>
@@ -190,23 +201,24 @@ export default function OrdersPage() {
           <h2>Order List</h2>
           <table className="table" tabIndex={0} aria-label="Scrollable data table" style={{ marginTop: 12 }}>
             <thead>
-              <tr><th>Order</th><th>Session</th><th>Status</th><th>Guest / Ref</th><th>Total</th><th>Tender</th></tr>
+              <tr><th>Order</th><th>Session</th><th>Status</th><th>Guest / Ref</th><th>Total</th><th>Refunded</th><th>Net</th><th>Tender</th></tr>
             </thead>
             <tbody>
               {orders.map((row) => (
                 <tr key={row.id} className={selectedOrder?.id === row.id ? 'table-row-active' : ''} onClick={() => setSelectedOrder(row)} style={{ cursor: 'pointer' }}>
-                  <td><strong>{row.order_no}</strong><div className="small muted">{row.business_date}</div></td>
+                  <td><strong>{row.order_no}</strong><div className="small muted">{row.created_at ? new Date(row.created_at).toLocaleString() : row.business_date}</div></td>
                   <td>{row.register_name || '-'}</td>
                   <td>
-                    <span className={`badge ${row.status === 'paid' ? 'success' : row.status === 'folio_pending' ? 'warn' : row.status === 'voided' ? 'danger' : row.status === 'held' ? 'warn' : 'info'}`}>{row.status}</span>
-                    {row.refund_status && row.refund_status !== 'none' && <div className="small muted" style={{ marginTop: 4 }}>{row.refund_status.replaceAll('_', ' ')}</div>}
+                    <span className={`badge ${orderDisplayState(row).tone}`}>{orderDisplayState(row).label}</span>
                   </td>
                   <td><div>{row.guest_name || 'Walk-in'}</div><div className="small muted">{row.table_label || row.order_type || '-'}</div></td>
                   <td>{money(row.total_amount)}</td>
+                  <td>{money(row.refunded_total)}</td>
+                  <td><strong>{money(Math.max(Number(row.total_amount || 0) - Number(row.refunded_total || 0), 0))}</strong></td>
                   <td>{row.primary_tender || '-'}</td>
                 </tr>
               ))}
-              {!orders.length && <tr><td colSpan="6" className="muted">No orders found for this filter.</td></tr>}
+              {!orders.length && <tr><td colSpan="8" className="muted">No orders found for this filter.</td></tr>}
             </tbody>
           </table>
         </section>
@@ -222,7 +234,7 @@ export default function OrdersPage() {
               <div className="card-grid">
                 <div className="card"><div className="muted">Order</div><strong>{selectedOrder.order_no}</strong></div>
                 <div className="card"><div className="muted">Cashier</div><strong>{selectedOrder.cashier_name || '-'}</strong></div>
-                <div className="card"><div className="muted">Status</div><strong>{selectedOrder.status}</strong></div>
+                <div className="card"><div className="muted">Status</div><strong>{orderDisplayState(selectedOrder).label}</strong></div>
                 <div className="card"><div className="muted">Settlement</div><strong>{selectedOrder.settlement_state || '-'}</strong></div>
                 <div className="card"><div className="muted">Total</div><strong>{money(selectedOrder.total_amount)}</strong></div>
                 <div className="card"><div className="muted">Refunded</div><strong>{money(selectedOrder.refunded_total)}</strong></div>
@@ -363,7 +375,7 @@ export default function OrdersPage() {
               <label className="field">Internal Note<textarea value={refundForm.note} onChange={(e) => setRefundForm((prev) => ({ ...prev, note: e.target.value }))} placeholder="Optional note for audit trail or accounting." /></label>
               <div className="row wrap">
                 <button type="button" className="secondary" onClick={() => setRefundModalOpen(false)}>Cancel</button>
-                <button type="button" className="primary" onClick={() => { setRefundModalOpen(false); setOverrideMode('refund'); }}>Approve and Process Refund</button>
+                <button type="button" className="primary" disabled={refundForm.reason_code === 'other' && !String(refundForm.reason_text || '').trim()} onClick={() => { setRefundModalOpen(false); setOverrideMode('refund'); }}>Continue to Manager Approval</button>
               </div>
             </div>
           </div>

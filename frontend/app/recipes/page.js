@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import ActionModal from '../../components/ActionModal';
 import { deleteRecipePdf, fetchRecipeDishes, fetchRecipePdf, uploadRecipePdf } from '../../lib/api';
@@ -135,15 +136,17 @@ export default function RecipesPage() {
         {!!error && <p className="error-text" style={{ marginTop: 8 }}>{error}</p>}
       </section>
 
-      <section className="section">
+      {!!dishes.length && <section className="section">
         <div className="recipe-filter-grid">
           <label className="field">Search dishes<input placeholder="Dish, category, or variant" value={q} onChange={(e) => setQ(e.target.value)} /></label>
           <label className="field">Category<select value={category} onChange={(e) => setCategory(e.target.value)}><option value="all">All categories</option>{categories.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
           <label className="field">PDF status<select value={status} onChange={(e) => setStatus(e.target.value)}><option value="all">All dishes</option><option value="with_pdf">With PDF</option><option value="missing_pdf">Missing PDF</option></select></label>
         </div>
-      </section>
+      </section>}
 
-      <div className="recipe-library-layout">
+      {!dishes.length && <section className="section"><div className="empty-state recipe-empty-state"><strong>No upstream dishes are available</strong><span>Recipes can only be attached after the selling catalog imports dishes from Accounting. Refresh the catalog first; recipe upload controls will appear once a dish exists.</span><div className="row wrap"><Link href="/catalog" className="button-link">Open Catalog Setup</Link><button type="button" className="secondary" onClick={() => loadDishes()}>Check again</button></div></div></section>}
+
+      {!!dishes.length && <div className="recipe-library-layout">
         <section className="section recipe-dish-list">
           <div><h2>Accounting Dishes</h2><p className="small muted">{visibleDishes.length} matching dishes</p></div>
           <div className="recipe-dish-grid">
@@ -183,7 +186,7 @@ export default function RecipesPage() {
             </form>}
           </>}
         </section>
-      </div>
+      </div>}
 
       {!!readerUrl && <section className="section recipe-reader-section">
         <div className="toolbar">

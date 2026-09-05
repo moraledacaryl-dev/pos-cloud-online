@@ -84,6 +84,7 @@ class Settings(BaseSettings):
     sync_worker_poll_seconds: int = 30
     sync_worker_batch_size: int = 25
     sync_worker_stale_seconds: int = 120
+    business_timezone: str = 'Asia/Manila'
     accounting_api_base: str = DEFAULT_ACCOUNTING_API_BASE
     accounting_integration_secret: str = ''
     integration_api_key: str = ''
