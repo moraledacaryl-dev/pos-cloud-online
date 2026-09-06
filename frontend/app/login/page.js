@@ -6,19 +6,19 @@ import { bootstrap, login } from '../../lib/api';
 const SHOW_DEVELOPMENT_BOOTSTRAP = process.env.NEXT_PUBLIC_ENABLE_ADMIN_BOOTSTRAP === 'true';
 
 const styles = {
-  shell: { minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 24, background: 'radial-gradient(circle at top left, #f8fbf9 0, transparent 32%), radial-gradient(circle at bottom right, #eef2f8 0, transparent 28%), #f6f6f4' },
-  card: { width: 'min(480px, 100%)', display: 'grid', gap: 20, padding: 'clamp(30px, 4vw, 42px)', borderRadius: 24, border: '1px solid #e1e6df', background: 'rgba(255,255,255,.94)', boxShadow: '0 28px 80px rgba(26,38,30,.11)' },
-  mark: { width: 56, height: 56, display: 'grid', placeItems: 'center', borderRadius: 17, background: '#243b68', color: '#fff', fontWeight: 720, letterSpacing: '.03em' },
+  shell: { minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 24, background: '#e8ece8' },
+  card: { width: 'min(480px, 100%)', display: 'grid', gap: 20, padding: 'clamp(30px, 4vw, 42px)', borderRadius: 22, border: '1px solid #bdc9c2', background: '#f8faf8', boxShadow: '0 24px 64px rgba(18,43,37,.13)' },
+  mark: { width: 56, height: 56, display: 'grid', placeItems: 'center', borderRadius: 16, background: '#14523e', color: '#fff', fontWeight: 760, letterSpacing: '.03em', boxShadow: '0 10px 24px rgba(20,82,62,.2)' },
   title: { margin: 0, fontSize: 38, letterSpacing: '-.04em', lineHeight: 1 },
-  context: { margin: '-10px 0 0', color: '#676e68', fontSize: 14 },
+  context: { margin: '-10px 0 0', color: '#5b6862', fontSize: 14 },
   form: { display: 'grid', gap: 13 },
-  label: { display: 'grid', gap: 6, fontSize: 12, fontWeight: 650, color: '#565b55' },
-  input: { width: '100%', minHeight: 48, padding: '12px 13px', borderRadius: 12, border: '1px solid #d7dad4', background: '#fff' },
-  button: { width: '100%', minHeight: 48, padding: '12px 13px', borderRadius: 12, border: '1px solid #111', background: '#111', color: '#fff', fontWeight: 650, cursor: 'pointer' },
-  secondary: { width: '100%', padding: '10px 12px', borderRadius: 12, border: '1px solid #d7dad4', background: '#fff', color: '#111', fontWeight: 650, cursor: 'pointer' },
-  credit: { color: '#7b8179', fontSize: 12 },
-  error: { color: '#b42318', fontSize: 13, margin: 0 },
-  notice: { color: '#1f6a47', fontSize: 13, margin: 0 },
+  label: { display: 'grid', gap: 6, fontSize: 12, fontWeight: 650, color: '#43534c' },
+  input: { width: '100%', minHeight: 48, padding: '12px 13px', borderRadius: 11, border: '1px solid #bdc9c2', background: '#fff', color: '#122b25' },
+  button: { width: '100%', minHeight: 48, padding: '12px 13px', borderRadius: 11, border: '1px solid #14523e', background: '#14523e', color: '#fff', fontWeight: 680, cursor: 'pointer' },
+  secondary: { width: '100%', padding: '10px 12px', borderRadius: 11, border: '1px solid #bdc9c2', background: '#f8faf8', color: '#122b25', fontWeight: 650, cursor: 'pointer' },
+  credit: { color: '#66756e', fontSize: 12 },
+  error: { color: '#b9472f', fontSize: 13, margin: 0 },
+  notice: { color: '#14523e', fontSize: 13, margin: 0 },
 };
 
 export default function LoginPage() {
