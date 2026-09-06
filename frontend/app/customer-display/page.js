@@ -8,11 +8,20 @@ import { useCurrentUser } from '../../lib/useCurrentUser';
 const peso = new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' });
 
 function SetupCard({ mode, children }) {
+  const managerMode = mode === 'Manager setup';
   return (
-    <section className="customer-display-empty customer-display-setup">
-      <ExitDisplayControl />
+    <section className={`customer-display-empty customer-display-setup${managerMode ? ' customer-display-manager-setup' : ''}`}>
+      {!managerMode && <ExitDisplayControl />}
       <div className="customer-display-setup-card">
-        <div className="customer-display-setup-brand" aria-hidden="true">HO</div>
+        <div className="customer-display-setup-toolbar">
+          <div className="customer-display-setup-brand" aria-hidden="true">HO</div>
+          {managerMode && (
+            <Link className="customer-display-manager-back" href="/pos">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M15 18l-6-6 6-6M9 12h10" /></svg>
+              <span>Back to POS</span>
+            </Link>
+          )}
+        </div>
         <div className="customer-display-setup-heading">
           <p className="customer-display-eyebrow">Hidden Oasis · Display setup</p>
           <span className="customer-display-mode">{mode}</span>

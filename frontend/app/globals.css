@@ -3024,11 +3024,23 @@ button.danger {
   backdrop-filter: blur(18px);
 }
 
+.customer-display-manager-setup .customer-display-setup-card {
+  width: min(720px, 100%);
+}
+
+.customer-display-setup-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 24px;
+}
+
 .customer-display-setup-brand {
   display: grid;
   width: 52px;
   height: 52px;
-  margin-bottom: 24px;
+  margin-bottom: 0;
   border-radius: 17px;
   place-items: center;
   color: #102117;
@@ -3036,6 +3048,42 @@ button.danger {
   font-size: 16px;
   font-weight: 900;
   letter-spacing: -0.04em;
+}
+
+.customer-display-manager-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 42px;
+  padding: 9px 13px;
+  border: 1px solid rgba(159, 213, 184, 0.3);
+  border-radius: 12px;
+  color: #d9eee2;
+  background: rgba(159, 213, 184, 0.08);
+  font-size: 14px;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.customer-display-manager-back:hover {
+  border-color: rgba(159, 213, 184, 0.52);
+  color: #fff;
+  background: rgba(159, 213, 184, 0.14);
+}
+
+.customer-display-manager-back:focus-visible {
+  outline: 3px solid rgba(159, 213, 184, 0.45);
+  outline-offset: 3px;
+}
+
+.customer-display-manager-back svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .customer-display-setup-heading {

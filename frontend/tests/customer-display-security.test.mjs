@@ -39,6 +39,9 @@ test('manager setup lists and revokes paired displays', () => {
   assert.match(page, /Paired displays/);
   assert.match(page, /Last seen/);
   assert.match(page, /revokeDisplay/);
+  assert.match(page, /customer-display-manager-back/);
+  assert.match(page, /Back to POS/);
+  assert.match(page, /!managerMode && <ExitDisplayControl \/>/);
 });
 
 test('every customer display state has a protected exit back to POS', () => {
