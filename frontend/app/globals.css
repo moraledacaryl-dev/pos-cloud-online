@@ -2905,6 +2905,81 @@ button.danger {
   box-shadow: 0 0 0 5px rgba(98, 217, 148, 0.15);
 }
 
+.customer-display-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.customer-display-exit-button {
+  min-height: 42px;
+  padding: 9px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 12px;
+  color: #f8fafc;
+  background: rgba(255, 255, 255, 0.08);
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.customer-display-setup > .customer-display-exit-button {
+  position: fixed;
+  z-index: 20;
+  top: clamp(14px, 2vw, 28px);
+  right: clamp(14px, 2vw, 28px);
+}
+
+.customer-display-exit-button:hover {
+  border-color: rgba(255, 255, 255, 0.48);
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.customer-display-exit-button:focus-visible {
+  outline: 3px solid rgba(159, 213, 184, 0.55);
+  outline-offset: 3px;
+}
+
+.customer-display-exit-backdrop {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: grid;
+  padding: 20px;
+  place-items: center;
+  background: rgba(4, 12, 9, 0.76);
+  backdrop-filter: blur(6px);
+}
+
+.customer-display-exit-dialog {
+  width: min(460px, 100%);
+  padding: clamp(24px, 4vw, 34px);
+  border: 1px solid #3a5147;
+  border-radius: 22px;
+  color: #f2f7f4;
+  background: #182822;
+  box-shadow: 0 26px 80px rgba(0, 0, 0, 0.48);
+}
+
+.customer-display-exit-dialog h2 {
+  margin: 6px 0 10px;
+  color: #fff;
+  font-size: clamp(28px, 4vw, 36px);
+  letter-spacing: -0.035em;
+}
+
+.customer-display-exit-dialog > p:not(.customer-display-eyebrow) {
+  margin: 0;
+  color: #c6d1ca;
+  line-height: 1.55;
+}
+
+.customer-display-exit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 24px;
+}
+
 .customer-display-empty {
   padding: 15vh 0;
   text-align: center;
@@ -3274,6 +3349,19 @@ button.danger {
 
   .customer-display-total {
     min-width: 0;
+  }
+
+  .customer-display-header-actions {
+    align-items: flex-start;
+    justify-content: space-between;
+  }
+
+  .customer-display-exit-actions {
+    display: grid;
+  }
+
+  .customer-display-exit-actions button {
+    width: 100%;
   }
 
   .customer-display-setup-heading,

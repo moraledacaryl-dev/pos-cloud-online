@@ -10,6 +10,7 @@ const peso = new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP'
 function SetupCard({ mode, children }) {
   return (
     <section className="customer-display-empty customer-display-setup">
+      <ExitDisplayControl />
       <div className="customer-display-setup-card">
         <div className="customer-display-setup-brand" aria-hidden="true">HO</div>
         <div className="customer-display-setup-heading">
@@ -19,6 +20,62 @@ function SetupCard({ mode, children }) {
         {children}
       </div>
     </section>
+  );
+}
+
+function ExitDisplayControl() {
+  const [confirming, setConfirming] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+
+  useEffect(() => {
+    if (!confirming) return undefined;
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') setConfirming(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [confirming]);
+
+  async function exitDisplay() {
+    setLeaving(true);
+    try {
+      if (document.fullscreenElement && document.exitFullscreen) await document.exitFullscreen();
+    } catch {
+      // Leaving the display should still work if the browser rejects fullscreen cleanup.
+    }
+    window.location.assign('/pos');
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        className="customer-display-exit-button"
+        onClick={() => setConfirming(true)}
+        aria-label="Exit customer display"
+      >
+        Exit display
+      </button>
+      {confirming && (
+        <div className="customer-display-exit-backdrop" onClick={() => setConfirming(false)}>
+          <section
+            className="customer-display-exit-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="customer-display-exit-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <p className="customer-display-eyebrow">Customer display</p>
+            <h2 id="customer-display-exit-title">Exit this display?</h2>
+            <p>This stops the guest-facing view on this screen. You can reopen it from the POS Tools menu.</p>
+            <div className="customer-display-exit-actions">
+              <button type="button" className="secondary" autoFocus onClick={() => setConfirming(false)}>Stay on display</button>
+              <button type="button" className="primary" disabled={leaving} onClick={exitDisplay}>{leaving ? 'Exiting…' : 'Exit to POS'}</button>
+            </div>
+          </section>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -280,7 +337,10 @@ export default function CustomerDisplayPage() {
           <h1>{latest?.order_no || 'Welcome'}</h1>
           <p>{latest?.table_label || 'Your order will appear here.'}</p>
         </div>
-        <div className={`customer-display-live ${serverConnected ? '' : 'fallback'}`}><span /> {serverConnected ? 'Live order' : 'Reconnecting'}</div>
+        <div className="customer-display-header-actions">
+          <div className={`customer-display-live ${serverConnected ? '' : 'fallback'}`}><span /> {serverConnected ? 'Live order' : 'Reconnecting'}</div>
+          <ExitDisplayControl />
+        </div>
       </header>
 
       {!cart.length ? (

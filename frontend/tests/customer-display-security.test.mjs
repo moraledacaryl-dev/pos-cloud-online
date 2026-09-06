@@ -40,3 +40,13 @@ test('manager setup lists and revokes paired displays', () => {
   assert.match(page, /Last seen/);
   assert.match(page, /revokeDisplay/);
 });
+
+test('every customer display state has a protected exit back to POS', () => {
+  assert.match(page, /aria-label="Exit customer display"/);
+  assert.match(page, /Exit this display\?/);
+  assert.match(page, /Stay on display/);
+  assert.match(page, /Exit to POS/);
+  assert.match(page, /document\.exitFullscreen/);
+  assert.match(page, /window\.location\.assign\('\/pos'\)/);
+  assert.match(page, /<ExitDisplayControl \/>/);
+});
