@@ -47,35 +47,41 @@ function ExitDisplayControl() {
   }
 
   return (
-    <>
+    <div className="customer-display-exit-control">
       <button
         type="button"
         className="customer-display-exit-button"
         onClick={() => setConfirming(true)}
         aria-label="Exit customer display"
+        aria-expanded={confirming}
+        aria-controls={confirming ? 'customer-display-exit-dialog' : undefined}
       >
-        Exit display
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M10 5H5v14h5M14 8l4 4-4 4M8 12h10" />
+        </svg>
+        <span>Exit</span>
       </button>
       {confirming && (
-        <div className="customer-display-exit-backdrop" onClick={() => setConfirming(false)}>
+        <>
+          <div className="customer-display-exit-backdrop" aria-hidden="true" onClick={() => setConfirming(false)} />
           <section
+            id="customer-display-exit-dialog"
             className="customer-display-exit-dialog"
             role="dialog"
             aria-modal="true"
             aria-labelledby="customer-display-exit-title"
-            onClick={(event) => event.stopPropagation()}
           >
             <p className="customer-display-eyebrow">Customer display</p>
-            <h2 id="customer-display-exit-title">Exit this display?</h2>
-            <p>This stops the guest-facing view on this screen. You can reopen it from the POS Tools menu.</p>
+            <h2 id="customer-display-exit-title">Leave this screen?</h2>
+            <p>The guest display will stop here. You can reopen it anytime from POS Tools.</p>
             <div className="customer-display-exit-actions">
-              <button type="button" className="secondary" autoFocus onClick={() => setConfirming(false)}>Stay on display</button>
-              <button type="button" className="primary" disabled={leaving} onClick={exitDisplay}>{leaving ? 'Exiting…' : 'Exit to POS'}</button>
+              <button type="button" className="secondary" autoFocus onClick={() => setConfirming(false)}>Keep open</button>
+              <button type="button" className="primary" disabled={leaving} onClick={exitDisplay}>{leaving ? 'Returning…' : 'Return to POS'}</button>
             </div>
           </section>
-        </div>
+        </>
       )}
-    </>
+    </div>
   );
 }
 
