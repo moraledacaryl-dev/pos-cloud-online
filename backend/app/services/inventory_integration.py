@@ -112,15 +112,16 @@ def _mark_suppressed(db: Session, row: SyncOutboxEvent) -> None:
     db.commit()
 
 
-async def run_inventory_outbox_sync(db: Session, limit: int = 25) -> dict:
-    rows = (
+async def run_inventory_outbox_sync(db: Session, limit: int = 25, *, event_id: int | None = None) -> dict:
+    query = (
         db.query(SyncOutboxEvent)
         .filter(SyncOutboxEvent.event_type.in_(list(INVENTORY_EVENT_TYPES.values())))
         .filter(SyncOutboxEvent.status.in_(['inventory_pending', 'inventory_retry', 'pending', 'suppressed']))
         .order_by(SyncOutboxEvent.id.asc())
-        .limit(max(int(limit or 1), 1))
-        .all()
     )
+    if event_id is not None:
+        query = query.filter(SyncOutboxEvent.id == int(event_id))
+    rows = query.limit(max(1, min(int(limit or 25), 500))).all()
 
     processed = synced = retried = blocked = skipped = 0
     now_text = _now_text()
@@ -199,6 +200,7 @@ async def run_inventory_outbox_sync(db: Session, limit: int = 25) -> dict:
         'ok': blocked == 0,
         'processed': processed,
         'synced': synced,
+        'failed': retried,
         'retrying': retried,
         'blocked': blocked,
         'skipped': skipped,

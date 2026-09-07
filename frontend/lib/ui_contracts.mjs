@@ -112,7 +112,10 @@ export function summarizeRoomChargeQueue(rows = []) {
   };
   for (const row of rows) {
     const status = String(row.posting_status || '').toLowerCase();
-    if (status in summary) summary[status] += 1;
+    if (['pending', 'inventory_pending', 'operations_pending'].includes(status)) summary.pending += 1;
+    else if (['failed', 'inventory_retry', 'operations_retry'].includes(status)) summary.failed += 1;
+    else if (['blocked', 'operations_blocked'].includes(status)) summary.blocked += 1;
+    else if (status in summary) summary[status] += 1;
     if (['rejected', 'disputed', 'written_off'].includes(status)) summary.attention += 1;
   }
   return summary;
@@ -155,7 +158,10 @@ export function summarizeOutboxRows(rows = []) {
   const summary = { all: rows.length, pending: 0, failed: 0, blocked: 0, suppressed: 0, synced: 0, retrying: 0 };
   for (const row of rows) {
     const status = String(row.status || '').toLowerCase();
-    if (status in summary) summary[status] += 1;
+    if (['pending', 'inventory_pending', 'operations_pending'].includes(status)) summary.pending += 1;
+    else if (['failed', 'inventory_retry', 'operations_retry'].includes(status)) summary.failed += 1;
+    else if (['blocked', 'operations_blocked'].includes(status)) summary.blocked += 1;
+    else if (status in summary) summary[status] += 1;
     if (moneyNumber(row.retry_count) > 0 && !['synced', 'suppressed'].includes(status)) summary.retrying += 1;
   }
   return summary;

@@ -27,7 +27,7 @@ async function streamMetrics(page) {
 test('closing the KDS page tears down proxy upstream stream and listener state', async ({ page }) => {
   await login(page);
   await page.goto('/kitchen');
-  await expect(page.getByText('connected', { exact: true })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText('Live updates connected', { exact: true })).toBeVisible({ timeout: 15_000 });
 
   await expect.poll(async () => {
     const metrics = await streamMetrics(page);

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -79,9 +80,9 @@ class CatalogItemCreate(BaseModel):
     category_name: str | None = None
     module_slug: str = 'restaurant'
     prep_station: str | None = None
-    price: float = 0
-    tax_rate: float = 0
-    service_charge_rate: float = 0
+    price: Decimal = Decimal('0')
+    tax_rate: Decimal = Decimal('0')
+    service_charge_rate: Decimal = Decimal('0')
     is_active: bool = True
     is_available: bool = True
     availability_override: bool | None = None
@@ -99,9 +100,9 @@ class CatalogItemUpdate(BaseModel):
     category_name: str | None = None
     module_slug: str | None = None
     prep_station: str | None = None
-    price: float | None = None
-    tax_rate: float | None = None
-    service_charge_rate: float | None = None
+    price: Decimal | None = None
+    tax_rate: Decimal | None = None
+    service_charge_rate: Decimal | None = None
     is_active: bool | None = None
     is_available: bool | None = None
     availability_override: bool | None = None
@@ -115,19 +116,19 @@ class RegisterSessionOpen(BaseModel):
     register_id: int
     business_date: str
     shift_name: str | None = None
-    opening_float: float = 0
+    opening_float: Decimal = Decimal('0')
     opening_note: str | None = None
 
 
 class CashCountLine(BaseModel):
     line_label: str
-    amount: float
+    amount: Decimal
     notes: str | None = None
     sort_order: int = 0
 
 
 class RegisterSessionClose(BaseModel):
-    closing_actual_cash: float
+    closing_actual_cash: Decimal
     closing_note: str | None = None
     close_mode: str = 'verified'
     blind_close: bool = False
@@ -146,17 +147,17 @@ class RegisterSessionReopen(BaseModel):
 
 class OrderLineCreate(BaseModel):
     catalog_item_id: int
-    quantity: float = 1
-    unit_price: float | None = None
-    discount_amount: float = 0
+    quantity: Decimal = Decimal('1')
+    unit_price: Decimal | None = None
+    discount_amount: Decimal = Decimal('0')
     note: str | None = None
     kitchen_status: str | None = None
 
 
 class OrderPaymentCreate(BaseModel):
     tender_type: str
-    amount_applied: float
-    amount_received: float | None = None
+    amount_applied: Decimal
+    amount_received: Decimal | None = None
     reference_no: str | None = None
     note: str | None = None
     accounting_financial_account_id: int | None = None
@@ -223,14 +224,14 @@ class OrderTableMergePayload(BaseModel):
 
 class RefundLineCreate(BaseModel):
     order_line_id: int | None = None
-    quantity: float | None = None
-    amount: float | None = None
+    quantity: Decimal | None = None
+    amount: Decimal | None = None
     note: str | None = None
 
 
 class RefundCreate(BaseModel):
     refund_mode: str = 'full'
-    amount: float | None = None
+    amount: Decimal | None = None
     reason_code: str | None = None
     reason_text: str | None = None
     note: str | None = None
@@ -246,7 +247,7 @@ class CashMovementCreate(BaseModel):
     direction: str
     movement_type: str
     category: str | None = None
-    amount: float
+    amount: Decimal
     note: str | None = None
     reference_no: str | None = None
     accounting_financial_account_id: int | None = None
@@ -258,18 +259,19 @@ class CashMovementCreate(BaseModel):
 class KitchenLineStatusPayload(BaseModel):
     kitchen_status: str
     acknowledgement_state: str | None = None
-    ready_quantity: float | None = None
+    ready_quantity: Decimal | None = None
     item_readiness: str | None = None
     note: str | None = None
 
 
 class SyncRunPayload(BaseModel):
-    limit: int = 25
+    limit: int = Field(default=25, ge=1, le=500)
 
 
 class SystemSettingsUpdate(BaseModel):
     accounting_sync: dict[str, Any] | None = None
     ui_preferences: dict[str, Any] | None = None
+    receipt_profile: dict[str, Any] | None = None
 
 
 class RefreshTokenPayload(BaseModel):

@@ -59,14 +59,21 @@ test("outbox summary counts retries separately from status totals", () => {
   const summary = summarizeOutboxRows([
     { status: 'pending', retry_count: 0 },
     { status: 'failed', retry_count: 2 },
+    { status: 'inventory_pending', retry_count: 0 },
+    { status: 'inventory_retry', retry_count: 1 },
+    { status: 'operations_pending', retry_count: 0 },
+    { status: 'operations_retry', retry_count: 1 },
+    { status: 'operations_blocked', retry_count: 1 },
     { status: 'synced', retry_count: 1 },
     { status: 'suppressed', retry_count: 3 },
   ]);
-  assert.equal(summary.pending, 1);
-  assert.equal(summary.failed, 1);
+  assert.equal(summary.all, 9);
+  assert.equal(summary.pending, 3);
+  assert.equal(summary.failed, 3);
+  assert.equal(summary.blocked, 1);
   assert.equal(summary.synced, 1);
   assert.equal(summary.suppressed, 1);
-  assert.equal(summary.retrying, 1);
+  assert.equal(summary.retrying, 4);
 });
 
 test("sync error explanations give manager recovery actions", () => {

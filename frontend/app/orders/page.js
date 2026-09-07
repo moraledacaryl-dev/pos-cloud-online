@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { createRefund, fetchOrders, fetchRegisterSessions, voidOrder } from '../../lib/api';
+import { createRefund, fetchOrders, fetchReceiptProfile, fetchRegisterSessions, voidOrder } from '../../lib/api';
 import { printReceipt, printRefundReceipt } from '../../lib/receipt';
 import ManagerOverrideModal from '../../components/ManagerOverrideModal';
 
@@ -55,6 +55,7 @@ export default function OrdersPage() {
   const [refundForm, setRefundForm] = useState({ refund_mode: 'full', amount: '', reason_code: 'guest_request', reason_text: '', note: '' });
   const [refundLineQtys, setRefundLineQtys] = useState({});
   const [refundModalOpen, setRefundModalOpen] = useState(false);
+  const [receiptProfile, setReceiptProfile] = useState({});
 
   async function loadAll({ silent = false } = {}) {
     if (!silent) setLoading(true);
@@ -75,6 +76,7 @@ export default function OrdersPage() {
   }
 
   useEffect(() => { loadAll().catch(console.error); }, []);
+  useEffect(() => { fetchReceiptProfile().then((profile) => setReceiptProfile(profile || {})).catch(() => setReceiptProfile({})); }, []);
   useEffect(() => { loadAll({ silent: true }).catch(console.error); }, [filters.status, filters.session_id, filters.q, filters.business_date, filters.limit]);
   useEffect(() => {
     if (!selectedOrder) return;
@@ -140,7 +142,7 @@ export default function OrdersPage() {
           .filter((line) => line.quantity > 0);
       }
       const refund = await createRefund(selectedOrder.id, payload);
-      printRefundReceipt(refund);
+      printRefundReceipt({ ...refund, receipt_profile: receiptProfile });
       setNotice(`Refund ${refund.refund_no} saved for ${selectedOrder.order_no}.`);
       await loadAll({ silent: true });
       setRefundForm({ refund_mode: 'full', amount: '', reason_code: 'guest_request', reason_text: '', note: '' });
@@ -277,7 +279,7 @@ export default function OrdersPage() {
                       </div>
                       <div className="text-right">
                         <div><strong>{money(refund.refunded_amount)}</strong></div>
-                        <button type="button" className="secondary" style={{ marginTop: 8 }} onClick={() => printRefundReceipt(refund)}>Print Refund</button>
+                        <button type="button" className="secondary" style={{ marginTop: 8 }} onClick={() => printRefundReceipt({ ...refund, receipt_profile: receiptProfile })}>Print Refund</button>
                       </div>
                     </div>
                   ))}
@@ -290,7 +292,7 @@ export default function OrdersPage() {
                 <div className="stack-tight" style={{ marginTop: 10 }}>
                   <textarea placeholder="Void reason" value={voidReason} onChange={(e) => setVoidReason(e.target.value)} />
                   <div className="row wrap">
-                    {selectedOrder.status === 'paid' && <button type="button" className="secondary" onClick={() => printReceipt(selectedOrder)}>Print / Reprint</button>}
+                    {selectedOrder.status === 'paid' && <button type="button" className="secondary" onClick={() => printReceipt({ ...selectedOrder, receipt_profile: receiptProfile })}>Print / Reprint Sales Invoice</button>}
                     {selectedOrder.status !== 'voided' && <button type="button" className="secondary" onClick={() => setOverrideMode('void')}>Void Order</button>}
                   </div>
                 </div>

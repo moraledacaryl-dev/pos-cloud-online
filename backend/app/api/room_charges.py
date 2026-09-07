@@ -1,11 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_any_permissions
 from app.db.database import get_db
 from app.schemas.common import InHouseBookingSnapshotCreate, InHouseBookingSnapshotUpdate, RoomChargePostingStatusUpdate
 from app.services.approval_guard import consume_protected_approval, reject_legacy_client_approver
-from app.services.operations_integration import publish_operations_event
+from app.services.operations_integration import enqueue_operations_event
 from app.services.pos_service import (
     create_in_house_booking_snapshot,
     get_room_charge_posting,
@@ -19,7 +19,7 @@ from app.services.room_charge_policy import validate_room_charge_status_update
 router = APIRouter()
 
 
-def _publish_room_charge_status(posting_id: int, result: dict, target: str, current_user) -> None:
+def _publish_room_charge_status(db: Session, posting_id: int, result: dict, target: str, current_user) -> None:
     if target not in {'pending', 'pending_frontdesk_post', 'disputed', 'written_off'}:
         return
     event_type = 'room_charge.pending_frontdesk_post'
@@ -27,7 +27,8 @@ def _publish_room_charge_status(posting_id: int, result: dict, target: str, curr
         event_type = 'refund.review_needed'
     room_number = result.get('room_number') or result.get('room') or ''
     title = 'Room charge needs Front Desk posting' if event_type == 'room_charge.pending_frontdesk_post' else 'Room charge needs review'
-    publish_operations_event(
+    enqueue_operations_event(
+        db,
         event_type,
         f'room-charge:{posting_id}:{target}',
         title=title,
@@ -46,12 +47,12 @@ def _publish_room_charge_status(posting_id: int, result: dict, target: str, curr
 
 
 @router.get('')
-def room_charge_queue(posting_status: str | None = None, stay_date: str | None = None, room_number: str | None = None, q: str | None = None, limit: int = 200, db: Session = Depends(get_db), user=Depends(require_any_permissions('room_charges.view', 'orders.manage', 'pos.use'))):
+def room_charge_queue(posting_status: str | None = None, stay_date: str | None = None, room_number: str | None = None, q: str | None = None, limit: int = Query(default=200, ge=1, le=500), db: Session = Depends(get_db), user=Depends(require_any_permissions('room_charges.view', 'orders.manage', 'pos.use'))):
     return list_room_charge_postings(db, posting_status=posting_status, stay_date=stay_date, room_number=room_number, q=q, limit=limit)
 
 
 @router.get('/in-house-bookings')
-def in_house_bookings(stay_date: str | None = None, room_number: str | None = None, q: str | None = None, active_only: bool = True, limit: int = 200, db: Session = Depends(get_db), user=Depends(require_any_permissions('room_charges.view', 'orders.manage', 'pos.use'))):
+def in_house_bookings(stay_date: str | None = None, room_number: str | None = None, q: str | None = None, active_only: bool = True, limit: int = Query(default=200, ge=1, le=500), db: Session = Depends(get_db), user=Depends(require_any_permissions('room_charges.view', 'orders.manage', 'pos.use'))):
     return list_in_house_bookings(db, stay_date=stay_date, room_number=room_number, q=q, active_only=active_only, limit=limit)
 
 
@@ -105,10 +106,10 @@ def room_charge_status(posting_id: int, payload: RoomChargePostingStatusUpdate, 
                 requested_reason=payload.dispute_note or payload.note or target,
             ) as grant:
                 result = update_room_charge_posting_status(db, posting_id, payload, user_id=getattr(current_user, 'id', None), approved_by_user_id=grant['approved_by_user_id'])
-            _publish_room_charge_status(posting_id, result, target, current_user)
+            _publish_room_charge_status(db, posting_id, result, target, current_user)
             return result
         result = update_room_charge_posting_status(db, posting_id, payload, user_id=getattr(current_user, 'id', None), approved_by_user_id=None)
-        _publish_room_charge_status(posting_id, result, target, current_user)
+        _publish_room_charge_status(db, posting_id, result, target, current_user)
         return result
     except ValueError as e:
         db.rollback()

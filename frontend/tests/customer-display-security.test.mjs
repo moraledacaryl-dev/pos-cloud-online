@@ -53,3 +53,15 @@ test('every customer display state has a protected exit back to POS', () => {
   assert.match(page, /window\.location\.assign\('\/pos'\)/);
   assert.match(page, /<ExitDisplayControl \/>/);
 });
+
+test('customer display stops polling while unpaired or in manager setup', () => {
+  assert.match(page, /if \(!routeReady \|\| managerSetup \|\| needsPairing\) return/);
+  assert.match(page, /\[401, 403\]\.includes\(Number\(err\?\.status\)\)/);
+  assert.match(page, /setInterval\(\(\) => load\(\)\.catch\(\(\) => \{\}\), 2000\)/);
+});
+
+test('exit confirmation uses the shared focus-trapped dialog behavior', () => {
+  assert.match(page, /useDialogFocus\(confirming/);
+  assert.match(page, /role="dialog"/);
+  assert.match(page, /aria-modal="true"/);
+});

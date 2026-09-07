@@ -8,6 +8,37 @@ from app.services.pos_service import save_setting_json, setting_json
 
 router = APIRouter()
 SENSITIVE_SYNC_FIELDS = {'api_token', 'integration_secret'}
+RECEIPT_PROFILE_FIELDS = {
+    'registration_status',
+    'tax_registration_type',
+    'registered_name',
+    'trade_name',
+    'business_address',
+    'tin',
+    'branch_code',
+    'machine_identification_number',
+    'serial_number',
+    'permit_to_use_number',
+    'permit_date',
+    'accreditation_number',
+    'accreditation_date',
+    'footer_message',
+}
+RECEIPT_PROFILE_REQUIRED = {
+    'tax_registration_type',
+    'registered_name',
+    'business_address',
+    'tin',
+    'branch_code',
+    'machine_identification_number',
+    'serial_number',
+    'permit_to_use_number',
+}
+
+
+def public_receipt_profile(value: dict | None) -> dict:
+    source = value if isinstance(value, dict) else {}
+    return {key: str(source.get(key) or '').strip()[:500] for key in RECEIPT_PROFILE_FIELDS}
 
 
 def public_accounting_sync(settings: dict | None) -> dict:
@@ -46,6 +77,7 @@ def get_settings(db: Session = Depends(get_db), user=Depends(require_permissions
     return {
         'accounting_sync': public_accounting_sync(setting_json(db, 'accounting_sync', default={})),
         'ui_preferences': setting_json(db, 'ui_preferences', default={}),
+        'receipt_profile': public_receipt_profile(setting_json(db, 'receipt_profile', default={})),
     }
 
 
@@ -69,11 +101,30 @@ def update_settings(payload: SystemSettingsUpdate, db: Session = Depends(get_db)
         save_setting_json(db, 'accounting_sync', next_sync, username=getattr(current_user, 'username', None))
     if 'ui_preferences' in data:
         save_setting_json(db, 'ui_preferences', data['ui_preferences'] or {}, username=getattr(current_user, 'username', None))
+    if 'receipt_profile' in data:
+        receipt_profile = public_receipt_profile(data['receipt_profile'])
+        status = receipt_profile.get('registration_status') or 'unregistered'
+        if status not in {'unregistered', 'registered'}:
+            raise HTTPException(status_code=400, detail='Receipt registration status must be registered or unregistered.')
+        receipt_profile['registration_status'] = status
+        if status == 'registered':
+            if receipt_profile.get('tax_registration_type') not in {'vat', 'non_vat'}:
+                raise HTTPException(status_code=400, detail='Choose VAT Registered or Non-VAT for official invoices.')
+            missing = sorted(field for field in RECEIPT_PROFILE_REQUIRED if not receipt_profile.get(field))
+            if missing:
+                raise HTTPException(status_code=400, detail=f'Complete the registered receipt profile: {", ".join(missing)}.')
+        save_setting_json(db, 'receipt_profile', receipt_profile, username=getattr(current_user, 'username', None))
     return {
         'ok': True,
         'accounting_sync': public_accounting_sync(setting_json(db, 'accounting_sync', default={})),
         'ui_preferences': setting_json(db, 'ui_preferences', default={}),
+        'receipt_profile': public_receipt_profile(setting_json(db, 'receipt_profile', default={})),
     }
+
+
+@router.get('/receipt-profile')
+def get_receipt_profile(db: Session = Depends(get_db), user=Depends(require_any_permissions('pos.use', 'orders.manage', 'reports.view', 'settings.manage'))):
+    return public_receipt_profile(setting_json(db, 'receipt_profile', default={}))
 
 
 @router.get('/table-layout')

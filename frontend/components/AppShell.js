@@ -7,6 +7,7 @@ import Header from './Header';
 import RouteGuard from './RouteGuard';
 import Sidebar from './Sidebar';
 import SyncHealthBanner from './SyncHealthBanner';
+import { getRouteTitle } from '../lib/routes';
 
 const STANDALONE_ROUTES = new Set(['/login', '/customer-display']);
 const TERMINAL_ROUTES = new Set(['/pos']);
@@ -31,6 +32,15 @@ export default function AppShell({ children }) {
 
   useEffect(() => {
     setDrawerOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    const title = pathname === '/login'
+      ? 'Sign In'
+      : pathname === '/customer-display'
+        ? 'Customer Display'
+        : getRouteTitle(pathname);
+    document.title = `${title} · Hidden Oasis POS`;
   }, [pathname]);
 
   useEffect(() => {

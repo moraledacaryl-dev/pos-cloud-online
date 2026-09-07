@@ -76,19 +76,19 @@ jobs:
         run: |
           alembic upgrade 0008_manager_approval_grants
           alembic upgrade head
-          alembic current | grep 0009_customer_display_devices
-          alembic heads | grep 0009_customer_display_devices
+          alembic current | grep 0010_numeric_concurrency
+          alembic heads | grep 0010_numeric_concurrency
           alembic check
-          alembic downgrade 0008_manager_approval_grants
-          alembic current | grep 0008_manager_approval_grants
-          alembic upgrade head
+          alembic downgrade 0009_customer_display_devices
           alembic current | grep 0009_customer_display_devices
+          alembic upgrade head
+          alembic current | grep 0010_numeric_concurrency
       - name: Run full backend suite against PostgreSQL
         run: python -m pytest tests -q
-      - name: Run PostgreSQL approval concurrency abuse regression
+      - name: Run PostgreSQL approval and financial concurrency regressions
         env:
           RUN_POSTGRES_INTEGRATION: '1'
-        run: python -m pytest tests/test_postgres_manager_approval_concurrency.py -q
+        run: python -m pytest tests/test_postgres_manager_approval_concurrency.py tests/test_postgres_financial_concurrency.py -q
       - name: Run real Redis rate-limit and ticket regressions
         env:
           RUN_REDIS_INTEGRATION: '1'

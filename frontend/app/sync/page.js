@@ -11,7 +11,37 @@ function formatDateTime(value) {
   try { return new Date(value).toLocaleString(); } catch { return String(value); }
 }
 
-const STATUS_VIEWS = ['all', 'pending', 'failed', 'blocked', 'suppressed', 'resolved', 'archived', 'synced'];
+const STATUS_VIEWS = [
+  'all',
+  'pending',
+  'failed',
+  'blocked',
+  'inventory_pending',
+  'inventory_retry',
+  'operations_pending',
+  'operations_retry',
+  'operations_blocked',
+  'suppressed',
+  'resolved',
+  'archived',
+  'synced',
+];
+const RETRYABLE_STATUSES = new Set(['pending', 'failed', 'inventory_pending', 'inventory_retry', 'operations_pending', 'operations_retry']);
+const BLOCKED_STATUSES = new Set(['blocked', 'operations_blocked']);
+const RESOLVABLE_STATUSES = new Set(['failed', 'blocked', 'inventory_retry', 'operations_retry', 'operations_blocked']);
+
+function normalizedStatus(row) { return String(row?.status || '').toLowerCase(); }
+function isRetryable(row) { return RETRYABLE_STATUSES.has(normalizedStatus(row)); }
+function isBlocked(row) { return BLOCKED_STATUSES.has(normalizedStatus(row)); }
+function isResolvable(row) { return RESOLVABLE_STATUSES.has(normalizedStatus(row)); }
+function statusTone(row) {
+  const status = normalizedStatus(row);
+  if (['failed', 'inventory_retry', 'operations_retry'].includes(status)) return 'danger';
+  if (BLOCKED_STATUSES.has(status)) return 'warn';
+  if (status === 'suppressed') return 'muted';
+  if (['resolved', 'synced'].includes(status)) return 'success';
+  return 'info';
+}
 
 export default function SyncPage() {
   const [rows, setRows] = useState([]);
@@ -24,8 +54,10 @@ export default function SyncPage() {
   const [pendingAction, setPendingAction] = useState(null);
 
   async function loadRows({ silent = false } = {}) {
-    if (!silent) setLoading(true);
-    setError('');
+    if (!silent) {
+      setLoading(true);
+      setError('');
+    }
     try {
       const [data, syncHealth] = await Promise.all([
         fetchOutbox({ limit: 300 }),
@@ -53,7 +85,7 @@ export default function SyncPage() {
     });
   }, [rows, filters]);
 
-  const retryRows = useMemo(() => filteredRows.filter((row) => ['failed', 'pending', 'inventory_retry'].includes(String(row.status || '').toLowerCase())), [filteredRows]);
+  const retryRows = useMemo(() => filteredRows.filter(isRetryable), [filteredRows]);
 
   const queueTitle = filters.status === 'all' ? 'All Queue' : filters.status === 'synced' ? 'Synced' : `${filters.status.charAt(0).toUpperCase() + filters.status.slice(1)}`;
 
@@ -63,6 +95,7 @@ export default function SyncPage() {
     try {
       const res = await runOutboxSync({ limit });
       setNotice(`Processed ${res.processed}. Synced ${res.synced}, failed ${res.failed}, blocked ${res.blocked}.`);
+      if (!res.ok) setError('One or more downstream queues still need attention. Review the rows below before retrying.');
       await loadRows({ silent: true });
     } catch (e) {
       setError(e.message || 'Failed to run sync.');
@@ -75,7 +108,7 @@ export default function SyncPage() {
     try {
       const res = await retryOutboxEvent(eventId);
       if (res.ok) {
-        setNotice(`Event ${eventId} ${res.synced ? 'synced' : res.failed ? 'failed again' : 'blocked'}.`);
+        setNotice(`Event ${eventId} ${res.synced ? 'synced' : (res.failed || res.retrying || res.retried) ? 'failed again' : res.blocked ? 'blocked' : 'processed'}.`);
       } else {
         setError(res.error || 'Retry failed.');
       }
@@ -176,6 +209,10 @@ export default function SyncPage() {
   const workerBadge = health?.sync_worker?.is_stale ? 'warn' : 'success';
   const accountingBadge = health?.accounting_api?.ok ? 'success' : 'danger';
   const dbBadge = health?.database?.ok ? 'success' : 'danger';
+  const migrationLabel = health?.database?.migration?.current
+    || health?.database?.migration?.current_revisions?.join(', ')
+    || health?.database?.migration?.detail
+    || 'Unknown';
 
   return (
     <div className="stack">
@@ -183,7 +220,7 @@ export default function SyncPage() {
         <div className="toolbar">
           <div>
             <h1>Sync Queue</h1>
-            <p className="muted">Manager view for outgoing accounting sync health, retry activity, and recovery actions. Use this page only for integration diagnostics and queue repair.</p>
+            <p className="muted">Manager view for Accounting, Inventory, and Operations delivery health, retry activity, and recovery actions.</p>
           </div>
           <div className="row wrap">
             <button className="secondary" onClick={() => handleRun(25)}>Run 25</button>
@@ -216,7 +253,7 @@ export default function SyncPage() {
         <div className="card-grid" style={{ marginTop: 12 }}>
           <div className="card">
             <div className="row wrap"><span className={`badge ${dbBadge}`}>Database</span><span className="small muted">{health?.database?.scheme || '-'}</span></div>
-            <div className="small muted" style={{ marginTop: 8 }}>Migration: {health?.database?.migration?.current || health?.database?.migration?.detail || 'Unknown'}</div>
+            <div className="small muted" style={{ marginTop: 8 }}>Migration: {migrationLabel}</div>
           </div>
           <div className="card">
             <div className="row wrap"><span className={`badge ${accountingBadge}`}>Accounting API</span><span className="small muted">{health?.accounting_api?.configured ? 'Configured' : 'Not configured'}</span></div>
@@ -274,23 +311,23 @@ export default function SyncPage() {
                     <td>{row.id}</td>
                     <td>{humanizeCode(row.event_type, 'Sync Event')}</td>
                     <td>{humanizeCode(row.aggregate_type, 'Record')} #{row.aggregate_id}</td>
-                    <td><span className={`badge ${row.status === 'failed' ? 'danger' : row.status === 'blocked' ? 'warn' : row.status === 'suppressed' ? 'muted' : row.status === 'resolved' ? 'success' : 'info'}`}>{humanizeCode(row.status)}</span></td>
+                    <td><span className={`badge ${statusTone(row)}`}>{humanizeCode(row.status)}</span></td>
                     <td>{row.retry_count}</td>
                     <td>{formatDateTime(row.last_attempt_at || row.next_retry_at)}</td>
                     <td><div className="small muted">{row.last_error ? explanation.summary : '-'}</div></td>
                     <td><button type="button" className="small secondary" onClick={() => toggleExpanded(row.id)}>{expandedRows.has(row.id) ? 'Hide' : 'Show'}</button></td>
                     <td>
                       <div className="row wrap" style={{ gap: 4 }}>
-                        {['failed', 'pending', 'inventory_retry'].includes(String(row.status || '').toLowerCase()) && (
+                        {isRetryable(row) && (
                           <button type="button" className="small secondary" onClick={() => handleRetry(row.id)}>Retry now</button>
                         )}
-                        {String(row.status || '').toLowerCase() === 'blocked' && (
+                        {isBlocked(row) && (
                           <button type="button" className="small warn" onClick={() => setPendingAction({ kind: 'unblock', eventId: row.id })}>Unblock</button>
                         )}
-                        {['failed', 'blocked'].includes(String(row.status || '').toLowerCase()) && (
+                        {isResolvable(row) && (
                           <button type="button" className="small danger" onClick={() => setPendingAction({ kind: 'archive', eventId: row.id })}>Archive</button>
                         )}
-                        {['failed', 'blocked'].includes(String(row.status || '').toLowerCase()) && (
+                        {isResolvable(row) && (
                           <button type="button" className="small success" onClick={() => setPendingAction({ kind: 'resolve', eventId: row.id })}>Resolve</button>
                         )}
                       </div>
@@ -319,16 +356,16 @@ export default function SyncPage() {
             {filteredRows.map((row) => {
               const explanation = explainSyncError(row);
               return <article className="sync-mobile-card" key={`mobile-${row.id}`}>
-                <div className="sync-mobile-identity"><strong>Event #{row.id}</strong><span className={`badge ${row.status === 'failed' ? 'danger' : row.status === 'blocked' ? 'warn' : row.status === 'suppressed' ? 'muted' : row.status === 'resolved' ? 'success' : 'info'}`}>{humanizeCode(row.status)}</span></div>
+                <div className="sync-mobile-identity"><strong>Event #{row.id}</strong><span className={`badge ${statusTone(row)}`}>{humanizeCode(row.status)}</span></div>
                 <div><strong>{humanizeCode(row.event_type, 'Sync Event')}</strong><div className="small muted">{humanizeCode(row.aggregate_type, 'Record')} #{row.aggregate_id}</div></div>
                 <div className="small"><strong>Last attempt:</strong> {formatDateTime(row.last_attempt_at || row.next_retry_at)}</div>
                 <div className="small"><strong>Summary:</strong> {row.last_error ? explanation.summary : 'No error recorded.'}</div>
                 <details className="technical-details"><summary>Technical details</summary><div className="stack-tight"><div><strong>Recommended action:</strong> {explanation.action}</div><div><strong>Raw error:</strong> {row.last_error || 'None'}</div><div><strong>Idempotency key:</strong> {row.idempotency_key || 'None'}</div><pre>{JSON.stringify(row.payload || {}, null, 2)}</pre></div></details>
                 <div className="row wrap">
-                  {['failed', 'pending', 'inventory_retry'].includes(String(row.status || '').toLowerCase()) && <button type="button" className="secondary" onClick={() => handleRetry(row.id)}>Retry now</button>}
-                  {String(row.status || '').toLowerCase() === 'blocked' && <button type="button" className="warn" onClick={() => setPendingAction({ kind: 'unblock', eventId: row.id })}>Unblock</button>}
-                  {['failed', 'blocked'].includes(String(row.status || '').toLowerCase()) && <button type="button" className="danger" onClick={() => setPendingAction({ kind: 'archive', eventId: row.id })}>Archive</button>}
-                  {['failed', 'blocked'].includes(String(row.status || '').toLowerCase()) && <button type="button" className="success" onClick={() => setPendingAction({ kind: 'resolve', eventId: row.id })}>Resolve</button>}
+                  {isRetryable(row) && <button type="button" className="secondary" onClick={() => handleRetry(row.id)}>Retry now</button>}
+                  {isBlocked(row) && <button type="button" className="warn" onClick={() => setPendingAction({ kind: 'unblock', eventId: row.id })}>Unblock</button>}
+                  {isResolvable(row) && <button type="button" className="danger" onClick={() => setPendingAction({ kind: 'archive', eventId: row.id })}>Archive</button>}
+                  {isResolvable(row) && <button type="button" className="success" onClick={() => setPendingAction({ kind: 'resolve', eventId: row.id })}>Resolve</button>}
                 </div>
               </article>;
             })}
@@ -339,7 +376,7 @@ export default function SyncPage() {
       <ActionModal
         open={!!pendingAction}
         title={pendingAction?.kind === 'unblock' ? `Unblock event ${pendingAction?.eventId}?` : pendingAction?.kind === 'archive' ? `Archive event ${pendingAction?.eventId}?` : `Resolve event ${pendingAction?.eventId}?`}
-        description={pendingAction?.kind === 'unblock' ? 'The event will return to pending and become eligible for retry.' : 'Record a short note so the recovery decision remains clear later.'}
+        description={pendingAction?.kind === 'unblock' ? 'The event will return to its downstream pending queue and become eligible for retry.' : 'Record a short note so the recovery decision remains clear later.'}
         fieldLabel={pendingAction?.kind === 'resolve' ? 'Resolution note' : 'Reason'}
         defaultValue={pendingAction?.kind === 'archive' ? 'Manual archive' : pendingAction?.kind === 'resolve' ? 'Manually resolved' : ''}
         required={pendingAction?.kind !== 'unblock'}

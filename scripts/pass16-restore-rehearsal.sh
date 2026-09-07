@@ -4,7 +4,7 @@ set -euo pipefail
 BACKUP_FILE="${BACKUP_FILE:-}"
 TARGET_DATABASE_URL="${TARGET_DATABASE_URL:-}"
 NON_PRODUCTION_CONFIRM="${NON_PRODUCTION_CONFIRM:-}"
-EXPECTED_HEAD="${EXPECTED_HEAD:-0009_customer_display_devices}"
+EXPECTED_HEAD="${EXPECTED_HEAD:-0010_numeric_concurrency}"
 
 fail() { echo "PASS 16 RESTORE REHEARSAL FAIL: $*" >&2; exit 1; }
 pass() { echo "PASS: $*"; }

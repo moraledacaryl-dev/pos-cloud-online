@@ -57,6 +57,12 @@ def get_sync_worker_status(db: Session) -> dict:
 
 def get_outbox_metrics(db: Session) -> dict:
     grouped = dict(db.query(SyncOutboxEvent.status, func.count(SyncOutboxEvent.id)).group_by(SyncOutboxEvent.status).all())
+    inventory_grouped = dict(
+        db.query(SyncOutboxEvent.status, func.count(SyncOutboxEvent.id))
+        .filter(SyncOutboxEvent.event_type.like('inventory.%'))
+        .group_by(SyncOutboxEvent.status)
+        .all()
+    )
     suppressed_counts: dict[str, int] = {}
     suppressed_ids: list[int] = []
     if not settings.inventory_integration_enabled:
@@ -84,13 +90,42 @@ def get_outbox_metrics(db: Session) -> dict:
             suppressed_counts[status] = suppressed_counts.get(status, 0) + 1
             suppressed_ids.append(int(row.id))
     suppressed = sum(suppressed_counts.values())
-    pending = max(0, int(grouped.get('pending', 0)) - suppressed_counts.get('pending', 0))
+    inventory_pending = max(
+        0,
+        int(inventory_grouped.get('inventory_pending', 0))
+        - suppressed_counts.get('inventory_pending', 0),
+    )
+    inventory_retry = max(
+        0,
+        int(inventory_grouped.get('inventory_retry', 0))
+        - suppressed_counts.get('inventory_retry', 0),
+    )
+    inventory_blocked = max(
+        0,
+        int(inventory_grouped.get('blocked', 0))
+        - suppressed_counts.get('blocked', 0),
+    )
+    pending = max(
+        0,
+        int(grouped.get('pending', 0))
+        + inventory_pending
+        + int(grouped.get('operations_pending', 0))
+        - suppressed_counts.get('pending', 0),
+    )
     failed = max(
         0,
-        int(grouped.get('failed', 0)) + int(grouped.get('error', 0))
+        int(grouped.get('failed', 0))
+        + int(grouped.get('error', 0))
+        + inventory_retry
+        + int(grouped.get('operations_retry', 0))
         - suppressed_counts.get('failed', 0) - suppressed_counts.get('error', 0),
     )
-    blocked = max(0, int(grouped.get('blocked', 0)) - suppressed_counts.get('blocked', 0))
+    blocked = max(
+        0,
+        int(grouped.get('blocked', 0))
+        + int(grouped.get('operations_blocked', 0))
+        - suppressed_counts.get('blocked', 0),
+    )
     synced = int(grouped.get('synced', 0))
     retrying_query = db.query(SyncOutboxEvent).filter(SyncOutboxEvent.retry_count > 0, SyncOutboxEvent.status != 'synced')
     if suppressed_ids:
@@ -100,8 +135,10 @@ def get_outbox_metrics(db: Session) -> dict:
     due_query = db.query(SyncOutboxEvent).filter(
         or_(
             SyncOutboxEvent.status == 'pending',
+            SyncOutboxEvent.status == 'inventory_pending',
+            SyncOutboxEvent.status == 'operations_pending',
             and_(
-                SyncOutboxEvent.status.in_(['failed', 'error']),
+                SyncOutboxEvent.status.in_(['failed', 'error', 'inventory_retry', 'operations_retry']),
                 or_(SyncOutboxEvent.next_retry_at.is_(None), SyncOutboxEvent.next_retry_at <= current_time),
             ),
         )
@@ -110,7 +147,17 @@ def get_outbox_metrics(db: Session) -> dict:
         due_query = due_query.filter(SyncOutboxEvent.id.notin_(suppressed_ids))
     due_now = due_query.count()
 
-    unresolved_statuses = ['pending', 'failed', 'error', 'blocked']
+    unresolved_statuses = [
+        'pending',
+        'failed',
+        'error',
+        'blocked',
+        'inventory_pending',
+        'inventory_retry',
+        'operations_pending',
+        'operations_retry',
+        'operations_blocked',
+    ]
     oldest_query = db.query(SyncOutboxEvent).filter(SyncOutboxEvent.status.in_(unresolved_statuses))
     max_retry_query = db.query(func.max(SyncOutboxEvent.retry_count)).filter(SyncOutboxEvent.status.in_(unresolved_statuses))
     if suppressed_ids:
@@ -130,6 +177,12 @@ def get_outbox_metrics(db: Session) -> dict:
         'retrying': int(retrying),
         'due_now': int(due_now),
         'attention_required': failed + blocked,
+        'inventory_pending': inventory_pending,
+        'inventory_retry': inventory_retry,
+        'inventory_blocked': inventory_blocked,
+        'operations_pending': int(grouped.get('operations_pending', 0)),
+        'operations_retry': int(grouped.get('operations_retry', 0)),
+        'operations_blocked': int(grouped.get('operations_blocked', 0)),
         'oldest_unresolved_event_id': getattr(oldest, 'id', None) if oldest else None,
         'oldest_unresolved_event_uuid': getattr(oldest, 'event_uuid', None) if oldest else None,
         'oldest_unresolved_status': getattr(oldest, 'status', None) if oldest else None,

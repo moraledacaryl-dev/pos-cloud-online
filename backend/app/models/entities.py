@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint
+from decimal import Decimal
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, LargeBinary, Numeric, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -129,9 +131,9 @@ class CatalogItem(Base, TimestampMixin):
     category_name: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
     module_slug: Mapped[str] = mapped_column(String(80), default='restaurant', index=True)
     prep_station: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
-    price: Mapped[float] = mapped_column(Float, default=0)
-    tax_rate: Mapped[float] = mapped_column(Float, default=0)
-    service_charge_rate: Mapped[float] = mapped_column(Float, default=0)
+    price: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    tax_rate: Mapped[Decimal] = mapped_column(Numeric(9, 6), default=0)
+    service_charge_rate: Mapped[Decimal] = mapped_column(Numeric(9, 6), default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_available: Mapped[bool] = mapped_column(Boolean, default=True)
     availability_override: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
@@ -171,10 +173,10 @@ class RegisterSession(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(40), default='open', index=True)
     opened_by_user_id: Mapped[int | None] = mapped_column(ForeignKey('users.id'), nullable=True, index=True)
     closed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey('users.id'), nullable=True, index=True)
-    opening_float: Mapped[float] = mapped_column(Float, default=0)
-    closing_actual_cash: Mapped[float | None] = mapped_column(Float, nullable=True)
-    closing_expected_cash: Mapped[float] = mapped_column(Float, default=0)
-    variance_amount: Mapped[float] = mapped_column(Float, default=0)
+    opening_float: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    closing_actual_cash: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    closing_expected_cash: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    variance_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
     opening_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     closing_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     close_mode: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
@@ -192,6 +194,15 @@ class RegisterSession(Base, TimestampMixin):
     closed_by: Mapped['User'] = relationship(foreign_keys=[closed_by_user_id])
     orders: Mapped[list['PosOrder']] = relationship(back_populates='session')
     cash_movements: Mapped[list['CashMovement']] = relationship(back_populates='session')
+    __table_args__ = (
+        Index(
+            'uq_register_sessions_one_open',
+            'register_id',
+            unique=True,
+            postgresql_where=text("status = 'open'"),
+            sqlite_where=text("status = 'open'"),
+        ),
+    )
 
 
 class PosOrder(Base, TimestampMixin):
@@ -211,13 +222,13 @@ class PosOrder(Base, TimestampMixin):
     seat_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String(40), default='draft', index=True)
     kitchen_status: Mapped[str] = mapped_column(String(40), default='queued', index=True)
-    subtotal_amount: Mapped[float] = mapped_column(Float, default=0)
-    discount_amount: Mapped[float] = mapped_column(Float, default=0)
-    tax_amount: Mapped[float] = mapped_column(Float, default=0)
-    service_charge_amount: Mapped[float] = mapped_column(Float, default=0)
-    total_amount: Mapped[float] = mapped_column(Float, default=0)
-    paid_amount: Mapped[float] = mapped_column(Float, default=0)
-    balance_due: Mapped[float] = mapped_column(Float, default=0)
+    subtotal_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    discount_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    tax_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    service_charge_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    total_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    paid_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    balance_due: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
     primary_tender: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     void_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -240,10 +251,10 @@ class PosOrderLine(Base, TimestampMixin):
     external_sku_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     item_name_snapshot: Mapped[str] = mapped_column(String(255), index=True)
     prep_station: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
-    quantity: Mapped[float] = mapped_column(Float, default=1)
-    unit_price: Mapped[float] = mapped_column(Float, default=0)
-    discount_amount: Mapped[float] = mapped_column(Float, default=0)
-    line_total: Mapped[float] = mapped_column(Float, default=0)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(12, 4), default=1)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    discount_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    line_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
     kitchen_status: Mapped[str] = mapped_column(String(40), default='queued', index=True)
     acknowledgement_state: Mapped[str] = mapped_column(String(40), default='unacknowledged', index=True)
     acknowledged_at_text: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
@@ -252,7 +263,7 @@ class PosOrderLine(Base, TimestampMixin):
     ready_at_text: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
     served_at_text: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
     item_readiness: Mapped[str] = mapped_column(String(40), default='not_ready', index=True)
-    ready_quantity: Mapped[float] = mapped_column(Float, default=0)
+    ready_quantity: Mapped[Decimal] = mapped_column(Numeric(12, 4), default=0)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     order: Mapped['PosOrder'] = relationship(back_populates='lines')
     catalog_item: Mapped['CatalogItem'] = relationship(back_populates='order_lines')
@@ -264,9 +275,9 @@ class PosOrderPayment(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     order_id: Mapped[int] = mapped_column(ForeignKey('pos_orders.id'), index=True)
     tender_type: Mapped[str] = mapped_column(String(80), index=True)
-    amount_applied: Mapped[float] = mapped_column(Float, default=0)
-    amount_received: Mapped[float] = mapped_column(Float, default=0)
-    change_given: Mapped[float] = mapped_column(Float, default=0)
+    amount_applied: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    amount_received: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    change_given: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
     reference_no: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_cash: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -306,7 +317,7 @@ class RoomChargePosting(Base, TimestampMixin):
     beds24_booking_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
     order_source: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
     service_type: Mapped[str] = mapped_column(String(80), default='room_service', index=True)
-    charge_amount: Mapped[float] = mapped_column(Float, default=0)
+    charge_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
     posting_status: Mapped[str] = mapped_column(String(80), default='pending_frontdesk_post', index=True)
     posted_to_beds24_at_text: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
     posted_by_user_id: Mapped[int | None] = mapped_column(ForeignKey('users.id'), nullable=True, index=True)
@@ -342,7 +353,7 @@ class CashMovement(Base, TimestampMixin):
     direction: Mapped[str] = mapped_column(String(10), index=True)
     movement_type: Mapped[str] = mapped_column(String(50), index=True)
     category: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
-    amount: Mapped[float] = mapped_column(Float, default=0)
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     reference_no: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     approved_by_user_id: Mapped[int | None] = mapped_column(ForeignKey('users.id'), nullable=True, index=True)
@@ -393,8 +404,8 @@ class Refund(Base, TimestampMixin):
     reason_code: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
     reason_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
-    subtotal_amount: Mapped[float] = mapped_column(Float, default=0)
-    refunded_amount: Mapped[float] = mapped_column(Float, default=0)
+    subtotal_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    refunded_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
     synced_to_accounting: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     last_sync_at: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
     order: Mapped['PosOrder'] = relationship(back_populates='refunds')
@@ -412,10 +423,10 @@ class RefundLine(Base, TimestampMixin):
     refund_id: Mapped[int] = mapped_column(ForeignKey('refunds.id'), index=True)
     order_line_id: Mapped[int | None] = mapped_column(ForeignKey('pos_order_lines.id'), nullable=True, index=True)
     item_name_snapshot: Mapped[str] = mapped_column(String(255), index=True)
-    quantity: Mapped[float] = mapped_column(Float, default=0)
-    unit_price: Mapped[float] = mapped_column(Float, default=0)
-    discount_amount: Mapped[float] = mapped_column(Float, default=0)
-    refunded_line_total: Mapped[float] = mapped_column(Float, default=0)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(12, 4), default=0)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    discount_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    refunded_line_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     refund: Mapped['Refund'] = relationship(back_populates='lines')
     order_line: Mapped['PosOrderLine'] = relationship()
@@ -426,7 +437,7 @@ class RefundPayment(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     refund_id: Mapped[int] = mapped_column(ForeignKey('refunds.id'), index=True)
     tender_type: Mapped[str] = mapped_column(String(80), index=True)
-    amount: Mapped[float] = mapped_column(Float, default=0)
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
     reference_no: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_cash: Mapped[bool] = mapped_column(Boolean, default=False)

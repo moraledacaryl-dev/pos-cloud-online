@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, inspect, or_, text
 from sqlalchemy.orm import Session, selectinload
 
+from app.core.json_utils import json_dumps
 from app.models.entities import ManagerApproval, User
 from app.services.auth_service import authenticate_user
 from app.services.permission_service import get_user_permission_keys
@@ -47,7 +48,7 @@ def _parse_time(value: str | None) -> datetime | None:
 
 
 def canonicalize_protected_payload(payload: dict | list | None) -> str:
-    return json.dumps(payload or {}, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
+    return json_dumps(payload or {}, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
 
 
 def protected_payload_digest(payload: dict | list | None) -> str:
@@ -202,7 +203,7 @@ def request_approval(
         approved_by_user_id=None,
         requested_reason=requested_reason,
         decision_note=None,
-        request_details_json=json.dumps(details, ensure_ascii=False, sort_keys=True),
+        request_details_json=json_dumps(details, ensure_ascii=False, sort_keys=True),
         requested_at_text=_now_text(),
         decided_at_text=None,
     )
@@ -346,7 +347,7 @@ def consume_approval_grant(
     details = _request_details(row)
     meta = details.setdefault('_approval_grant', {})
     meta['consumed_at'] = consumed_at
-    row.request_details_json = json.dumps(details, ensure_ascii=False, sort_keys=True)
+    row.request_details_json = json_dumps(details, ensure_ascii=False, sort_keys=True)
     row.status = 'consumed'
     db.add(row)
     _write_grant_columns(

@@ -1,6 +1,6 @@
 # Pass 22 — POS remediation status
 
-Date: 2026-09-02 (Asia/Manila)
+Updated: 2026-09-07 (Asia/Manila)
 
 This document reconciles the comprehensive POS audit with the current source tree. It distinguishes implemented code from evidence that can only be produced in staging, production, or on physical POS hardware.
 
@@ -9,6 +9,17 @@ This document reconciles the comprehensive POS audit with the current source tre
 The release-blocking application defects found in the latest browser and source audit have been corrected. The application is **code/deployment ready**, subject to the external acceptance gates in `PASS_16_OPERATIONAL_ACCEPTANCE.md`. It must not be described as 100% operationally accepted until those gates have dated evidence.
 
 ## Remediation delivered
+
+### Current release hardening
+
+- Financial storage and transaction calculations now use fixed-precision Decimal/Numeric values for prices, quantities, payments, tax, service charge, refunds, room charges, cash movements, and drawer reconciliation.
+- PostgreSQL and SQLite enforce one open session per register, while order and refund numbers are derived from database identities instead of concurrent row counts.
+- Order, payment, refund, void, table-transfer/merge, session, and room-charge transition paths lock the records they mutate; PostgreSQL concurrency tests cover simultaneous shift opening and double payment.
+- Operations events now use a durable, idempotent outbox with retry/backoff instead of best-effort background delivery. Manual Sync Queue recovery correctly routes Accounting, Inventory, and Operations events to their own workers.
+- Production readiness now counts Inventory and Operations pending/retry/blocked states and cannot hide their failures when an Accounting outage is explicitly accepted.
+- Receipt output has a fail-closed provisional mode and a validated registered Sales Invoice profile for verified tax registration, terminal, permit, and accreditation details.
+- Customer displays stop unauthorized polling while unpaired, tolerate transient server failures without losing pairing state, and use an accessible focus-managed exit confirmation.
+- API list/batch inputs are bounded and mutation request bodies have application-level size limits.
 
 ### Checkout and transaction correctness
 
@@ -69,7 +80,7 @@ The release-blocking application defects found in the latest browser and source 
 | CI-001 production-equivalent gates | Implemented | Workflow exists; green run on exact release SHA is required. |
 | A11Y/KDS/ROUTE/I18N/API/INT/SYNC/UX/PERF | Implemented in code | Local contracts and browser smoke pass; staging Axe/viewport/integration evidence remains. |
 | ARCH-001 frontend decomposition | Improved, not complete | Domain calculations/configuration were extracted and tested; `app/pos/page.js` remains large and should be split by workspace panel in a non-release refactor. |
-| ARCH-002 backend decomposition | Not release blocking; still open | `pos_service.py` remains a large transactional service. Split by sessions/orders/payments/refunds/treasury/KDS behind the existing 241-test characterization suite. |
+| ARCH-002 backend decomposition | Not release blocking; still open | `pos_service.py` remains a large transactional service. Split by sessions/orders/payments/refunds/treasury/KDS behind the existing 262-test characterization suite. |
 | DEP-002 hashed Python lock | Implemented | Runtime and development locks contain exact versions and package hashes and were installed successfully in a clean Python 3.12 environment. |
 | DEP-003 JWT dependency chain | Implemented | Maintained PyJWT path and algorithm allowlisting; obsolete passlib/bcrypt dependency removed. |
 | TIME-001 aware UTC | Implemented by existing migration/contracts | Revalidate against PostgreSQL during release certification. |
@@ -79,12 +90,12 @@ The release-blocking application defects found in the latest browser and source 
 
 ## Verification completed on this pass
 
-- Backend: Ruff clean; `243 passed, 2 skipped`. The two skips are production-only PostgreSQL/Redis checks represented in CI.
-- Frontend: source audit clean; ESLint clean; `55 passed`; Next production build compiled all 22 routes.
+- Backend: Ruff clean; `262 passed, 3 skipped`. The skips are environment-gated PostgreSQL/Redis checks represented in production-equivalent CI.
+- Frontend: source audit clean; ESLint clean; `69 passed`; Next production build compiled all 22 routes.
 - Production smoke: 20 routed page checks plus CSP, static asset, not-found, protected shell, customer-display, and API-path checks passed.
 - Dependency audit: npm production audit and Python locked-dependency audit reported no known vulnerabilities during this remediation pass.
 - Configuration: all GitHub workflow YAML parsed; the release shell script passed syntax validation; `git diff --check` passed.
-- Real browser: styled login, authenticated shell, POS loading/session state, tools menu, workflow dialogs, customer-display pairing, sale/payment/receipt, sync diagnostics, audit, and cash-movement views were exercised. The completed test sale was `POS-20260901-0010` for `₱152.10`.
+- Real browser: `11 passed` against the production build, covering cookie auth/refresh/logout, role-denied and not-found routes, desktop/mobile route-wide Axe scans, keyboard navigation, KDS teardown, one-use/channel-bound/revocable customer display pairing, and fail-closed invoice-registration validation.
 
 ## Required before calling the product 100% complete
 

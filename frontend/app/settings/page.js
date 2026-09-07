@@ -18,8 +18,8 @@ const PATH_FIELDS = [
 ];
 
 export default function SettingsPage() {
-  const [settings, setSettings] = useState({ accounting_sync: {}, ui_preferences: {} });
-  const [savedSettings, setSavedSettings] = useState({ accounting_sync: {}, ui_preferences: {} });
+  const [settings, setSettings] = useState({ accounting_sync: {}, ui_preferences: {}, receipt_profile: {} });
+  const [savedSettings, setSavedSettings] = useState({ accounting_sync: {}, ui_preferences: {}, receipt_profile: {} });
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [healthStatus, setHealthStatus] = useState('');
@@ -31,7 +31,7 @@ export default function SettingsPage() {
   async function loadSettings() {
     try {
       const data = await getSystemSettings();
-      const next = data || { accounting_sync: {}, ui_preferences: {} };
+      const next = data || { accounting_sync: {}, ui_preferences: {}, receipt_profile: {} };
       setSettings(next);
       setSavedSettings(next);
     } catch (e) {
@@ -45,6 +45,10 @@ export default function SettingsPage() {
     setSettings((prev) => ({ ...prev, accounting_sync: { ...prev.accounting_sync, [key]: value } }));
   }
 
+  function setReceiptField(key, value) {
+    setSettings((prev) => ({ ...prev, receipt_profile: { ...prev.receipt_profile, [key]: value } }));
+  }
+
   async function handleSave(event) {
     event.preventDefault();
     setError(''); setNotice(''); setBusy('save');
@@ -56,6 +60,21 @@ export default function SettingsPage() {
       for (const [key, label] of PATH_FIELDS) {
         const value = String(settings.accounting_sync?.[key] || '').trim();
         if (value && !value.startsWith('/')) throw new Error(`${label} must start with /.`);
+      }
+      const receipt = settings.receipt_profile || {};
+      if ((receipt.registration_status || 'unregistered') === 'registered') {
+        const required = [
+          ['tax_registration_type', 'Tax registration type'],
+          ['registered_name', 'Registered name'],
+          ['business_address', 'Business address'],
+          ['tin', 'TIN'],
+          ['branch_code', 'Branch code'],
+          ['machine_identification_number', 'Machine identification number'],
+          ['serial_number', 'POS serial number'],
+          ['permit_to_use_number', 'Permit to use number'],
+        ];
+        const missing = required.filter(([key]) => !String(receipt[key] || '').trim()).map(([, label]) => label);
+        if (missing.length) throw new Error(`Complete the registered invoice profile: ${missing.join(', ')}.`);
       }
       await updateSystemSettings({ ...settings, accounting_sync: { ...(settings.accounting_sync || {}), mode: 'current_erp' } });
       setNotice('Settings saved. Stored secrets remain masked.');
@@ -101,6 +120,7 @@ export default function SettingsPage() {
   }
 
   const sync = settings.accounting_sync || {};
+  const receipt = settings.receipt_profile || {};
   const dirty = useMemo(() => JSON.stringify(settings) !== JSON.stringify(savedSettings), [settings, savedSettings]);
 
   return (
@@ -160,6 +180,30 @@ export default function SettingsPage() {
               ))}
             </div>
           </details>
+
+          <div className="settings-subsection wide">
+            <div>
+              <h2>Sales Invoice & BIR Registration</h2>
+              <p className="muted">Configure the exact registered details issued for this POS terminal. Keep this set to Unregistered until the BIR permit, machine identification number, and serial details are verified.</p>
+            </div>
+            <div className="form-grid" style={{ marginTop: 12 }}>
+              <label className="field">Registration Status<select value={receipt.registration_status || 'unregistered'} onChange={(e) => setReceiptField('registration_status', e.target.value)}><option value="unregistered">Unregistered / training output</option><option value="registered">Registered for official invoices</option></select></label>
+              <label className="field">Tax Registration<select value={receipt.tax_registration_type || ''} onChange={(e) => setReceiptField('tax_registration_type', e.target.value)}><option value="">Select tax registration</option><option value="vat">VAT Registered</option><option value="non_vat">Non-VAT</option></select></label>
+              <label className="field">Registered Business Name<input value={receipt.registered_name || ''} onChange={(e) => setReceiptField('registered_name', e.target.value)} /></label>
+              <label className="field">Trade Name<input value={receipt.trade_name || ''} onChange={(e) => setReceiptField('trade_name', e.target.value)} /></label>
+              <label className="field wide">Registered Business Address<input value={receipt.business_address || ''} onChange={(e) => setReceiptField('business_address', e.target.value)} /></label>
+              <label className="field">TIN<input value={receipt.tin || ''} onChange={(e) => setReceiptField('tin', e.target.value)} inputMode="numeric" /></label>
+              <label className="field">Branch Code<input value={receipt.branch_code || ''} onChange={(e) => setReceiptField('branch_code', e.target.value)} /></label>
+              <label className="field">Machine Identification Number<input value={receipt.machine_identification_number || ''} onChange={(e) => setReceiptField('machine_identification_number', e.target.value)} /></label>
+              <label className="field">POS Serial Number<input value={receipt.serial_number || ''} onChange={(e) => setReceiptField('serial_number', e.target.value)} /></label>
+              <label className="field">Permit to Use Number<input value={receipt.permit_to_use_number || ''} onChange={(e) => setReceiptField('permit_to_use_number', e.target.value)} /></label>
+              <label className="field">Permit Date<input type="date" value={receipt.permit_date || ''} onChange={(e) => setReceiptField('permit_date', e.target.value)} /></label>
+              <label className="field">Accreditation Number<input value={receipt.accreditation_number || ''} onChange={(e) => setReceiptField('accreditation_number', e.target.value)} /></label>
+              <label className="field">Accreditation Date<input type="date" value={receipt.accreditation_date || ''} onChange={(e) => setReceiptField('accreditation_date', e.target.value)} /></label>
+              <label className="field wide">Invoice Footer<input value={receipt.footer_message || ''} onChange={(e) => setReceiptField('footer_message', e.target.value)} placeholder="Thank you for visiting Hidden Oasis." /></label>
+            </div>
+            <p className={`small ${receipt.registration_status === 'registered' ? 'success-text' : 'notice-text'}`} style={{ marginTop: 10 }}>{receipt.registration_status === 'registered' ? 'Official Sales Invoice mode will be used after all fields are saved.' : 'Printed documents are visibly marked as provisional and not valid for tax claims.'}</p>
+          </div>
 
           <div className="settings-save-bar"><span className={`small ${dirty ? 'notice-text' : 'muted'}`}>{dirty ? 'Unsaved changes' : 'All changes saved'}</span><div className="row wrap">{dirty && <button type="button" className="secondary" onClick={() => setSettings(savedSettings)}>Discard changes</button>}<button type="submit" className="primary" disabled={!!busy || !dirty}>{busy === 'save' ? 'Saving...' : 'Save Settings'}</button></div></div>
         </form>

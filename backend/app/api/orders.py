@@ -1,4 +1,4 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_permissions
@@ -20,7 +20,7 @@ from app.services.inventory_integration import (
     should_reverse_inventory_for_refund,
     should_reverse_inventory_for_void,
 )
-from app.services.operations_integration import publish_operations_event
+from app.services.operations_integration import enqueue_operations_event
 from app.services.order_state_policy import assert_order_action, policy_snapshot
 from app.services.payment_control_policy import validate_payment_control
 from app.services.pos_service import (
@@ -58,7 +58,7 @@ def state_policy(user=Depends(require_permissions('pos.use'))):
 
 
 @router.get('')
-def orders(status: str | None = None, session_id: int | None = None, q: str | None = None, business_date: str | None = None, limit: int = 200, db: Session = Depends(get_db), user=Depends(require_permissions('pos.use'))):
+def orders(status: str | None = None, session_id: int | None = None, q: str | None = None, business_date: str | None = None, limit: int = Query(default=200, ge=1, le=500), db: Session = Depends(get_db), user=Depends(require_permissions('pos.use'))):
     return list_orders(db, status=status, session_id=session_id, q=q, business_date=business_date, limit=limit)
 
 
@@ -134,7 +134,7 @@ def resume_order(order_id: int, db: Session = Depends(get_db), user=Depends(requ
 
 
 @router.post('/{order_id}/pay')
-def settle_order(order_id: int, payload: OrderPayPayload, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user=Depends(require_permissions('orders.manage'))):
+def settle_order(order_id: int, payload: OrderPayPayload, db: Session = Depends(get_db), current_user=Depends(require_permissions('orders.manage'))):
     try:
         _assert_order_action(db, order_id, 'pay')
         order_snapshot = get_order(db, order_id)
@@ -142,8 +142,8 @@ def settle_order(order_id: int, payload: OrderPayPayload, background_tasks: Back
         result = pay_order(db, order_id, payload, user_id=getattr(current_user, 'id', None))
         if settings.inventory_integration_enabled:
             enqueue_inventory_event(db, result, 'sale_completed')
-        background_tasks.add_task(
-            publish_operations_event,
+        enqueue_operations_event(
+            db,
             'order.finalized',
             f'order-finalized:{order_id}',
             title=f'POS order finalized #{order_id}',
@@ -180,7 +180,7 @@ def merge_table(order_id: int, payload: OrderTableMergePayload, db: Session = De
 
 
 @router.post('/{order_id}/void')
-def cancel_order(order_id: int, payload: OrderVoidPayload, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user=Depends(require_permissions('orders.void'))):
+def cancel_order(order_id: int, payload: OrderVoidPayload, db: Session = Depends(get_db), current_user=Depends(require_permissions('orders.void'))):
     try:
         _assert_order_action(db, order_id, 'void')
         pre_void = get_order(db, order_id)
@@ -196,8 +196,8 @@ def cancel_order(order_id: int, payload: OrderVoidPayload, background_tasks: Bac
             result = void_order(db, order_id, payload.reason, user_id=getattr(current_user, 'id', None), approved_by_user_id=grant['approved_by_user_id'])
         if settings.inventory_integration_enabled and should_reverse_inventory_for_void(pre_void):
             enqueue_inventory_event(db, result, 'sale_voided')
-        background_tasks.add_task(
-            publish_operations_event,
+        enqueue_operations_event(
+            db,
             'void.review_needed',
             f'void-review:{order_id}',
             title=f'POS void requires review #{order_id}',
@@ -223,7 +223,7 @@ def order_refunds(order_id: int, db: Session = Depends(get_db), user=Depends(req
 
 
 @router.post('/{order_id}/refunds')
-def refund_order(order_id: int, payload: RefundCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user=Depends(require_permissions('orders.manage'))):
+def refund_order(order_id: int, payload: RefundCreate, db: Session = Depends(get_db), current_user=Depends(require_permissions('orders.manage'))):
     try:
         _assert_order_action(db, order_id, 'refund')
         with consume_protected_approval(
@@ -240,8 +240,8 @@ def refund_order(order_id: int, payload: RefundCreate, background_tasks: Backgro
         if settings.inventory_integration_enabled and should_reverse_inventory_for_refund(order_after_refund):
             enqueue_inventory_event(db, order_after_refund, 'sale_refunded')
         refund_id = result.get('id') if isinstance(result, dict) else getattr(result, 'id', order_id)
-        background_tasks.add_task(
-            publish_operations_event,
+        enqueue_operations_event(
+            db,
             'refund.review_needed',
             f'refund-review:{refund_id}',
             title=f'POS refund requires review #{refund_id}',

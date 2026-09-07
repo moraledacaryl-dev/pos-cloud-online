@@ -6,6 +6,7 @@ from app.db.database import SessionLocal
 from app.services import sync_service
 from app.services.accounting_review_defaults import install_accounting_review_transport
 from app.services.inventory_integration import run_inventory_outbox_sync
+from app.services.operations_integration import run_operations_outbox_sync
 from app.services.sync_service import (
     record_sync_worker_heartbeat,
     run_outbox_sync,
@@ -32,9 +33,23 @@ async def loop_forever():
                 except Exception as exc:
                     catalog_result = {'ok': False, 'error': str(exc)}
                     logger.warning('catalog sync failed: %s', exc)
-                inventory_result = await run_inventory_outbox_sync(db, limit=settings.sync_worker_batch_size)
-                result = await run_outbox_sync(db, limit=settings.sync_worker_batch_size)
+                try:
+                    inventory_result = await run_inventory_outbox_sync(db, limit=settings.sync_worker_batch_size)
+                except Exception as exc:
+                    inventory_result = {'ok': False, 'error': str(exc)}
+                    logger.warning('inventory outbox sync failed: %s', exc)
+                try:
+                    operations_result = await run_operations_outbox_sync(db, limit=settings.sync_worker_batch_size)
+                except Exception as exc:
+                    operations_result = {'ok': False, 'error': str(exc)}
+                    logger.warning('operations outbox sync failed: %s', exc)
+                try:
+                    result = await run_outbox_sync(db, limit=settings.sync_worker_batch_size)
+                except Exception as exc:
+                    result = {'ok': False, 'error': str(exc)}
+                    logger.warning('accounting outbox sync failed: %s', exc)
                 result['inventory'] = inventory_result
+                result['operations'] = operations_result
                 result['room_charge_bookings'] = booking_result
                 result['catalog'] = catalog_result
                 record_sync_worker_heartbeat(db, status='ok', result=result)

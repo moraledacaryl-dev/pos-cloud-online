@@ -168,6 +168,28 @@ test.describe.serial('production-equivalent browser acceptance', () => {
     await displayContext.close();
   });
 
+  test('receipt registration cannot claim official invoice status without required BIR fields', async ({ page }) => {
+    await login(page, ownerUsername, ownerPassword);
+    const settingsLoaded = page.waitForResponse((response) => (
+      response.request().method() === 'GET'
+      && new URL(response.url()).pathname === '/api/system-settings'
+      && response.ok()
+    ));
+    await page.goto('/settings');
+    await settingsLoaded;
+    await expect(page.getByRole('heading', { name: 'Sales Invoice & BIR Registration' })).toBeVisible();
+
+    await page.getByLabel('Registration Status').selectOption('registered');
+    await expect(page.getByRole('button', { name: 'Save Settings' })).toBeEnabled();
+    await page.getByRole('button', { name: 'Save Settings' }).click();
+    await expect(page.getByText(/Complete the registered invoice profile/i)).toBeVisible();
+
+    // Restore the persisted state in the browser so this validation test never
+    // leaves a training environment appearing to be BIR-registered.
+    await page.getByRole('button', { name: 'Discard changes' }).click();
+    await expect(page.getByLabel('Registration Status')).toHaveValue('unregistered');
+  });
+
   test('login, POS workspace, and mobile POS have no serious or critical Axe violations', async ({ page }) => {
     await page.goto('/login');
     expect(await seriousAxeViolations(page), 'serious/critical Axe violations on login').toEqual([]);

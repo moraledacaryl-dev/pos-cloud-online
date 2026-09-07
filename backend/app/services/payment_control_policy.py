@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import math
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 REFERENCE_TENDERS = {'gcash', 'card', 'bank_transfer'}
 SUPPORTED_TENDERS = {'cash', 'gcash', 'card', 'bank_transfer', 'room_charge'}
@@ -19,14 +19,17 @@ CASH_MOVEMENT_DIRECTIONS = {
 SENSITIVE_CASH_MOVEMENTS = {'paid_out', 'safe_drop', 'owner_withdrawal', 'adjustment_out'}
 
 
-def _money(value, label: str) -> float:
+MONEY_QUANTUM = Decimal('0.01')
+
+
+def _money(value, label: str) -> Decimal:
     try:
-        amount = float(value)
-    except (TypeError, ValueError) as exc:
+        amount = Decimal(str(value)).quantize(MONEY_QUANTUM, rounding=ROUND_HALF_UP)
+    except (InvalidOperation, TypeError, ValueError) as exc:
         raise ValueError(f'{label} must be a valid amount.') from exc
-    if not math.isfinite(amount):
+    if not amount.is_finite():
         raise ValueError(f'{label} must be finite.')
-    return round(amount, 2)
+    return amount
 
 
 def validate_payment_control(order: dict, payments) -> dict:
@@ -39,7 +42,7 @@ def validate_payment_control(order: dict, payments) -> dict:
     if order_total <= 0:
         raise ValueError('Order total must be greater than zero before payment.')
 
-    applied_total = 0.0
+    applied_total = Decimal('0')
     references: set[tuple[str, str]] = set()
     for index, payment in enumerate(payments, start=1):
         tender = str(getattr(payment, 'tender_type', '') or '').strip().lower()
@@ -48,14 +51,14 @@ def validate_payment_control(order: dict, payments) -> dict:
         applied = _money(getattr(payment, 'amount_applied', None), f'Payment line {index} amount')
         if applied <= 0:
             raise ValueError(f'Payment line {index} amount must be greater than zero.')
-        applied_total = round(applied_total + applied, 2)
+        applied_total = (applied_total + applied).quantize(MONEY_QUANTUM, rounding=ROUND_HALF_UP)
 
         received_raw = getattr(payment, 'amount_received', None)
         if tender == 'cash':
             received = _money(received_raw if received_raw is not None else applied, f'Payment line {index} amount received')
             if received < applied:
                 raise ValueError('Cash amount received cannot be lower than the applied amount.')
-        elif received_raw is not None and abs(_money(received_raw, f'Payment line {index} amount received') - applied) > 0.009:
+        elif received_raw is not None and abs(_money(received_raw, f'Payment line {index} amount received') - applied) >= MONEY_QUANTUM:
             raise ValueError('Non-cash amount received must equal the applied amount.')
 
         reference = str(getattr(payment, 'reference_no', '') or '').strip()
@@ -73,8 +76,8 @@ def validate_payment_control(order: dict, payments) -> dict:
             if not snapshot_id and not room_number:
                 raise ValueError('Room charge requires a selected booking or room number.')
 
-    difference = round(applied_total - order_total, 2)
-    if abs(difference) > 0.009:
+    difference = (applied_total - order_total).quantize(MONEY_QUANTUM, rounding=ROUND_HALF_UP)
+    if abs(difference) >= MONEY_QUANTUM:
         if difference < 0:
             raise ValueError('Payment total is lower than the order total.')
         raise ValueError('Payment applied total cannot exceed the order total.')

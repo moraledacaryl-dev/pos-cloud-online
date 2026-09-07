@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import time
 import uuid
@@ -24,6 +25,9 @@ from app.services.pos_service import ensure_default_outlet_registers
 configure_logging(settings.log_level)
 logger = logging.getLogger(__name__)
 install_accounting_review_transport(sync_service)
+
+DEFAULT_API_BODY_LIMIT_BYTES = 2 * 1024 * 1024
+RECIPE_PDF_BODY_LIMIT_BYTES = 16 * 1024 * 1024
 
 
 @asynccontextmanager
@@ -61,8 +65,30 @@ async def request_context_middleware(request: Request, call_next):
     started = time.time()
     client_ip = request.client.host if request.client else 'unknown'
     try:
-        enforce_rate_limit(f"{client_ip}:{request.url.path}")
-        response = await call_next(request)
+        body_error = None
+        content_length = request.headers.get('content-length')
+        if content_length and request.method in {'POST', 'PUT', 'PATCH'}:
+            try:
+                body_size = int(content_length)
+            except ValueError:
+                body_error = JSONResponse(status_code=400, content={'detail': 'Invalid Content-Length header.'})
+            else:
+                body_limit = RECIPE_PDF_BODY_LIMIT_BYTES if '/api/recipes/' in request.url.path else DEFAULT_API_BODY_LIMIT_BYTES
+                if body_size > body_limit:
+                    body_error = JSONResponse(status_code=413, content={'detail': f'Request body exceeds the {body_limit // (1024 * 1024)} MB limit.'})
+        if body_error is not None:
+            response = body_error
+        else:
+            rate_identity = client_ip
+            # Guest displays commonly share one hotel/public NAT address.  Once a
+            # display has its high-entropy HttpOnly credential, isolate its read
+            # budget so several legitimate screens cannot throttle each other.
+            if request.method == 'GET' and request.url.path.startswith('/api/customer-display/'):
+                display_credential = request.cookies.get('pos_display')
+                if display_credential:
+                    rate_identity = f"display:{hashlib.sha256(display_credential.encode('utf-8')).hexdigest()[:24]}"
+            enforce_rate_limit(f"{rate_identity}:{request.url.path}")
+            response = await call_next(request)
     except Exception as exc:
         log_json(logger, 'error', 'request.error', path=request.url.path, method=request.method, error=str(exc))
         raise

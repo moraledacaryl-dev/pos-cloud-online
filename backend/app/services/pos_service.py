@@ -6,11 +6,13 @@ import logging
 import re
 import uuid
 from datetime import UTC, datetime
+from decimal import ROUND_HALF_UP, Decimal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, selectinload
 
+from app.core.json_utils import json_dumps
 from app.core.settings import settings
 from app.models.entities import (
     CashMovement,
@@ -55,6 +57,25 @@ from app.services.kds_stream import publish_kds_event
 from app.services.permission_service import get_user_permission_keys
 
 logger = logging.getLogger(__name__)
+
+MONEY_QUANTUM = Decimal('0.01')
+QUANTITY_QUANTUM = Decimal('0.0001')
+
+
+def _decimal(value) -> Decimal:
+    if value is None or value == '':
+        return Decimal('0')
+    if isinstance(value, Decimal):
+        return value
+    return Decimal(str(value))
+
+
+def _money(value) -> Decimal:
+    return _decimal(value).quantize(MONEY_QUANTUM, rounding=ROUND_HALF_UP)
+
+
+def _quantity(value) -> Decimal:
+    return _decimal(value).quantize(QUANTITY_QUANTUM, rounding=ROUND_HALF_UP)
 
 LEGACY_ACCOUNTING_ROOT_API = 'https://hiddenoasis.app/api'
 ACCOUNTING_SUBDOMAIN_API = 'https://accounting.hiddenoasis.app/api'
@@ -251,30 +272,30 @@ def _payment_settlement_snapshot(payment: PosOrderPayment) -> dict:
     }
 
 
-def _order_settlement_totals(row: PosOrder) -> tuple[float, float]:
-    immediate_amount = 0.0
-    folio_pending_amount = 0.0
+def _order_settlement_totals(row: PosOrder) -> tuple[Decimal, Decimal]:
+    immediate_amount = Decimal('0')
+    folio_pending_amount = Decimal('0')
     for payment in (row.payments or []):
-        amount = float(payment.amount_applied or 0)
+        amount = _money(payment.amount_applied)
         tender = _normalize_tender_type(payment.tender_type)
         if tender in FOLIO_PENDING_TENDERS:
             folio_pending_amount += amount
         else:
             immediate_amount += amount
-    return round(immediate_amount, 2), round(folio_pending_amount, 2)
+    return _money(immediate_amount), _money(folio_pending_amount)
 
 
 def _order_settlement_state(row: PosOrder) -> str:
     immediate_amount, folio_pending_amount = _order_settlement_totals(row)
-    total_amount = round(float(row.total_amount or 0), 2)
-    covered_amount = round(immediate_amount + folio_pending_amount, 2)
+    total_amount = _money(row.total_amount)
+    covered_amount = _money(immediate_amount + folio_pending_amount)
     if total_amount <= 0 and covered_amount <= 0:
         return 'unpaid'
-    if folio_pending_amount > 0.009 and immediate_amount > 0.009:
+    if folio_pending_amount > Decimal('0.009') and immediate_amount > Decimal('0.009'):
         return 'mixed_with_folio_pending'
-    if folio_pending_amount > 0.009:
+    if folio_pending_amount > Decimal('0.009'):
         return 'folio_pending'
-    if covered_amount > 0.009:
+    if covered_amount > Decimal('0.009'):
         return 'settled'
     return 'unpaid'
 
@@ -446,7 +467,7 @@ def _build_room_charge_posting(db: Session, row: PosOrder, payment_row: PosOrder
         beds24_booking_id=beds24_booking_id,
         order_source=_derive_room_charge_order_source(row, payment),
         service_type=service_type,
-        charge_amount=round(float(payment_row.amount_applied or 0), 2),
+        charge_amount=_money(payment_row.amount_applied),
         posting_status='pending_frontdesk_post',
         later_payment_status='pending',
         note=_clean_text(getattr(payment, 'room_charge_note', None)) or _clean_text(getattr(payment, 'note', None)),
@@ -474,7 +495,7 @@ def save_setting_json(db: Session, key: str, value, username: str | None = None)
     row = db.query(SystemSetting).filter(SystemSetting.key == key).first()
     if not row:
         row = SystemSetting(key=key, value_json='{}', updated_by=username)
-    row.value_json = json.dumps(value or {}, ensure_ascii=False)
+    row.value_json = json_dumps(value or {}, ensure_ascii=False)
     row.updated_by = username
     db.add(row)
     db.commit()
@@ -494,7 +515,7 @@ def repair_accounting_sync_api_base(db: Session) -> bool:
         if value.get('api_base') != LEGACY_ACCOUNTING_ROOT_API:
             return False
         value['api_base'] = ACCOUNTING_SUBDOMAIN_API
-        row.value_json = json.dumps(value, ensure_ascii=False)
+        row.value_json = json_dumps(value, ensure_ascii=False)
     else:
         row.value_json = (row.value_json or '').replace(LEGACY_ACCOUNTING_ROOT_API, ACCOUNTING_SUBDOMAIN_API)
     row.updated_by = 'startup-repair'
@@ -607,7 +628,7 @@ def _serialize_catalog_item(row: CatalogItem) -> dict:
 
 
 
-def compute_session_expected_cash(db: Session, session_id: int, *, commit: bool = True) -> float:
+def compute_session_expected_cash(db: Session, session_id: int, *, commit: bool = True) -> Decimal:
     session = db.get(RegisterSession, int(session_id))
     if not session:
         raise ValueError('Register session not found.')
@@ -619,7 +640,7 @@ def compute_session_expected_cash(db: Session, session_id: int, *, commit: bool 
         CashMovement.register_session_id == session.id,
         CashMovement.direction == 'out',
     ).scalar() or 0
-    expected = float(total_in) - float(total_out)
+    expected = _money(_money(total_in) - _money(total_out))
     session.closing_expected_cash = expected
     db.add(session)
     if commit:
@@ -739,12 +760,12 @@ def _serialize_refund(row: Refund, include_details: bool = True) -> dict:
 
 def _serialize_order(row: PosOrder, include_lines: bool = True, db: Session | None = None) -> dict:
     refunds = list(row.refunds or [])
-    refunded_total = round(sum(float(refund.refunded_amount or 0) for refund in refunds), 2)
-    refundable_balance = round(max(float(row.total_amount or 0) - refunded_total, 0), 2)
+    refunded_total = _money(sum((_money(refund.refunded_amount) for refund in refunds), Decimal('0')))
+    refundable_balance = _money(max(_money(row.total_amount) - refunded_total, Decimal('0')))
     refund_status = 'none'
-    if refunded_total > 0.009 and refundable_balance <= 0.009:
+    if refunded_total >= MONEY_QUANTUM and refundable_balance < MONEY_QUANTUM:
         refund_status = 'fully_refunded'
-    elif refunded_total > 0.009:
+    elif refunded_total >= MONEY_QUANTUM:
         refund_status = 'partially_refunded'
     settled_amount, folio_pending_amount = _order_settlement_totals(row)
     settlement_state = _order_settlement_state(row)
@@ -1048,10 +1069,9 @@ def delete_catalog_item(db: Session, item_id: int):
     return {'ok': True}
 
 
-def _next_order_no(db: Session, business_date: str):
+def _order_no_from_id(order_id: int, business_date: str):
     ymd = (business_date or today_iso()).replace('-', '')
-    count = db.query(PosOrder).filter(PosOrder.business_date == business_date).count() + 1
-    return f'POS-{ymd}-{count:04d}'
+    return f'POS-{ymd}-{int(order_id):06d}'
 
 
 def _next_session_code(db: Session, register: Register, business_date: str):
@@ -1065,7 +1085,7 @@ def create_outbox_event(db: Session, *, aggregate_type: str, aggregate_id: int, 
     suppression_reason = outbox_suppression_reason(event_type, payload)
     existing = db.query(SyncOutboxEvent).filter(SyncOutboxEvent.idempotency_key == key).first()
     if existing:
-        existing.payload_json = json.dumps(payload, ensure_ascii=False)
+        existing.payload_json = json_dumps(payload, ensure_ascii=False)
         if suppression_reason:
             existing.status = 'suppressed'
             existing.last_error = suppression_reason
@@ -1081,7 +1101,7 @@ def create_outbox_event(db: Session, *, aggregate_type: str, aggregate_id: int, 
         aggregate_id=int(aggregate_id),
         event_type=event_type,
         idempotency_key=key,
-        payload_json=json.dumps(payload, ensure_ascii=False),
+        payload_json=json_dumps(payload, ensure_ascii=False),
         status='suppressed' if suppression_reason else 'pending',
         last_error=suppression_reason,
     )
@@ -1091,7 +1111,7 @@ def create_outbox_event(db: Session, *, aggregate_type: str, aggregate_id: int, 
 
 
 def open_register_session(db: Session, payload: RegisterSessionOpen, user_id: int | None = None):
-    register = db.query(Register).options(selectinload(Register.outlet)).filter(Register.id == int(payload.register_id)).first()
+    register = db.query(Register).options(selectinload(Register.outlet)).filter(Register.id == int(payload.register_id)).with_for_update().first()
     if not register:
         raise ValueError('Register not found.')
     if not register.accounting_financial_account_id:
@@ -1106,10 +1126,10 @@ def open_register_session(db: Session, payload: RegisterSessionOpen, user_id: in
         shift_name=payload.shift_name,
         status='open',
         opened_by_user_id=user_id,
-        opening_float=float(payload.opening_float or 0),
+        opening_float=_money(payload.opening_float),
         opening_note=payload.opening_note,
         opened_at_text=now_iso(),
-        closing_expected_cash=float(payload.opening_float or 0),
+        closing_expected_cash=_money(payload.opening_float),
     )
     db.add(row)
     db.commit()
@@ -1164,7 +1184,7 @@ def get_register_session(db: Session, session_id: int):
 
 
 def close_register_session(db: Session, session_id: int, payload: RegisterSessionClose, user_id: int | None = None):
-    row = db.query(RegisterSession).options(selectinload(RegisterSession.register)).filter(RegisterSession.id == int(session_id)).first()
+    row = db.query(RegisterSession).options(selectinload(RegisterSession.register)).filter(RegisterSession.id == int(session_id)).with_for_update().first()
     if not row:
         raise ValueError('Register session not found.')
     if row.status != 'open':
@@ -1173,18 +1193,18 @@ def close_register_session(db: Session, session_id: int, payload: RegisterSessio
         raise ValueError('This register is missing its Accounting drawer mapping. Ask a manager to map the register before closing the shift.')
     expected = compute_session_expected_cash(db, row.id)
     close_mode = (payload.close_mode or ('blind' if payload.blind_close else 'verified')).strip().lower()
-    row.closing_actual_cash = float(payload.closing_actual_cash or 0)
-    row.variance_amount = row.closing_actual_cash - expected
+    row.closing_actual_cash = _money(payload.closing_actual_cash)
+    row.variance_amount = _money(row.closing_actual_cash - expected)
     row.close_mode = close_mode
     row.blind_close = bool(payload.blind_close or close_mode == 'blind')
-    row.denomination_json = json.dumps([line.model_dump() for line in (payload.denomination_lines or [])]) if payload.denomination_lines else '[]'
+    row.denomination_json = json_dumps([line.model_dump() for line in (payload.denomination_lines or [])]) if payload.denomination_lines else '[]'
     row.variance_note = (payload.variance_note or '').strip() or None
     row.close_sign_off_name = (payload.sign_off_name or '').strip() or None
     row.close_sign_off_role = (payload.sign_off_role or '').strip() or None
     note_parts = [payload.closing_note or '']
     if close_mode == 'blind':
         note_parts.append('Blind close submitted.')
-    if abs(row.variance_amount) > 0.009:
+    if abs(row.variance_amount) >= MONEY_QUANTUM:
         note_parts.append(f'Variance investigation required: {row.variance_amount:.2f}')
     if row.variance_note:
         note_parts.append(f'Variance note: {row.variance_note}')
@@ -1226,7 +1246,7 @@ def close_register_session(db: Session, session_id: int, payload: RegisterSessio
 
 
 def reopen_register_session(db: Session, session_id: int, payload: RegisterSessionReopen, user_id: int | None = None, approved_by_user_id: int | None = None):
-    row = db.query(RegisterSession).options(selectinload(RegisterSession.register)).filter(RegisterSession.id == int(session_id)).first()
+    row = db.query(RegisterSession).options(selectinload(RegisterSession.register)).filter(RegisterSession.id == int(session_id)).with_for_update().first()
     if not row:
         raise ValueError('Register session not found.')
     if row.status != 'closed':
@@ -1254,7 +1274,7 @@ def reopen_register_session(db: Session, session_id: int, payload: RegisterSessi
 
 
 def create_order(db: Session, payload: OrderCreate, user_id: int | None = None):
-    session = db.query(RegisterSession).options(selectinload(RegisterSession.register)).filter(RegisterSession.id == int(payload.register_session_id)).first()
+    session = db.query(RegisterSession).options(selectinload(RegisterSession.register)).filter(RegisterSession.id == int(payload.register_session_id)).with_for_update().first()
     if not session:
         raise ValueError('Register session not found.')
     if session.status != 'open':
@@ -1267,7 +1287,7 @@ def create_order(db: Session, payload: OrderCreate, user_id: int | None = None):
         raise ValueError('Order must contain at least one line.')
     row = PosOrder(
         order_uuid=str(uuid.uuid4()),
-        order_no=_next_order_no(db, session.business_date),
+        order_no=f'PENDING-{uuid.uuid4()}',
         register_session_id=session.id,
         register_id=session.register_id,
         cashier_user_id=user_id,
@@ -1284,6 +1304,7 @@ def create_order(db: Session, payload: OrderCreate, user_id: int | None = None):
     )
     db.add(row)
     db.flush()
+    row.order_no = _order_no_from_id(row.id, session.business_date)
     _rebuild_order_lines(db, row, payload.lines)
     db.add(row)
     if float(row.discount_amount or 0) > 0:
@@ -1298,10 +1319,10 @@ def create_order(db: Session, payload: OrderCreate, user_id: int | None = None):
 def _rebuild_order_lines(db: Session, row: PosOrder, line_payloads):
     row.lines.clear()
     db.flush()
-    subtotal = 0.0
-    discount = 0.0
-    tax_amount = 0.0
-    service_charge = 0.0
+    subtotal = Decimal('0')
+    discount = Decimal('0')
+    tax_amount = Decimal('0')
+    service_charge = Decimal('0')
     stations = []
     for item in line_payloads or []:
         catalog_item_id = getattr(item, 'catalog_item_id', None)
@@ -1313,15 +1334,15 @@ def _rebuild_order_lines(db: Session, row: PosOrder, line_payloads):
         qty_value = getattr(item, 'quantity', None)
         if qty_value is None and isinstance(item, dict):
             qty_value = item.get('quantity')
-        qty = float(qty_value or 0)
+        qty = _quantity(qty_value)
         if qty <= 0:
             raise ValueError('Line quantity must be greater than zero.')
         unit_price_value = getattr(item, 'unit_price', None)
         if unit_price_value is None and isinstance(item, dict):
             unit_price_value = item.get('unit_price')
-        catalog_price = float(catalog.price or 0)
-        unit_price = float(unit_price_value if unit_price_value is not None else catalog_price)
-        if abs(unit_price - catalog_price) >= 0.01:
+        catalog_price = _money(catalog.price)
+        unit_price = _money(unit_price_value if unit_price_value is not None else catalog_price)
+        if unit_price != catalog_price:
             raise ValueError(
                 f'{catalog.display_name or catalog.menu_item_name} price does not match the current catalog price. '
                 'Refresh the catalog and use the discount workflow for an authorized reduction.'
@@ -1329,11 +1350,11 @@ def _rebuild_order_lines(db: Session, row: PosOrder, line_payloads):
         discount_value = getattr(item, 'discount_amount', None)
         if discount_value is None and isinstance(item, dict):
             discount_value = item.get('discount_amount')
-        line_discount = float(discount_value or 0)
+        line_discount = _money(discount_value)
         gross = qty * unit_price
-        line_total = max(gross - line_discount, 0)
-        tax_amount += line_total * float(catalog.tax_rate or 0)
-        service_charge += line_total * float(catalog.service_charge_rate or 0)
+        line_total = max(gross - line_discount, Decimal('0'))
+        tax_amount += line_total * _decimal(catalog.tax_rate)
+        service_charge += line_total * _decimal(catalog.service_charge_rate)
         subtotal += gross
         discount += line_discount
         prep_station = normalize_kds_station(catalog.prep_station or catalog.module_slug)
@@ -1360,12 +1381,12 @@ def _rebuild_order_lines(db: Session, row: PosOrder, line_payloads):
             ready_quantity=0,
             note=(item.get('note') if isinstance(item, dict) else getattr(item, 'note', None)),
         ))
-    row.subtotal_amount = round(subtotal, 2)
-    row.discount_amount = round(discount, 2)
-    row.tax_amount = round(tax_amount, 2)
-    row.service_charge_amount = round(service_charge, 2)
-    row.total_amount = round(subtotal - discount + tax_amount + service_charge, 2)
-    row.balance_due = row.total_amount - row.paid_amount
+    row.subtotal_amount = _money(subtotal)
+    row.discount_amount = _money(discount)
+    row.tax_amount = _money(tax_amount)
+    row.service_charge_amount = _money(service_charge)
+    row.total_amount = _money(subtotal - discount + tax_amount + service_charge)
+    row.balance_due = _money(row.total_amount - _money(row.paid_amount))
     if stations:
         statuses = {line.kitchen_status for line in row.lines}
         row.kitchen_status = 'held' if statuses == {'held'} else 'queued'
@@ -1373,7 +1394,7 @@ def _rebuild_order_lines(db: Session, row: PosOrder, line_payloads):
 
 
 def update_order(db: Session, order_id: int, payload: OrderUpdate, user_id: int | None = None):
-    row = db.query(PosOrder).options(selectinload(PosOrder.lines), selectinload(PosOrder.payments), selectinload(PosOrder.register), selectinload(PosOrder.cashier)).filter(PosOrder.id == int(order_id)).first()
+    row = db.query(PosOrder).options(selectinload(PosOrder.lines), selectinload(PosOrder.payments), selectinload(PosOrder.register), selectinload(PosOrder.cashier)).filter(PosOrder.id == int(order_id)).with_for_update().first()
     if not row:
         raise ValueError('Order not found.')
     if row.status in {'paid', 'voided'}:
@@ -1541,7 +1562,7 @@ def update_room_charge_posting_status(db: Session, posting_id: int, payload: Roo
         selectinload(RoomChargePosting.posted_by),
         selectinload(RoomChargePosting.created_by),
         selectinload(RoomChargePosting.selected_by),
-    ).filter(RoomChargePosting.id == int(posting_id)).first()
+    ).filter(RoomChargePosting.id == int(posting_id)).with_for_update().first()
     if not row:
         raise ValueError('Room charge posting not found.')
     status = str(payload.posting_status or '').strip().lower().replace(' ', '_')
@@ -1605,7 +1626,7 @@ def update_room_charge_posting_status(db: Session, posting_id: int, payload: Roo
 
 
 def set_order_status(db: Session, order_id: int, status: str, user_id: int | None = None):
-    row = db.query(PosOrder).options(selectinload(PosOrder.lines), selectinload(PosOrder.payments), selectinload(PosOrder.register), selectinload(PosOrder.cashier)).filter(PosOrder.id == int(order_id)).first()
+    row = db.query(PosOrder).options(selectinload(PosOrder.lines), selectinload(PosOrder.payments), selectinload(PosOrder.register), selectinload(PosOrder.cashier)).filter(PosOrder.id == int(order_id)).with_for_update().first()
     if not row:
         raise ValueError('Order not found.')
     if row.status in {'paid', 'folio_pending', 'voided'}:
@@ -1619,7 +1640,7 @@ def set_order_status(db: Session, order_id: int, status: str, user_id: int | Non
 
 
 def transfer_order_table(db: Session, order_id: int, target_table_label: str, target_service_area: str | None = None, user_id: int | None = None):
-    row = db.query(PosOrder).options(selectinload(PosOrder.lines), selectinload(PosOrder.payments), selectinload(PosOrder.register), selectinload(PosOrder.cashier)).filter(PosOrder.id == int(order_id)).first()
+    row = db.query(PosOrder).options(selectinload(PosOrder.lines), selectinload(PosOrder.payments), selectinload(PosOrder.register), selectinload(PosOrder.cashier)).filter(PosOrder.id == int(order_id)).with_for_update().first()
     if not row:
         raise ValueError('Order not found.')
     if row.status not in ACTIVE_TABLE_ORDER_STATUSES:
@@ -1635,7 +1656,7 @@ def transfer_order_table(db: Session, order_id: int, target_table_label: str, ta
     )
     if target_area:
         occupied_query = occupied_query.filter(PosOrder.service_area == target_area)
-    occupied = occupied_query.first()
+    occupied = occupied_query.with_for_update().first()
     if occupied:
         area_label = f'{target_area} · ' if target_area else ''
         raise ValueError(f'Table {area_label}{target} already has an active order. Use merge instead.')
@@ -1653,7 +1674,7 @@ def transfer_order_table(db: Session, order_id: int, target_table_label: str, ta
 
 
 def merge_order_table(db: Session, order_id: int, target_table_label: str, target_service_area: str | None = None, user_id: int | None = None):
-    source = db.query(PosOrder).options(selectinload(PosOrder.lines), selectinload(PosOrder.payments), selectinload(PosOrder.refunds)).filter(PosOrder.id == int(order_id)).first()
+    source = db.query(PosOrder).options(selectinload(PosOrder.lines), selectinload(PosOrder.payments), selectinload(PosOrder.refunds)).filter(PosOrder.id == int(order_id)).with_for_update().first()
     if not source:
         raise ValueError('Order not found.')
     if source.status not in ACTIVE_TABLE_ORDER_STATUSES:
@@ -1673,7 +1694,7 @@ def merge_order_table(db: Session, order_id: int, target_table_label: str, targe
     )
     if target_area:
         target_query = target_query.filter(PosOrder.service_area == target_area)
-    target = target_query.first()
+    target = target_query.with_for_update().first()
     if not target:
         area_label = f'{target_area} · ' if target_area else ''
         raise ValueError(f'Table {area_label}{target_label or "(blank)"} does not have an active order to merge into.')
@@ -1685,23 +1706,23 @@ def merge_order_table(db: Session, order_id: int, target_table_label: str, targe
         line.order = target
         db.add(line)
     db.flush()
-    subtotal = 0.0
-    discount = 0.0
-    tax_amount = 0.0
-    service_charge = 0.0
+    subtotal = Decimal('0')
+    discount = Decimal('0')
+    tax_amount = Decimal('0')
+    service_charge = Decimal('0')
     for line in target.lines or []:
         catalog = db.get(CatalogItem, int(line.catalog_item_id))
-        gross = float(line.quantity or 0) * float(line.unit_price or 0)
+        gross = _quantity(line.quantity) * _money(line.unit_price)
         subtotal += gross
-        discount += float(line.discount_amount or 0)
-        tax_amount += float(line.line_total or 0) * float(catalog.tax_rate or 0)
-        service_charge += float(line.line_total or 0) * float(catalog.service_charge_rate or 0)
-    target.subtotal_amount = round(subtotal, 2)
-    target.discount_amount = round(discount, 2)
-    target.tax_amount = round(tax_amount, 2)
-    target.service_charge_amount = round(service_charge, 2)
-    target.total_amount = round(subtotal - discount + tax_amount + service_charge, 2)
-    target.balance_due = round(float(target.total_amount or 0) - float(target.paid_amount or 0), 2)
+        discount += _money(line.discount_amount)
+        tax_amount += _money(line.line_total) * _decimal(catalog.tax_rate)
+        service_charge += _money(line.line_total) * _decimal(catalog.service_charge_rate)
+    target.subtotal_amount = _money(subtotal)
+    target.discount_amount = _money(discount)
+    target.tax_amount = _money(tax_amount)
+    target.service_charge_amount = _money(service_charge)
+    target.total_amount = _money(subtotal - discount + tax_amount + service_charge)
+    target.balance_due = _money(target.total_amount - _money(target.paid_amount))
     if source.seat_count:
         target.seat_count = int(target.seat_count or 0) + int(source.seat_count or 0)
     merge_from_label = f'{source.service_area} · {source_label}' if source.service_area and source_label else (source_label or 'unassigned')
@@ -1724,7 +1745,7 @@ def merge_order_table(db: Session, order_id: int, target_table_label: str, targe
 
 
 def pay_order(db: Session, order_id: int, payload: OrderPayPayload, user_id: int | None = None):
-    row = db.query(PosOrder).options(selectinload(PosOrder.lines), selectinload(PosOrder.payments), selectinload(PosOrder.register), selectinload(PosOrder.session)).filter(PosOrder.id == int(order_id)).first()
+    row = db.query(PosOrder).options(selectinload(PosOrder.lines), selectinload(PosOrder.payments), selectinload(PosOrder.register), selectinload(PosOrder.session)).filter(PosOrder.id == int(order_id)).with_for_update().first()
     if not row:
         raise ValueError('Order not found.')
     if row.status in {'voided', 'paid', 'folio_pending'}:
@@ -1739,9 +1760,9 @@ def pay_order(db: Session, order_id: int, payload: OrderPayPayload, user_id: int
     row.payments.clear()
     db.flush()
 
-    total_covered = 0.0
-    immediate_settlement_total = 0.0
-    folio_pending_total = 0.0
+    total_covered = Decimal('0')
+    immediate_settlement_total = Decimal('0')
+    folio_pending_total = Decimal('0')
     tender_labels = []
 
     for payment in payments:
@@ -1751,7 +1772,7 @@ def pay_order(db: Session, order_id: int, payload: OrderPayPayload, user_id: int
         if tender not in TENDER_SETTLEMENT_META:
             raise ValueError(f'Unsupported tender type: {tender}.')
 
-        amount_applied = round(float(payment.amount_applied or 0), 2)
+        amount_applied = _money(payment.amount_applied)
         if amount_applied <= 0:
             raise ValueError('Payment amount_applied must be greater than zero.')
 
@@ -1763,13 +1784,13 @@ def pay_order(db: Session, order_id: int, payload: OrderPayPayload, user_id: int
             raise ValueError(meta['validation_error'])
 
         if tender == 'room_charge':
-            amount_received = round(float(payment.amount_received or 0), 2)
-            change_given = 0.0
+            amount_received = _money(payment.amount_received)
+            change_given = Decimal('0')
             payment_account_id = None
             folio_pending_total += amount_applied
         else:
-            amount_received = round(float(payment.amount_received if payment.amount_received is not None else amount_applied), 2)
-            change_given = round(max(amount_received - amount_applied, 0), 2) if tender == 'cash' else 0.0
+            amount_received = _money(payment.amount_received if payment.amount_received is not None else amount_applied)
+            change_given = _money(max(amount_received - amount_applied, Decimal('0'))) if tender == 'cash' else Decimal('0')
             immediate_settlement_total += amount_applied
 
         payment_row = PosOrderPayment(
@@ -1789,12 +1810,12 @@ def pay_order(db: Session, order_id: int, payload: OrderPayPayload, user_id: int
         total_covered += amount_applied
         tender_labels.append(tender)
 
-    row.paid_amount = round(immediate_settlement_total, 2)
-    row.balance_due = round(max(float(row.total_amount or 0) - total_covered, 0), 2)
-    if row.balance_due > 0.009:
+    row.paid_amount = _money(immediate_settlement_total)
+    row.balance_due = _money(max(_money(row.total_amount) - total_covered, Decimal('0')))
+    if row.balance_due > Decimal('0.009'):
         raise ValueError('Payment total is lower than order total.')
     row.primary_tender = tender_labels[0] if len(set(tender_labels)) == 1 else 'mixed'
-    row.status = 'folio_pending' if folio_pending_total > 0.009 else 'paid'
+    row.status = 'folio_pending' if folio_pending_total > Decimal('0.009') else 'paid'
     row.kitchen_status = 'queued'
     if payload.note:
         row.note = payload.note
@@ -1869,10 +1890,9 @@ def pay_order(db: Session, order_id: int, payload: OrderPayPayload, user_id: int
     return _serialize_order(row, include_lines=True, db=db)
 
 
-def _next_refund_no(db: Session, business_date: str):
+def _refund_no_from_id(refund_id: int, business_date: str):
     ymd = (business_date or today_iso()).replace('-', '')
-    count = db.query(Refund).count() + 1
-    return f'RFD-{ymd}-{count:04d}'
+    return f'RFD-{ymd}-{int(refund_id):06d}'
 
 
 def _approval_user_for_refund(db: Session, approved_by_user_id: int | None):
@@ -1908,7 +1928,7 @@ def create_refund(db: Session, order_id: int, payload: RefundCreate, cashier_use
         selectinload(PosOrder.cashier),
         selectinload(PosOrder.refunds).selectinload(Refund.lines),
         selectinload(PosOrder.refunds).selectinload(Refund.payments),
-    ).filter(PosOrder.id == int(order_id)).first()
+    ).filter(PosOrder.id == int(order_id)).with_for_update().first()
     if not row:
         raise ValueError('Order not found.')
     if row.status not in {'paid', 'folio_pending'}:
@@ -1916,53 +1936,58 @@ def create_refund(db: Session, order_id: int, payload: RefundCreate, cashier_use
 
     approved_user = _approval_user_for_refund(db, payload.approved_by_user_id)
 
-    refunded_total_existing = round(sum(float(refund.refunded_amount or 0) for refund in (row.refunds or [])), 2)
-    refundable_remaining = round(max(float(row.total_amount or 0) - refunded_total_existing, 0), 2)
-    if refundable_remaining <= 0.009:
+    refunded_total_existing = _money(sum((_money(refund.refunded_amount) for refund in (row.refunds or [])), Decimal('0')))
+    refundable_remaining = _money(max(_money(row.total_amount) - refunded_total_existing, Decimal('0')))
+    if refundable_remaining < MONEY_QUANTUM:
         raise ValueError('This order has already been fully refunded.')
 
-    refunded_qty_by_line = {}
-    refunded_tender_by_type = {}
+    refunded_qty_by_line: dict[int, Decimal] = {}
+    refunded_tender_by_type: dict[str, Decimal] = {}
     for refund in (row.refunds or []):
         for line in (refund.lines or []):
             if line.order_line_id:
-                refunded_qty_by_line[line.order_line_id] = refunded_qty_by_line.get(line.order_line_id, 0) + float(line.quantity or 0)
+                refunded_qty_by_line[line.order_line_id] = _quantity(
+                    refunded_qty_by_line.get(line.order_line_id, Decimal('0')) + _quantity(line.quantity)
+                )
         for payment in (refund.payments or []):
             key = (payment.tender_type or '').strip().lower()
-            refunded_tender_by_type[key] = refunded_tender_by_type.get(key, 0) + float(payment.amount or 0)
+            refunded_tender_by_type[key] = _money(
+                refunded_tender_by_type.get(key, Decimal('0')) + _money(payment.amount)
+            )
 
     refund_mode = (payload.refund_mode or 'full').strip().lower()
     refund_lines_payload = []
-    refund_amount = 0.0
+    refund_amount = Decimal('0')
 
     if refund_mode == 'full':
-        line_total_accum = 0.0
+        line_total_accum = Decimal('0')
         for line in (row.lines or []):
-            already_qty = float(refunded_qty_by_line.get(line.id, 0) or 0)
-            remaining_qty = round(max(float(line.quantity or 0) - already_qty, 0), 4)
+            already_qty = _quantity(refunded_qty_by_line.get(line.id, Decimal('0')))
+            remaining_qty = _quantity(max(_quantity(line.quantity) - already_qty, Decimal('0')))
             if remaining_qty <= 0:
                 continue
-            ratio = remaining_qty / float(line.quantity or 1)
-            line_total = round(float(line.line_total or 0) * ratio, 2)
+            source_quantity = _quantity(line.quantity)
+            ratio = remaining_qty / (source_quantity or Decimal('1'))
+            line_total = _money(_money(line.line_total) * ratio)
             refund_lines_payload.append({
                 'order_line_id': line.id,
                 'item_name_snapshot': line.item_name_snapshot,
                 'quantity': remaining_qty,
                 'unit_price': line.unit_price,
-                'discount_amount': round(float(line.discount_amount or 0) * ratio, 2),
+                'discount_amount': _money(_money(line.discount_amount) * ratio),
                 'refunded_line_total': line_total,
                 'note': payload.note,
             })
             line_total_accum += line_total
-        refund_amount = round(refundable_remaining, 2)
-        remainder = round(refund_amount - round(line_total_accum, 2), 2)
-        if abs(remainder) >= 0.01:
+        refund_amount = _money(refundable_remaining)
+        remainder = _money(refund_amount - _money(line_total_accum))
+        if abs(remainder) >= MONEY_QUANTUM:
             refund_lines_payload.append({
                 'order_line_id': None,
                 'item_name_snapshot': 'Order-Level Adjustment',
-                'quantity': 1,
+                'quantity': Decimal('1'),
                 'unit_price': remainder,
-                'discount_amount': 0,
+                'discount_amount': Decimal('0'),
                 'refunded_line_total': remainder,
                 'note': 'Taxes / service charge / rounding',
             })
@@ -1975,48 +2000,49 @@ def create_refund(db: Session, order_id: int, payload: RefundCreate, cashier_use
             source_line = next((line for line in (row.lines or []) if line.id == int(req.order_line_id)), None)
             if not source_line:
                 raise ValueError(f'Order line {req.order_line_id} not found.')
-            requested_qty = float(req.quantity or 0)
+            requested_qty = _quantity(req.quantity)
             if requested_qty <= 0:
                 raise ValueError('Refund line quantity must be greater than zero.')
-            already_qty = float(refunded_qty_by_line.get(source_line.id, 0) or 0)
-            remaining_qty = round(max(float(source_line.quantity or 0) - already_qty, 0), 4)
-            if requested_qty - remaining_qty > 0.0001:
+            already_qty = _quantity(refunded_qty_by_line.get(source_line.id, Decimal('0')))
+            remaining_qty = _quantity(max(_quantity(source_line.quantity) - already_qty, Decimal('0')))
+            if requested_qty - remaining_qty >= QUANTITY_QUANTUM:
                 raise ValueError(f'Refund quantity exceeds remaining refundable quantity for {source_line.item_name_snapshot}.')
-            ratio = requested_qty / float(source_line.quantity or 1)
-            line_total = round(float(source_line.line_total or 0) * ratio, 2)
+            source_quantity = _quantity(source_line.quantity)
+            ratio = requested_qty / (source_quantity or Decimal('1'))
+            line_total = _money(_money(source_line.line_total) * ratio)
             refund_lines_payload.append({
                 'order_line_id': source_line.id,
                 'item_name_snapshot': source_line.item_name_snapshot,
                 'quantity': requested_qty,
                 'unit_price': source_line.unit_price,
-                'discount_amount': round(float(source_line.discount_amount or 0) * ratio, 2),
+                'discount_amount': _money(_money(source_line.discount_amount) * ratio),
                 'refunded_line_total': line_total,
                 'note': req.note or payload.note,
             })
             refund_amount += line_total
-        refund_amount = round(refund_amount, 2)
+        refund_amount = _money(refund_amount)
     elif refund_mode == 'amount':
-        refund_amount = round(float(payload.amount or 0), 2)
+        refund_amount = _money(payload.amount)
         if refund_amount <= 0:
             raise ValueError('Refund amount must be greater than zero.')
-        if refund_amount - refundable_remaining > 0.009:
+        if refund_amount - refundable_remaining >= MONEY_QUANTUM:
             raise ValueError('Refund amount exceeds remaining refundable balance.')
         refund_lines_payload.append({
             'order_line_id': None,
             'item_name_snapshot': 'Amount Refund',
-            'quantity': 1,
+            'quantity': Decimal('1'),
             'unit_price': refund_amount,
-            'discount_amount': 0,
+            'discount_amount': Decimal('0'),
             'refunded_line_total': refund_amount,
             'note': payload.note or payload.reason_text,
         })
     else:
         raise ValueError('refund_mode must be one of: full, lines, amount.')
 
-    refund_amount = round(refund_amount, 2)
+    refund_amount = _money(refund_amount)
     if refund_amount <= 0:
         raise ValueError('Refund amount must be greater than zero.')
-    if refund_amount - refundable_remaining > 0.009:
+    if refund_amount - refundable_remaining >= MONEY_QUANTUM:
         raise ValueError('Refund exceeds remaining refundable balance.')
 
     allocations = []
@@ -2024,10 +2050,12 @@ def create_refund(db: Session, order_id: int, payload: RefundCreate, cashier_use
     remaining_to_allocate = refund_amount
     for payment in (row.payments or []):
         tender = (payment.tender_type or '').strip().lower()
-        remaining_for_tender = round(float(payment.amount_applied or 0) - float(refunded_tender_by_type.get(tender, 0) or 0), 2)
+        remaining_for_tender = _money(
+            _money(payment.amount_applied) - refunded_tender_by_type.get(tender, Decimal('0'))
+        )
         if remaining_for_tender <= 0:
             continue
-        alloc = round(min(remaining_for_tender, remaining_to_allocate), 2)
+        alloc = _money(min(remaining_for_tender, remaining_to_allocate))
         if alloc <= 0:
             continue
         
@@ -2052,15 +2080,15 @@ def create_refund(db: Session, order_id: int, payload: RefundCreate, cashier_use
                 'accounting_financial_account_id': payment.accounting_financial_account_id or (row.register.accounting_financial_account_id if payment.is_cash else None),
             })
         
-        remaining_to_allocate = round(remaining_to_allocate - alloc, 2)
-        if remaining_to_allocate <= 0.009:
+        remaining_to_allocate = _money(remaining_to_allocate - alloc)
+        if remaining_to_allocate < MONEY_QUANTUM:
             break
-    if remaining_to_allocate > 0.009:
+    if remaining_to_allocate >= MONEY_QUANTUM:
         raise ValueError('Unable to allocate refund across original payment tenders.')
 
     refund_row = Refund(
         refund_uuid=str(uuid.uuid4()),
-        refund_no=_next_refund_no(db, row.business_date),
+        refund_no=f'PENDING-{uuid.uuid4()}',
         order_id=row.id,
         register_session_id=row.register_session_id,
         register_id=row.register_id,
@@ -2075,6 +2103,7 @@ def create_refund(db: Session, order_id: int, payload: RefundCreate, cashier_use
     )
     db.add(refund_row)
     db.flush()
+    refund_row.refund_no = _refund_no_from_id(refund_row.id, row.business_date)
 
     for line in refund_lines_payload:
         refund_row.lines.append(RefundLine(**line))
@@ -2085,16 +2114,21 @@ def create_refund(db: Session, order_id: int, payload: RefundCreate, cashier_use
         source_line_id = refund_line.get('order_line_id')
         if not source_line_id:
             continue
-        refunded_qty_after[source_line_id] = refunded_qty_after.get(source_line_id, 0) + float(refund_line.get('quantity') or 0)
+        refunded_qty_after[source_line_id] = _quantity(
+            refunded_qty_after.get(source_line_id, Decimal('0')) + _quantity(refund_line.get('quantity'))
+        )
     for source_line in (row.lines or []):
-        remaining_qty = max(float(source_line.quantity or 0) - float(refunded_qty_after.get(source_line.id, 0) or 0), 0)
-        if remaining_qty <= 0.0001 and source_line.kitchen_status not in {'voided', 'cancelled', 'served'}:
+        remaining_qty = max(
+            _quantity(source_line.quantity) - refunded_qty_after.get(source_line.id, Decimal('0')),
+            Decimal('0'),
+        )
+        if remaining_qty <= QUANTITY_QUANTUM and source_line.kitchen_status not in {'voided', 'cancelled', 'served'}:
             source_line.kitchen_status = 'voided'
             source_line.item_readiness = 'not_ready'
             source_line.ready_quantity = 0
             db.add(source_line)
             kitchen_changed = True
-    if refundable_remaining - refund_amount <= 0.009 and row.kitchen_status not in {'voided', 'cancelled', 'served'}:
+    if refundable_remaining - refund_amount < MONEY_QUANTUM and row.kitchen_status not in {'voided', 'cancelled', 'served'}:
         row.kitchen_status = 'voided'
         db.add(row)
         kitchen_changed = True
@@ -2229,7 +2263,7 @@ def create_refund(db: Session, order_id: int, payload: RefundCreate, cashier_use
 
 
 def void_order(db: Session, order_id: int, reason: str, user_id: int | None = None, approved_by_user_id: int | None = None):
-    row = db.query(PosOrder).options(selectinload(PosOrder.payments), selectinload(PosOrder.register), selectinload(PosOrder.lines), selectinload(PosOrder.cashier)).filter(PosOrder.id == int(order_id)).first()
+    row = db.query(PosOrder).options(selectinload(PosOrder.payments), selectinload(PosOrder.register), selectinload(PosOrder.lines), selectinload(PosOrder.cashier)).filter(PosOrder.id == int(order_id)).with_for_update().first()
     if not row:
         raise ValueError('Order not found.')
     if row.status == 'voided':
@@ -2287,7 +2321,7 @@ def create_cash_movement(
     if session.status != 'open' and not source_order_id:
         raise ValueError('Manual cash movement requires an open register session.')
     explicit_approver = payload.approved_by_user_id or approved_by_user_id
-    amount = float(payload.amount or 0)
+    amount = _money(payload.amount)
     if amount <= 0:
         raise ValueError('Cash movement amount must be greater than zero.')
     direction = str(payload.direction or '').strip().lower()
@@ -2326,7 +2360,7 @@ def create_cash_movement(
         direction=direction,
         movement_type=movement_type,
         category=payload.category,
-        amount=round(amount, 2),
+        amount=amount,
         note=payload.note,
         reference_no=payload.reference_no,
         approved_by_user_id=explicit_approver,
@@ -2568,10 +2602,22 @@ def list_outbox_events(db: Session, status: str | None = None, limit: int = 200)
 
 def dashboard_summary(db: Session):
     open_sessions = db.query(RegisterSession).filter(RegisterSession.status == 'open').count()
-    pending_query = db.query(SyncOutboxEvent).filter(SyncOutboxEvent.status.in_(['pending', 'failed', 'blocked']))
+    pending_query = db.query(SyncOutboxEvent).filter(
+        SyncOutboxEvent.status.in_([
+            'pending', 'failed', 'blocked', 'operations_pending', 'operations_retry', 'operations_blocked'
+        ])
+    )
     if not settings.inventory_integration_enabled:
         pending_query = pending_query.filter(~SyncOutboxEvent.event_type.like('inventory.%'))
-    pending_sync = pending_query.count()
+    # Dashboard must use the same effective suppression policy as the recovery
+    # queue.  Historical local-only events can remain physically "blocked" in
+    # the database while being intentionally suppressed at serialization time;
+    # counting their raw status creates a false operator warning.
+    pending_sync = sum(
+        1
+        for event in pending_query.all()
+        if not outbox_suppression_reason(event.event_type, event.payload_json)
+    )
     today = today_iso()
     sales_today = db.query(func.coalesce(func.sum(PosOrder.total_amount), 0)).filter(PosOrder.business_date == today, PosOrder.status.in_(['paid', 'folio_pending'])).scalar() or 0
     cash_today = db.query(func.coalesce(func.sum(CashMovement.amount), 0)).filter(CashMovement.event_date == today, CashMovement.direction == 'in').scalar() or 0

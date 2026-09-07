@@ -142,10 +142,22 @@ if certification_phase == "postdeploy" and not health.get("accounting_api", {}).
 outbox = health.get("outbox", {})
 for key in ("failed", "blocked", "attention_required") if certification_phase == "postdeploy" else ():
     if allow_accounting_unavailable and accounting_is_unavailable:
-        # Every non-Inventory SyncOutboxEvent is delivered by run_outbox_sync to
-        # Accounting. Inventory events are removed from these alerting counts
-        # when that integration is disabled, so this backlog is the expected
-        # consequence of the explicitly accepted Accounting outage.
+        # Accounting delivery failures are acceptable only during an explicitly
+        # accepted Accounting outage. Inventory and Operations use distinct
+        # outbox statuses, so their failures remain visible to this gate.
+        non_accounting_value = {
+            "failed": int(outbox.get("operations_retry", 0) or 0)
+            + int(outbox.get("inventory_retry", 0) or 0),
+            "blocked": int(outbox.get("operations_blocked", 0) or 0)
+            + int(outbox.get("inventory_blocked", 0) or 0),
+            "attention_required": int(outbox.get("operations_retry", 0) or 0)
+            + int(outbox.get("operations_blocked", 0) or 0)
+            + int(outbox.get("inventory_retry", 0) or 0)
+            + int(outbox.get("inventory_blocked", 0) or 0),
+        }[key]
+        if non_accounting_value == 0:
+            continue
+        errors.append(f"non-Accounting outbox {key}={non_accounting_value}")
         continue
     if int(outbox.get(key, 0) or 0) != 0:
         errors.append(f"outbox {key}={outbox.get(key)}")

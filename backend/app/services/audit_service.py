@@ -5,6 +5,7 @@ import json
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, selectinload
 
+from app.core.json_utils import json_dumps
 from app.models.entities import AuditLog
 
 AUDIT_PAGE_SIZE_DEFAULT = 50
@@ -44,7 +45,7 @@ def write_audit_log(
     details: dict | list | None = None,
     commit: bool = True,
 ):
-    row = AuditLog(actor_user_id=actor_user_id, actor_username=actor_username, action=action, entity_type=entity_type, entity_id=str(entity_id) if entity_id is not None else None, request_path=request_path, request_method=request_method, ip_address=ip_address, status_code=status_code, details_json=json.dumps(details or {}, ensure_ascii=False))
+    row = AuditLog(actor_user_id=actor_user_id, actor_username=actor_username, action=action, entity_type=entity_type, entity_id=str(entity_id) if entity_id is not None else None, request_path=request_path, request_method=request_method, ip_address=ip_address, status_code=status_code, details_json=json_dumps(details or {}, ensure_ascii=False))
     db.add(row)
     if commit:
         db.commit()

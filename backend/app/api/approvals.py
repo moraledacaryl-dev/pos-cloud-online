@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -58,7 +58,7 @@ def authorize_approval(request: ApprovalAuthorizeRequest, http_request: Request,
 
 
 @router.get('')
-def approvals(status: str | None = None, approval_type: str | None = None, entity_type: str | None = None, requested_by_user_id: int | None = None, approved_by_user_id: int | None = None, date_from: str | None = None, date_to: str | None = None, q: str | None = None, limit: int = 200, db: Session = Depends(get_db), user=Depends(require_any_permissions('settings.manage', 'users.manage', 'reports.view', 'approvals.view'))):
+def approvals(status: str | None = None, approval_type: str | None = None, entity_type: str | None = None, requested_by_user_id: int | None = None, approved_by_user_id: int | None = None, date_from: str | None = None, date_to: str | None = None, q: str | None = None, limit: int = Query(default=200, ge=1, le=500), db: Session = Depends(get_db), user=Depends(require_any_permissions('settings.manage', 'users.manage', 'reports.view', 'approvals.view'))):
     return list_manager_approvals(db, status=status, approval_type=approval_type, entity_type=entity_type, requested_by_user_id=requested_by_user_id, approved_by_user_id=approved_by_user_id, date_from=date_from, date_to=date_to, q=q, limit=limit)
 
 

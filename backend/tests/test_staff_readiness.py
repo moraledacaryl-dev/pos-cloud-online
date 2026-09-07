@@ -7,6 +7,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.api.customer_display import _stored_snapshot, update_snapshot
 from app.core.settings import DEFAULT_ACCOUNTING_API_BASE, Settings, looks_like_placeholder_secret
+from app.core.settings import settings as runtime_settings
 from app.db.database import Base
 from app.models.entities import Outlet, Register, SyncOutboxEvent, SystemSetting, User
 from app.schemas.common import RegisterSessionClose, RegisterSessionOpen
@@ -224,6 +225,34 @@ def test_local_only_order_is_excluded_from_outbox_alert_counts():
     assert metrics['blocked'] == 0
     assert metrics['attention_required'] == 0
     assert metrics['suppressed'] == 1
+
+
+def test_enabled_inventory_failures_are_included_in_readiness_metrics(monkeypatch):
+    db = make_session()
+    monkeypatch.setattr(runtime_settings, 'inventory_integration_enabled', True)
+    for index, status in enumerate(('inventory_pending', 'inventory_retry', 'blocked'), start=1):
+        db.add(SyncOutboxEvent(
+            event_uuid=f'inventory-event-{index}',
+            aggregate_type='order',
+            aggregate_id=index,
+            event_type='inventory.sale_completed',
+            idempotency_key=f'inventory:metrics:{index}',
+            payload_json='{}',
+            status=status,
+            retry_count=1 if status != 'inventory_pending' else 0,
+        ))
+    db.commit()
+
+    metrics = get_outbox_metrics(db)
+
+    assert metrics['inventory_pending'] == 1
+    assert metrics['inventory_retry'] == 1
+    assert metrics['inventory_blocked'] == 1
+    assert metrics['pending'] == 1
+    assert metrics['failed'] == 1
+    assert metrics['blocked'] == 1
+    assert metrics['attention_required'] == 2
+    assert metrics['due_now'] == 2
 
 
 def test_accounting_health_path_uses_origin_not_api_prefix():

@@ -62,6 +62,9 @@ def test_accounting_outage_override_is_explicit_and_narrow():
     assert 'disallowed_integration_reasons' in text
     assert 'value is False' in text
     assert 'key == "accounting_api"' in text
+    assert 'inventory_retry' in text
+    assert 'inventory_blocked' in text
+    assert 'non-Accounting outbox' in text
 
 
 def test_predeploy_checks_core_and_postdeploy_checks_integrations():

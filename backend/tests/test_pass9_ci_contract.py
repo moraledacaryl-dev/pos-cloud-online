@@ -12,7 +12,7 @@ def test_production_equivalent_ci_keeps_required_security_and_runtime_gates():
         'postgres:16',
         'redis:7',
         'alembic upgrade 0008_manager_approval_grants',
-        'alembic downgrade 0008_manager_approval_grants',
+        'alembic downgrade 0009_customer_display_devices',
         'alembic check',
         'app.workers.sync_worker',
         'test_postgres_manager_approval_concurrency.py',

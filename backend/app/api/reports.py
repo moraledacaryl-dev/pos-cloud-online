@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from datetime import UTC, datetime
+from decimal import ROUND_HALF_UP, Decimal
 from hmac import compare_digest
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
@@ -14,8 +15,11 @@ from app.models.entities import CashMovement, PosOrder, PosOrderPayment, Refund,
 router = APIRouter()
 
 
-def _money(value) -> float:
-    return round(float(value or 0), 2)
+MONEY_QUANTUM = Decimal('0.01')
+
+
+def _money(value) -> Decimal:
+    return Decimal(str(value or 0)).quantize(MONEY_QUANTUM, rounding=ROUND_HALF_UP)
 
 
 def _hour(value) -> str | None:
@@ -51,7 +55,7 @@ def build_daily_ops_context(db: Session, business_date: str) -> dict:
         payments = db.query(PosOrderPayment).filter(PosOrderPayment.order_id.in_(order_ids)).all()
         refunds = db.query(Refund).filter(Refund.order_id.in_(order_ids)).all()
 
-    tender_totals = defaultdict(float)
+    tender_totals: defaultdict[str, Decimal] = defaultdict(lambda: Decimal('0'))
     for payment in payments:
         key = (payment.tender_type or 'unknown').lower().replace(' ', '_')
         tender_totals[key] += _money(payment.amount_applied)

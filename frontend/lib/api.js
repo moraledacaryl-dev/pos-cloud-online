@@ -77,10 +77,18 @@ async function requestOnce(path, init = {}, retrying = false) {
   if (res.status === 401 && !retrying && !String(path).startsWith('/auth/')) {
     await refreshBrowserSession();
     const retried = await rawRequest(path, init);
-    if (!retried.res.ok) throw new Error(errorMessage(retried.data));
+    if (!retried.res.ok) {
+      const error = new Error(errorMessage(retried.data));
+      error.status = retried.res.status;
+      throw error;
+    }
     return retried.data;
   }
-  if (!res.ok) throw new Error(errorMessage(data));
+  if (!res.ok) {
+    const error = new Error(errorMessage(data));
+    error.status = res.status;
+    throw error;
+  }
   return data;
 }
 
@@ -224,6 +232,7 @@ export const resolveOutboxEvent = (eventId, resolution = 'Manually resolved') =>
 
 export const getSystemSettings = () => request('/system-settings');
 export const updateSystemSettings = (payload) => request('/system-settings', { method: 'PUT', body: JSON.stringify(payload) });
+export const fetchReceiptProfile = () => request('/system-settings/receipt-profile');
 export const fetchTableLayout = () => request('/system-settings/table-layout');
 export const updateTableLayout = (payload) => request('/system-settings/table-layout', { method: 'PUT', body: JSON.stringify(payload) });
 export const seedDefaults = () => request('/seed/defaults', { method: 'POST' });
@@ -251,7 +260,13 @@ export const rejectApproval = (id, payload = {}) => request(`/approvals/${id}/re
 
 export async function fetchCustomerDisplaySnapshot(channel = 'main') {
   const res = await fetch(`${API_BASE}/customer-display/${encodeURIComponent(channel)}`, { cache: 'no-store', credentials: 'same-origin' });
-  if (!res.ok) throw new Error('Customer display server is unavailable.');
+  if (!res.ok) {
+    const error = new Error(res.status === 401 || res.status === 403
+      ? 'This customer display must be paired.'
+      : 'Customer display server is unavailable.');
+    error.status = res.status;
+    throw error;
+  }
   return res.json();
 }
 

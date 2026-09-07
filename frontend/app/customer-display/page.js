@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { API_BASE, errorMessage, fetchCustomerDisplaySnapshot, request } from '../../lib/api';
 import { useCurrentUser } from '../../lib/useCurrentUser';
+import { useDialogFocus } from '../../lib/useDialogFocus';
 
 const peso = new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' });
 
@@ -35,15 +36,7 @@ function SetupCard({ mode, children }) {
 function ExitDisplayControl() {
   const [confirming, setConfirming] = useState(false);
   const [leaving, setLeaving] = useState(false);
-
-  useEffect(() => {
-    if (!confirming) return undefined;
-    const handleKeyDown = (event) => {
-      if (event.key === 'Escape') setConfirming(false);
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [confirming]);
+  useDialogFocus(confirming, () => { if (!leaving) setConfirming(false); });
 
   async function exitDisplay() {
     setLeaving(true);
@@ -79,6 +72,7 @@ function ExitDisplayControl() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="customer-display-exit-title"
+            tabIndex={-1}
           >
             <p className="customer-display-eyebrow">Customer display</p>
             <h2 id="customer-display-exit-title">Leave this screen?</h2>
@@ -135,6 +129,7 @@ export default function CustomerDisplayPage() {
   const [busy, setBusy] = useState(false);
   const [channel, setChannel] = useState('main');
   const [managerSetup, setManagerSetup] = useState(false);
+  const [routeReady, setRouteReady] = useState(false);
   const [devices, setDevices] = useState([]);
   const [devicesBusy, setDevicesBusy] = useState(false);
 
@@ -142,9 +137,11 @@ export default function CustomerDisplayPage() {
     const params = new URLSearchParams(window.location.search);
     setChannel(params.get('channel') || 'main');
     setManagerSetup(params.get('setup') === '1');
+    setRouteReady(true);
   }, []);
 
   useEffect(() => {
+    if (!routeReady || managerSetup || needsPairing) return undefined;
     let active = true;
     const load = async () => {
       try {
@@ -157,16 +154,16 @@ export default function CustomerDisplayPage() {
         if (!active) return;
         setLatest(null);
         setServerConnected(false);
-        setNeedsPairing(true);
+        if ([401, 403].includes(Number(err?.status))) setNeedsPairing(true);
       }
     };
     load().catch(() => {});
-    const timer = window.setInterval(() => load().catch(() => {}), 1000);
+    const timer = window.setInterval(() => load().catch(() => {}), 2000);
     return () => {
       active = false;
       window.clearInterval(timer);
     };
-  }, [channel]);
+  }, [channel, managerSetup, needsPairing, routeReady]);
 
   async function loadDevices() {
     setDevicesBusy(true);

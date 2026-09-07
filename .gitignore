@@ -18,6 +18,8 @@ venv/
 node_modules/
 .next/
 out/
+playwright-report/
+test-results/
 
 # Runtime data
 *.db

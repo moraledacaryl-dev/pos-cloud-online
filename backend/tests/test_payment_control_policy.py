@@ -1,3 +1,4 @@
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
@@ -33,6 +34,14 @@ def test_exact_split_payment_is_valid():
         [payment('cash', 200, 500), payment('gcash', 300, 300, 'GC-123')],
     )
     assert result['applied_total'] == 500
+
+
+def test_fractional_split_payment_uses_decimal_not_binary_float_math():
+    result = validate_payment_control(
+        {'status': 'draft', 'total_amount': '0.30'},
+        [payment('cash', '0.10', '0.10'), payment('cash', '0.20', '0.20')],
+    )
+    assert result['applied_total'] == Decimal('0.30')
 
 
 def test_payment_must_exactly_cover_order():

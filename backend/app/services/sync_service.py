@@ -18,6 +18,8 @@ from app.models.entities import (
     RoomChargePosting,
     SyncOutboxEvent,
 )
+from app.services.inventory_integration import INVENTORY_EVENT_TYPES, run_inventory_outbox_sync
+from app.services.operations_integration import OPERATIONS_EVENT_PREFIX, run_operations_outbox_sync
 from app.services.pos_service import normalize_kds_station, now_iso, save_setting_json, setting_json
 
 
@@ -804,6 +806,27 @@ async def run_outbox_sync(db: Session, limit: int = 25) -> dict:
 
 
 async def retry_outbox_event(db: Session, event_id: int) -> dict:
+    integration_row = db.query(SyncOutboxEvent).filter(SyncOutboxEvent.id == event_id).first()
+    if not integration_row:
+        raise ValueError('Outbox event not found.')
+    if integration_row.event_type in INVENTORY_EVENT_TYPES.values():
+        if integration_row.status == 'synced':
+            raise ValueError('Event is already synced.')
+        integration_row.status = 'inventory_pending'
+        integration_row.next_retry_at = None
+        integration_row.last_error = None
+        db.add(integration_row)
+        db.commit()
+        return await run_inventory_outbox_sync(db, limit=1, event_id=event_id)
+    if integration_row.event_type.startswith(OPERATIONS_EVENT_PREFIX):
+        if integration_row.status == 'synced':
+            raise ValueError('Event is already synced.')
+        integration_row.status = 'operations_pending'
+        integration_row.next_retry_at = None
+        integration_row.last_error = None
+        db.add(integration_row)
+        db.commit()
+        return await run_operations_outbox_sync(db, limit=1, event_id=event_id)
     config = get_sync_config(db)
     base = (config.get('api_base') or '').strip()
     if not base:
@@ -908,10 +931,15 @@ async def unblock_outbox_event(db: Session, event_id: int) -> dict:
     row = db.query(SyncOutboxEvent).filter(SyncOutboxEvent.id == event_id).first()
     if not row:
         raise ValueError('Sync event not found')
-    if row.status not in {'blocked', 'failed'}:
+    if row.status not in {'blocked', 'failed', 'inventory_retry', 'operations_retry', 'operations_blocked'}:
         raise ValueError('Event is not blocked or failed')
-    
-    row.status = 'pending'
+
+    if row.event_type in INVENTORY_EVENT_TYPES.values():
+        row.status = 'inventory_pending'
+    elif row.event_type.startswith(OPERATIONS_EVENT_PREFIX):
+        row.status = 'operations_pending'
+    else:
+        row.status = 'pending'
     row.next_retry_at = now_iso()
     row.last_attempt_at = None
     row.last_error = None
@@ -938,7 +966,7 @@ async def resolve_outbox_event(db: Session, event_id: int, resolution: str) -> d
     row = db.query(SyncOutboxEvent).filter(SyncOutboxEvent.id == event_id).first()
     if not row:
         raise ValueError('Sync event not found')
-    if row.status not in {'failed', 'blocked'}:
+    if row.status not in {'failed', 'blocked', 'inventory_retry', 'operations_retry', 'operations_blocked'}:
         raise ValueError('Event is not in a resolvable state')
     
     row.status = 'resolved'

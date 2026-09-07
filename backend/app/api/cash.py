@@ -1,6 +1,6 @@
 import json
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_permissions
@@ -8,7 +8,7 @@ from app.db.database import get_db
 from app.models.entities import AuditLog
 from app.schemas.common import CashMovementCreate
 from app.services.approval_guard import consume_protected_approval, reject_legacy_client_approver
-from app.services.operations_integration import publish_operations_event
+from app.services.operations_integration import enqueue_operations_event
 from app.services.payment_control_policy import validate_cash_movement_control
 from app.services.pos_service import create_cash_movement, list_cash_movements
 
@@ -55,12 +55,13 @@ def _correct_cash_audit_attribution(db: Session, movement_id: int, current_user,
     db.commit()
 
 
-def _publish_cash_movement(result: dict, payload: CashMovementCreate, current_user) -> None:
+def _publish_cash_movement(db: Session, result: dict, payload: CashMovementCreate, current_user) -> None:
     movement_id = result.get('id')
     if movement_id is None:
         return
     movement_type = str(payload.movement_type or '').strip().lower()
-    publish_operations_event(
+    enqueue_operations_event(
+        db,
         'cash_movement.created',
         f'cash-movement:{movement_id}',
         title=f'POS cash movement: {movement_type.replace("_", " ").title()}',
@@ -80,7 +81,7 @@ def _publish_cash_movement(result: dict, payload: CashMovementCreate, current_us
 
 
 @router.get('')
-def cash_movements(session_id: int | None = None, limit: int = 300, db: Session = Depends(get_db), user=Depends(require_permissions('cash.manage'))):
+def cash_movements(session_id: int | None = None, limit: int = Query(default=300, ge=1, le=500), db: Session = Depends(get_db), user=Depends(require_permissions('cash.manage'))):
     return list_cash_movements(db, session_id=session_id, limit=limit)
 
 
@@ -93,7 +94,7 @@ def add_cash_movement(payload: CashMovementCreate, db: Session = Depends(get_db)
         requires_approval = movement_type in SENSITIVE_CASH_MOVEMENTS or bool(payload.requires_approval)
         if not requires_approval:
             result = create_cash_movement(db, payload, approved_by_user_id=getattr(current_user, 'id', None))
-            _publish_cash_movement(result, payload, current_user)
+            _publish_cash_movement(db, result, payload, current_user)
             return result
 
         with consume_protected_approval(
@@ -108,7 +109,7 @@ def add_cash_movement(payload: CashMovementCreate, db: Session = Depends(get_db)
             payload.requires_approval = True
             result = create_cash_movement(db, payload, approved_by_user_id=grant['approved_by_user_id'])
         _correct_cash_audit_attribution(db, int(result['id']), current_user, grant)
-        _publish_cash_movement(result, payload, current_user)
+        _publish_cash_movement(db, result, payload, current_user)
         return result
     except ValueError as e:
         db.rollback()
