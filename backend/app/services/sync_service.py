@@ -102,9 +102,13 @@ async def _ensure_accounting_token(db: Session, config: dict) -> dict:
     if not base or not secret:
         return config
     token_path = config.get('integration_token_path') or '/auth/integration/token'
-    async with httpx.AsyncClient(timeout=settings.http_timeout_seconds, headers={'Accept': 'application/json'}) as client:
+    async with httpx.AsyncClient(
+        timeout=settings.http_timeout_seconds,
+        headers={'Accept': 'application/json'},
+        follow_redirects=True,
+    ) as client:
         res = await client.post(_join(base, token_path), json={'secret': secret})
-        if res.status_code >= 400:
+        if not 200 <= res.status_code < 300:
             detail = res.text[:300]
             raise ValueError(f'Failed to refresh accounting integration token: {detail}')
         data = res.json() or {}
@@ -123,9 +127,13 @@ async def fetch_accounting_financial_accounts(db: Session) -> list[dict]:
         return []
     config = await _ensure_accounting_token(db, config)
     path = config.get('current_erp_financial_accounts_path') or '/financial-accounts'
-    async with httpx.AsyncClient(timeout=settings.http_timeout_seconds, headers=_client_headers(config)) as client:
+    async with httpx.AsyncClient(
+        timeout=settings.http_timeout_seconds,
+        headers=_client_headers(config),
+        follow_redirects=True,
+    ) as client:
         res = await client.get(_join(base, path), params={'only_active': 'true'})
-        if res.status_code >= 400:
+        if not 200 <= res.status_code < 300:
             detail = res.text[:300]
             raise ValueError(f'Failed to fetch financial accounts: {detail}')
         rows = res.json() or []
@@ -169,7 +177,7 @@ async def sync_in_house_bookings_from_accounting(
     path = config.get('accounting_bookings_calendar_path') or '/reservations/bookings/calendar'
     async with httpx.AsyncClient(timeout=settings.http_timeout_seconds, headers=_client_headers(config), follow_redirects=True) as client:
         res = await client.get(_join(base, path), params={'start_date': start.isoformat(), 'end_date': end.isoformat()})
-        if res.status_code >= 400:
+        if not 200 <= res.status_code < 300:
             detail = res.text[:400]
             raise ValueError(f'Failed to fetch Accounting booking calendar: {detail}')
         bookings = res.json() or []
@@ -297,13 +305,17 @@ async def sync_catalog_from_accounting(db: Session, *, force: bool = True) -> di
     items_path = config.get('catalog_items_path') or '/menu/items'
     skus_path = config.get('catalog_skus_path') or '/menu/skus'
     headers = _client_headers(config)
-    async with httpx.AsyncClient(timeout=settings.http_timeout_seconds, headers=headers) as client:
+    async with httpx.AsyncClient(
+        timeout=settings.http_timeout_seconds,
+        headers=headers,
+        follow_redirects=True,
+    ) as client:
         items_res = await client.get(_join(base, items_path))
-        if items_res.status_code >= 400:
+        if not 200 <= items_res.status_code < 300:
             detail = items_res.text[:400]
             raise ValueError(f'Failed to fetch accounting menu items: {detail}')
         skus_res = await client.get(_join(base, skus_path))
-        if skus_res.status_code >= 400:
+        if not 200 <= skus_res.status_code < 300:
             detail = skus_res.text[:400]
             raise ValueError(f'Failed to fetch accounting menu SKUs: {detail}')
         items = items_res.json() or []
@@ -420,7 +432,7 @@ async def _current_erp_transaction_exists(client: httpx.AsyncClient, base: str, 
     if not reference_no:
         return False
     res = await client.get(_join(base, path), params={'q': reference_no, 'limit': 50})
-    if res.status_code >= 400:
+    if not 200 <= res.status_code < 300:
         return False
     rows = res.json() or []
     return any(str(row.get('reference_no') or '') == str(reference_no) for row in rows)
@@ -430,7 +442,7 @@ async def _current_erp_transfer_exists(client: httpx.AsyncClient, base: str, pat
     if not reference_no:
         return False
     res = await client.get(_join(base, path), params={'limit': 200})
-    if res.status_code >= 400:
+    if not 200 <= res.status_code < 300:
         return False
     rows = res.json() or []
     return any(str(row.get('reference_no') or '') == str(reference_no) for row in rows)
@@ -438,7 +450,7 @@ async def _current_erp_transfer_exists(client: httpx.AsyncClient, base: str, pat
 
 async def _find_current_erp_sale(client: httpx.AsyncClient, base: str, path: str, order_no: str) -> dict | None:
     res = await client.get(_join(base, path), params={'limit': 300})
-    if res.status_code >= 400:
+    if not 200 <= res.status_code < 300:
         return None
     rows = res.json() or []
     for row in rows:
@@ -450,7 +462,7 @@ async def _find_current_erp_sale(client: httpx.AsyncClient, base: str, path: str
 async def _current_erp_reconciliation_exists(client: httpx.AsyncClient, base: str, path: str, account_id: int | None, shift_name: str, business_date: str) -> bool:
     params = {'account_id': account_id, 'start_date': business_date, 'end_date': business_date, 'limit': 200}
     res = await client.get(_join(base, path), params=params)
-    if res.status_code >= 400:
+    if not 200 <= res.status_code < 300:
         return False
     rows = res.json() or []
     return any(str(row.get('shift_name') or '') == str(shift_name) for row in rows)
@@ -721,7 +733,11 @@ async def run_outbox_sync(db: Session, limit: int = 25) -> dict:
     synced = 0
     failed = 0
     blocked = 0
-    async with httpx.AsyncClient(timeout=settings.http_timeout_seconds, headers=_client_headers(config)) as client:
+    async with httpx.AsyncClient(
+        timeout=settings.http_timeout_seconds,
+        headers=_client_headers(config),
+        follow_redirects=True,
+    ) as client:
         for row in rows:
             payload = _load_payload(row)
             row.last_attempt_at = now_iso()
@@ -751,7 +767,7 @@ async def run_outbox_sync(db: Session, limit: int = 25) -> dict:
                     db.add(row)
                     continue
 
-                if res is None or res.status_code < 400:
+                if res is None or 200 <= res.status_code < 300:
                     row.status = 'synced'
                     row.synced_at = now_iso()
                     row.retry_count = 0
@@ -840,7 +856,11 @@ async def retry_outbox_event(db: Session, event_id: int) -> dict:
     synced = 0
     failed = 0
     blocked = 0
-    async with httpx.AsyncClient(timeout=settings.http_timeout_seconds, headers=_client_headers(config)) as client:
+    async with httpx.AsyncClient(
+        timeout=settings.http_timeout_seconds,
+        headers=_client_headers(config),
+        follow_redirects=True,
+    ) as client:
         payload = _load_payload(row)
         row.last_attempt_at = now_iso()
         try:
@@ -870,7 +890,7 @@ async def retry_outbox_event(db: Session, event_id: int) -> dict:
                 db.commit()
                 return {'ok': False, 'blocked': True, 'error': row.last_error}
 
-            if res is None or res.status_code < 400:
+            if res is None or 200 <= res.status_code < 300:
                 row.status = 'synced'
                 row.synced_at = now_iso()
                 row.retry_count = 0

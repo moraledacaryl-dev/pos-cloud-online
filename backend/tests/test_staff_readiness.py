@@ -20,7 +20,7 @@ from app.services.pos_service import (
     save_setting_json,
     setting_json,
 )
-from app.services.sync_service import run_outbox_sync
+from app.services.sync_service import fetch_accounting_financial_accounts, run_outbox_sync
 
 
 def make_session():
@@ -57,6 +57,8 @@ class FakeResponse:
         self._payload = payload if payload is not None else []
 
     def json(self):
+        if self._payload is None:
+            raise ValueError('Response did not contain JSON.')
         return self._payload
 
 
@@ -78,6 +80,54 @@ class CaptureAsyncClient:
     async def post(self, url, json=None):
         self.__class__.posts.append((url, json))
         return FakeResponse({'ok': True})
+
+
+class StatusResponse:
+    def __init__(self, status_code, payload=None, text=''):
+        self.status_code = status_code
+        self._payload = payload
+        self.text = text
+
+    def json(self):
+        if self._payload is None:
+            raise ValueError('Response did not contain JSON.')
+        return self._payload
+
+
+class RedirectAwareAsyncClient:
+    follow_redirects_values = []
+
+    def __init__(self, *args, follow_redirects=False, **kwargs):
+        self.follow_redirects = follow_redirects
+        self.__class__.follow_redirects_values.append(follow_redirects)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def get(self, url, params=None):
+        if url.endswith('/financial-accounts') and self.follow_redirects:
+            return StatusResponse(200, [{'id': 1, 'name': 'Main Cash'}], '[{"id":1}]')
+        return StatusResponse(307, None, 'Temporary Redirect')
+
+
+class UnexpectedRedirectAsyncClient:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def get(self, url, params=None):
+        return StatusResponse(200, [], '[]')
+
+    async def post(self, url, json=None):
+        return StatusResponse(307, None, 'Temporary Redirect')
 
 
 def test_accounting_api_base_default_is_accounting_subdomain(monkeypatch):
@@ -160,6 +210,43 @@ def test_sync_worker_uses_configured_accounting_api_base(monkeypatch):
     assert result['synced'] == 1
     assert CaptureAsyncClient.posts
     assert CaptureAsyncClient.posts[0][0] == 'https://accounting.configured.test/api/cashflow/transactions'
+
+
+def test_accounting_financial_accounts_follow_canonical_redirects(monkeypatch):
+    db = make_session()
+    save_setting_json(db, 'accounting_sync', {'api_base': 'https://accounting.test/api'}, username='test')
+    RedirectAwareAsyncClient.follow_redirects_values = []
+    monkeypatch.setattr('app.services.sync_service.httpx.AsyncClient', RedirectAwareAsyncClient)
+
+    rows = asyncio.run(fetch_accounting_financial_accounts(db))
+
+    assert rows == [{'id': 1, 'name': 'Main Cash'}]
+    assert RedirectAwareAsyncClient.follow_redirects_values == [True]
+
+
+def test_accounting_worker_never_marks_unfollowed_redirect_as_synced(monkeypatch):
+    db = make_session()
+    save_setting_json(db, 'accounting_sync', {'api_base': 'https://accounting.test/api'}, username='test')
+    row = SyncOutboxEvent(
+        event_uuid='event-redirect',
+        aggregate_type='cash_movement',
+        aggregate_id='1000',
+        event_type='cash_movement.created',
+        idempotency_key='cash_movement.created:1000',
+        payload_json='{"event_date":"2026-09-07","direction":"in","amount":1,"reference_no":"CM-1000","cash_event_uuid":"cm-1000","accounting_financial_account_id":1,"id":1000}',
+        status='pending',
+    )
+    db.add(row)
+    db.commit()
+    monkeypatch.setattr('app.services.sync_service.httpx.AsyncClient', UnexpectedRedirectAsyncClient)
+
+    result = asyncio.run(run_outbox_sync(db, limit=1))
+
+    db.refresh(row)
+    assert result['synced'] == 0
+    assert result['failed'] == 1
+    assert row.status == 'failed'
+    assert row.last_error == 'Temporary Redirect'
 
 
 def test_unmapped_register_cannot_open_or_close_a_shift():
