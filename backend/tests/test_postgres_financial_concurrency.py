@@ -54,7 +54,6 @@ def test_postgres_allows_only_one_open_session_per_register():
 
     def insert_open(db):
         db.add(RegisterSession(
-            session_uuid=str(uuid.uuid4()),
             session_code=f'SES-{uuid.uuid4().hex[:12]}',
             register_id=register_id,
             business_date='2026-09-07',
@@ -85,7 +84,6 @@ def test_postgres_row_lock_prevents_double_payment():
         db.add(register)
         db.flush()
         session = RegisterSession(
-            session_uuid=str(uuid.uuid4()),
             session_code=f'PAY-{suffix}',
             register_id=register.id,
             business_date='2026-09-07',
