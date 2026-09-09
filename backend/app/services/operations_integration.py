@@ -119,8 +119,18 @@ def publish_operations_event(
             headers={'X-Integration-Api-Key': key},
             json=jsonable_encoder(envelope),
             timeout=settings.operations_integration_timeout_seconds,
+            follow_redirects=True,
         )
-        response.raise_for_status()
+        if not 200 <= response.status_code < 300:
+            logger.warning(
+                'operations.integration_delivery_failed',
+                extra={
+                    'event_type': event_type,
+                    'event_id': str(event_id),
+                    'status_code': response.status_code,
+                },
+            )
+            return False
         return True
     except Exception as exc:
         logger.warning(
@@ -243,7 +253,10 @@ async def run_operations_outbox_sync(
         processed += 1
         row.last_attempt_at = now_text
         try:
-            async with httpx.AsyncClient(timeout=settings.operations_integration_timeout_seconds) as client:
+            async with httpx.AsyncClient(
+                timeout=settings.operations_integration_timeout_seconds,
+                follow_redirects=True,
+            ) as client:
                 response = await client.post(
                     _operations_url(),
                     headers={'X-Integration-Api-Key': key},
