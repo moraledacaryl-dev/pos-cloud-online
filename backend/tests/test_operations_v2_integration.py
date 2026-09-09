@@ -20,9 +20,10 @@ def test_operations_url_accepts_api_base(monkeypatch):
 
 def test_publisher_uses_stable_event_contract(monkeypatch):
     captured = {}
+
     class Response:
-        def raise_for_status(self):
-            return None
+        status_code = 202
+
     def fake_post(url, **kwargs):
         captured['url'] = url
         captured.update(kwargs)
@@ -49,6 +50,23 @@ def test_publisher_uses_stable_event_contract(monkeypatch):
     assert captured['json']['event_type'] == 'cash_movement.created'
     assert captured['json']['subject']['id'] == '42'
     assert captured['json']['occurred_at'] == '2026-09-01T08:30:00+00:00'
+    assert captured['follow_redirects'] is True
+
+
+def test_publisher_never_reports_redirect_as_success(monkeypatch):
+    class RedirectResponse:
+        status_code = 302
+
+    monkeypatch.setattr(oi.settings, 'operations_integration_enabled', True)
+    monkeypatch.setattr(oi.settings, 'operations_api_base', 'https://operations.hiddenoasis.app/api')
+    monkeypatch.setattr(oi.settings, 'operations_integration_key', 'test-key')
+    monkeypatch.setattr(oi.httpx, 'post', lambda *args, **kwargs: RedirectResponse())
+
+    assert oi.publish_operations_event(
+        'order.finalized',
+        'order-finalized:redirect-test',
+        title='Order finalized',
+    ) is False
 
 
 def test_unknown_event_is_rejected(monkeypatch):
@@ -103,6 +121,7 @@ def test_operations_events_are_durable_and_worker_delivers_them(monkeypatch):
     db.refresh(row)
     assert result['synced'] == 1
     assert row.status == 'synced'
+    assert captured['client']['follow_redirects'] is True
     assert captured['headers']['X-Integration-Api-Key'] == 'test-key'
     assert captured['json']['subject']['id'] == '42'
 
