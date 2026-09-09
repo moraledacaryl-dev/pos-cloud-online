@@ -1,7 +1,10 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const visualAuditEnabled = process.env.VISUAL_AUDIT_RUN === '1';
+
 export default defineConfig({
   testDir: './e2e',
+  testIgnore: visualAuditEnabled ? [] : ['**/visual-audit.spec.mjs'],
   timeout: 45_000,
   expect: { timeout: 10_000 },
   fullyParallel: false,
