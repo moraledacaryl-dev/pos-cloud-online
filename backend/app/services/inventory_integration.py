@@ -171,7 +171,11 @@ async def run_inventory_outbox_sync(db: Session, limit: int = 25, *, event_id: i
             'lines': payload.get('lines') or [],
         }
         try:
-            async with httpx.AsyncClient(timeout=settings.http_timeout_seconds, headers={'Accept': 'application/json', 'X-Integration-Token': token}) as client:
+            async with httpx.AsyncClient(
+                timeout=settings.http_timeout_seconds,
+                headers={'Accept': 'application/json', 'X-Integration-Token': token},
+                follow_redirects=True,
+            ) as client:
                 response = await client.post(_join(base, settings.inventory_pos_events_path), json=outbound)
         except Exception as exc:
             _mark_retry(db, row, f'Inventory network failure: {exc}')
