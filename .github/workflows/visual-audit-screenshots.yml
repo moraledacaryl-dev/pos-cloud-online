@@ -110,7 +110,7 @@ jobs:
           ADMIN_USERNAME=ci-manager ADMIN_FULL_NAME='Visual Audit Manager' ADMIN_ROLE=manager ADMIN_PASSWORD='CiManagerPassword-2026!' python scripts/create_admin.py
           ADMIN_USERNAME=ci-cashier ADMIN_FULL_NAME='Visual Audit Cashier' ADMIN_ROLE=cashier ADMIN_PASSWORD='CiCashierPassword-2026!' python scripts/create_admin.py
           ADMIN_USERNAME=ci-kitchen ADMIN_FULL_NAME='Visual Audit Kitchen' ADMIN_ROLE=kitchen ADMIN_PASSWORD='CiKitchenPassword-2026!' python scripts/create_admin.py
-          python scripts/seed_visual_audit.py
+          PYTHONPATH=. python scripts/seed_visual_audit.py
 
       - name: Build frontend
         working-directory: frontend
