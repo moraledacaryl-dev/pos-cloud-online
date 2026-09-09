@@ -1,3 +1,5 @@
+import asyncio
+import json
 from types import SimpleNamespace
 
 from app.services import inventory_integration as integration
@@ -76,3 +78,67 @@ def test_inventory_outbox_uses_dedicated_pending_status(monkeypatch):
     assert row.last_error is None
     assert captured['event_type'] == 'inventory.sale_completed'
     assert captured['idempotency_key'] == 'inventory:pos:order-uuid-15:sale_completed'
+
+
+def test_inventory_worker_follows_canonical_redirects(monkeypatch):
+    payload = integration.build_inventory_event(order_payload(), 'sale_completed')
+    row = SimpleNamespace(
+        id=101,
+        event_type='inventory.sale_completed',
+        status='inventory_pending',
+        next_retry_at=None,
+        retry_count=0,
+        last_attempt_at=None,
+        synced_at=None,
+        last_error=None,
+        payload_json=json.dumps(payload),
+    )
+    captured = {}
+
+    class FakeQuery:
+        def filter(self, *args, **kwargs):
+            return self
+        def order_by(self, *args, **kwargs):
+            return self
+        def limit(self, *args, **kwargs):
+            return self
+        def all(self):
+            return [row]
+
+    class FakeDb:
+        def query(self, *args, **kwargs):
+            return FakeQuery()
+        def add(self, value):
+            assert value is row
+        def commit(self):
+            pass
+
+    class Response:
+        status_code = 202
+        text = ''
+
+    class Client:
+        def __init__(self, **kwargs):
+            captured['client'] = kwargs
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            return None
+        async def post(self, url, **kwargs):
+            captured['url'] = url
+            captured.update(kwargs)
+            return Response()
+
+    monkeypatch.setattr(integration.settings, 'inventory_integration_enabled', True)
+    monkeypatch.setattr(integration.settings, 'inventory_api_base', 'https://inventory.hiddenoasis.app/api')
+    monkeypatch.setattr(integration.settings, 'inventory_integration_token', 'inventory-test-token')
+    monkeypatch.setattr(integration.settings, 'inventory_pos_events_path', '/integrations/pos/events')
+    monkeypatch.setattr(integration.httpx, 'AsyncClient', Client)
+
+    result = asyncio.run(integration.run_inventory_outbox_sync(FakeDb(), limit=10))
+
+    assert result['synced'] == 1
+    assert row.status == 'synced'
+    assert captured['client']['follow_redirects'] is True
+    assert captured['client']['headers']['X-Integration-Token'] == 'inventory-test-token'
+    assert captured['url'] == 'https://inventory.hiddenoasis.app/api/integrations/pos/events'
