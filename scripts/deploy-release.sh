@@ -66,6 +66,11 @@ EVIDENCE_FILE="$EVIDENCE_DIR/$EXPECTED_COMMIT.txt"
 rollback_code() {
   local exit_code=$?
   if [[ $exit_code -eq 0 ]]; then return; fi
+  # ERR can fire inside a subshell whose working directory is backend/ or
+  # frontend/. Disable the trap and re-anchor before using repository-relative
+  # paths so rollback itself cannot recurse or look under backend/backend.
+  trap - ERR
+  cd "$APP_DIR" || true
   echo "Deployment failed; restoring code commit $PREVIOUS_COMMIT" >&2
   git switch --detach "$PREVIOUS_COMMIT" || true
   install_systemd_units || true
@@ -103,7 +108,16 @@ systemctl stop pos-frontend pos-sync-worker pos-backend
   .venv/bin/python -m pip install --upgrade pip
   .venv/bin/python -m pip install -r requirements-dev.lock
   .venv/bin/ruff check app tests
-  PYTHONPATH=. .venv/bin/pytest -q
+  # Deployment is usually launched from an administrative shell that may have
+  # sourced /etc/hiddenoasis/pos-backend.env. Unit tests must not inherit live
+  # production mode, database URLs, credentials, or feature flags. CI also runs
+  # against the application's deterministic defaults rather than live env state.
+  env -i \
+    PATH="$PATH" \
+    HOME="${HOME:-/root}" \
+    LANG="${LANG:-C.UTF-8}" \
+    PYTHONPATH=. \
+    .venv/bin/pytest -q
 )
 (
   cd frontend
