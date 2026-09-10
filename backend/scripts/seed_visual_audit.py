@@ -50,6 +50,11 @@ def _id(row):
     return int(row["id"] if isinstance(row, dict) else row.id)
 
 
+def _is_active(row):
+    value = row.get("is_active") if isinstance(row, dict) else getattr(row, "is_active", True)
+    return bool(value)
+
+
 def main():
     db = SessionLocal()
     try:
@@ -73,7 +78,7 @@ def main():
                 ))
 
         items = list_catalog_items(db, active_only=True, available_only=True)
-        registers = list_registers(db, active_only=True)
+        registers = [row for row in list_registers(db) if _is_active(row)]
         if not registers:
             raise RuntimeError("Visual audit seed expected at least one default register")
 
