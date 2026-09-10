@@ -3,6 +3,7 @@ import './mobile-accessibility.css';
 import './pass12-runtime.css';
 import './pass13-accessibility.css';
 import './hidden-oasis-theme.css';
+import './final-polish.css';
 import { connection } from 'next/server';
 import AppShell from '../components/AppShell';
 import { CurrentUserProvider } from '../lib/useCurrentUser';
