@@ -167,7 +167,7 @@ export default function OrdersPage() {
       </section>
 
       <section className="section">
-        <div className="metric-rail">
+        <div className="metric-rail" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(140px, 100%), 1fr))' }}>
           <div className="metric-card"><div className="muted">Paid Orders</div><div className="metric-value">{summary.paidCount}</div></div>
           <div className="metric-card"><div className="muted">Net Paid Sales</div><div className="metric-value">{money(summary.paidSales)}</div></div>
           <div className="metric-card"><div className="muted">Folio Pending</div><div className="metric-value">{summary.folioPendingCount}</div></div>
