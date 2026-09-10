@@ -7,23 +7,9 @@ const MODE = (process.env.VISUAL_AUDIT_MODE || 'full').toLowerCase();
 const CAPTURE_FULL_PAGE = process.env.VISUAL_AUDIT_FULL_PAGE !== 'false';
 
 const ROUTES = [
-  '/dashboard',
-  '/pos',
-  '/kitchen',
-  '/kitchen-board',
-  '/bar',
-  '/expo',
-  '/orders',
-  '/registers',
-  '/sessions',
-  '/cash-movements',
-  '/room-charges',
-  '/catalog',
-  '/recipes',
-  '/sync',
-  '/settings',
-  '/users',
-  '/audit',
+  '/dashboard', '/pos', '/kitchen', '/kitchen-board', '/bar', '/expo', '/orders',
+  '/registers', '/sessions', '/cash-movements', '/room-charges', '/catalog', '/recipes',
+  '/sync', '/settings', '/users', '/audit',
 ];
 
 const VIEWPORTS = {
@@ -49,18 +35,13 @@ const ROLE_CASES = [
     role: 'cashier',
     username: process.env.E2E_CASHIER_USERNAME || 'ci-cashier',
     password: process.env.E2E_CASHIER_PASSWORD || 'CiCashierPassword-2026!',
-    allowed: new Set([
-      '/dashboard', '/pos', '/orders', '/registers', '/sessions', '/cash-movements',
-      '/room-charges', '/catalog', '/recipes',
-    ]),
+    allowed: new Set(['/dashboard', '/pos', '/orders', '/registers', '/sessions', '/cash-movements', '/room-charges', '/catalog', '/recipes']),
   },
   {
     role: 'kitchen',
     username: process.env.E2E_KITCHEN_USERNAME || 'ci-kitchen',
     password: process.env.E2E_KITCHEN_PASSWORD || 'CiKitchenPassword-2026!',
-    allowed: new Set([
-      '/dashboard', '/kitchen', '/kitchen-board', '/bar', '/expo', '/catalog', '/recipes',
-    ]),
+    allowed: new Set(['/dashboard', '/kitchen', '/kitchen-board', '/bar', '/expo', '/catalog', '/recipes']),
   },
 ];
 
@@ -76,10 +57,7 @@ const manifest = {
 };
 
 function safePart(value) {
-  return String(value || 'none')
-    .replace(/^\/+/, '')
-    .replace(/[^a-zA-Z0-9._-]+/g, '-')
-    .replace(/^-+|-+$/g, '') || 'root';
+  return String(value || 'none').replace(/^\/+/, '').replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'root';
 }
 
 function selectedViewports() {
@@ -110,6 +88,41 @@ async function settle(page) {
   await page.waitForTimeout(350);
 }
 
+async function expandInternalAppScroller(page) {
+  return page.evaluate(() => {
+    const shell = document.querySelector('.app-shell:not(.standalone-shell):not(.terminal-shell)');
+    const mainShell = shell?.querySelector('.main-shell');
+    const main = shell?.querySelector('.main');
+    if (!shell || !mainShell || !main || main.scrollHeight <= main.clientHeight + 1) return false;
+
+    const nodes = [shell, mainShell, main];
+    for (const node of nodes) {
+      node.dataset.visualAuditOriginalStyle = node.getAttribute('style') ?? '__none__';
+    }
+    shell.style.height = 'auto';
+    shell.style.minHeight = '100vh';
+    shell.style.overflow = 'visible';
+    mainShell.style.height = 'auto';
+    mainShell.style.minHeight = '0';
+    mainShell.style.overflow = 'visible';
+    main.style.height = 'auto';
+    main.style.maxHeight = 'none';
+    main.style.overflow = 'visible';
+    return true;
+  });
+}
+
+async function restoreInternalAppScroller(page) {
+  await page.evaluate(() => {
+    document.querySelectorAll('[data-visual-audit-original-style]').forEach((node) => {
+      const original = node.dataset.visualAuditOriginalStyle;
+      if (original === '__none__') node.removeAttribute('style');
+      else node.setAttribute('style', original || '');
+      delete node.dataset.visualAuditOriginalStyle;
+    });
+  });
+}
+
 async function capture(page, { role = 'public', viewport, route, state = 'default', note = '' }) {
   const routePart = safePart(route);
   const dir = path.join(OUTPUT_ROOT, safePart(role), safePart(viewport), routePart);
@@ -118,29 +131,25 @@ async function capture(page, { role = 'public', viewport, route, state = 'defaul
   const baseName = safePart(state);
   const viewportFile = path.join(dir, `${baseName}--viewport.png`);
   await page.screenshot({ path: viewportFile, fullPage: false, animations: 'disabled' });
-  manifest.captures.push({
-    role,
-    viewport,
-    route,
-    state,
-    kind: 'viewport',
-    file: path.relative(OUTPUT_ROOT, viewportFile),
-    url: page.url(),
-    note,
-  });
+  manifest.captures.push({ role, viewport, route, state, kind: 'viewport', file: path.relative(OUTPUT_ROOT, viewportFile), url: page.url(), note });
 
   if (CAPTURE_FULL_PAGE) {
     const fullFile = path.join(dir, `${baseName}--full.png`);
-    await page.screenshot({ path: fullFile, fullPage: true, animations: 'disabled' });
+    let expandedInternalScroller = false;
+    try {
+      expandedInternalScroller = await expandInternalAppScroller(page);
+      if (expandedInternalScroller) {
+        await page.waitForTimeout(50);
+        const metrics = await page.evaluate(() => ({ documentHeight: document.documentElement.scrollHeight, viewportHeight: window.innerHeight }));
+        expect(metrics.documentHeight, `expanded full-page capture should exceed viewport for ${route}`).toBeGreaterThan(metrics.viewportHeight);
+      }
+      await page.screenshot({ path: fullFile, fullPage: true, animations: 'disabled' });
+    } finally {
+      if (expandedInternalScroller) await restoreInternalAppScroller(page);
+    }
     manifest.captures.push({
-      role,
-      viewport,
-      route,
-      state,
-      kind: 'full',
-      file: path.relative(OUTPUT_ROOT, fullFile),
-      url: page.url(),
-      note,
+      role, viewport, route, state, kind: 'full', file: path.relative(OUTPUT_ROOT, fullFile), url: page.url(), note,
+      internal_scroll_expanded: expandedInternalScroller,
     });
   }
   writeManifest();
@@ -179,22 +188,10 @@ async function captureRouteMatrix(page, roleCase, viewportName) {
     const denied = page.locator('[data-route-status="403"]');
     if (roleCase.allowed.has(route)) {
       await expect(denied, `${roleCase.role} should be allowed on ${route}`).toHaveCount(0);
-      await capture(page, {
-        role: roleCase.role,
-        viewport: viewportName,
-        route,
-        state: 'allowed-default',
-        note: `HTTP ${response?.status() || 'client-navigation'}; allowed route`,
-      });
+      await capture(page, { role: roleCase.role, viewport: viewportName, route, state: 'allowed-default', note: `HTTP ${response?.status() || 'client-navigation'}; allowed route` });
     } else {
       await expect(denied, `${roleCase.role} should be denied on ${route}`).toBeVisible();
-      await capture(page, {
-        role: roleCase.role,
-        viewport: viewportName,
-        route,
-        state: 'permission-denied-403',
-        note: 'Known route intentionally denied by role matrix',
-      });
+      await capture(page, { role: roleCase.role, viewport: viewportName, route, state: 'permission-denied-403', note: 'Known route intentionally denied by role matrix' });
     }
   }
 }
@@ -207,12 +204,7 @@ async function captureMobileDrawer(page, roleCase, viewportName) {
   if (!await opener.count()) return;
   await opener.click();
   await expect(opener).toHaveAttribute('aria-expanded', 'true');
-  await capture(page, {
-    role: roleCase.role,
-    viewport: viewportName,
-    route: '/dashboard',
-    state: 'mobile-navigation-open',
-  });
+  await capture(page, { role: roleCase.role, viewport: viewportName, route: '/dashboard', state: 'mobile-navigation-open' });
   await page.keyboard.press('Escape');
 }
 
@@ -221,56 +213,38 @@ async function captureUnknownRoute(page, roleCase, viewportName) {
   const response = await page.goto(route, { waitUntil: 'domcontentloaded' });
   await settle(page);
   await expect(page.getByRole('heading', { name: /Page Not Found/i })).toBeVisible();
-  await capture(page, {
-    role: roleCase.role,
-    viewport: viewportName,
-    route,
-    state: 'not-found-404',
-    note: `HTTP ${response?.status() || 404}`,
-  });
+  await capture(page, { role: roleCase.role, viewport: viewportName, route, state: 'not-found-404', note: `HTTP ${response?.status() || 404}` });
 }
 
 async function captureOwnerSpecialStates(page, viewportName) {
-  if (viewportName === 'desktop') {
-    await page.goto('/pos');
-    await settle(page);
-    await capture(page, { role: 'owner', viewport: viewportName, route: '/pos', state: 'pos-initial-workspace' });
+  if (viewportName !== 'desktop') return;
+  await page.goto('/pos');
+  await settle(page);
+  await capture(page, { role: 'owner', viewport: viewportName, route: '/pos', state: 'pos-initial-workspace' });
 
-    await page.context().setOffline(true);
-    await page.evaluate(() => window.dispatchEvent(new Event('offline')));
-    await page.waitForTimeout(250);
-    await capture(page, { role: 'owner', viewport: viewportName, route: '/pos', state: 'browser-offline' });
-    await page.context().setOffline(false);
-    await page.evaluate(() => window.dispatchEvent(new Event('online')));
+  await page.context().setOffline(true);
+  await page.evaluate(() => window.dispatchEvent(new Event('offline')));
+  await page.waitForTimeout(250);
+  await capture(page, { role: 'owner', viewport: viewportName, route: '/pos', state: 'browser-offline' });
+  await page.context().setOffline(false);
+  await page.evaluate(() => window.dispatchEvent(new Event('online')));
 
-    await page.goto('/customer-display?setup=1&channel=visual-audit', { waitUntil: 'domcontentloaded' });
-    await settle(page);
-    await capture(page, {
-      role: 'owner',
-      viewport: viewportName,
-      route: '/customer-display?setup=1&channel=visual-audit',
-      state: 'display-management',
-    });
+  await page.goto('/customer-display?setup=1&channel=visual-audit', { waitUntil: 'domcontentloaded' });
+  await settle(page);
+  await capture(page, { role: 'owner', viewport: viewportName, route: '/customer-display?setup=1&channel=visual-audit', state: 'display-management' });
 
-    for (const route of ['/dashboard', '/pos', '/orders', '/sync']) {
-      await page.unroute('**/api/**').catch(() => {});
-      await page.route('**/api/**', async (routeHandler) => {
-        const pathname = new URL(routeHandler.request().url()).pathname;
-        if (pathname.startsWith('/api/auth/')) return routeHandler.continue();
-        return routeHandler.abort('failed');
-      });
-      await page.goto(route, { waitUntil: 'domcontentloaded' });
-      await page.waitForTimeout(700);
-      await capture(page, {
-        role: 'owner',
-        viewport: viewportName,
-        route,
-        state: 'dependency-network-failure',
-        note: 'Non-auth API requests intentionally aborted by Playwright',
-      });
-    }
+  for (const route of ['/dashboard', '/pos', '/orders', '/sync']) {
     await page.unroute('**/api/**').catch(() => {});
+    await page.route('**/api/**', async (routeHandler) => {
+      const pathname = new URL(routeHandler.request().url()).pathname;
+      if (pathname.startsWith('/api/auth/')) return routeHandler.continue();
+      return routeHandler.abort('failed');
+    });
+    await page.goto(route, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(700);
+    await capture(page, { role: 'owner', viewport: viewportName, route, state: 'dependency-network-failure', note: 'Non-auth API requests intentionally aborted by Playwright' });
   }
+  await page.unroute('**/api/**').catch(() => {});
 }
 
 test.describe.serial('comprehensive POS visual audit', () => {
@@ -278,13 +252,11 @@ test.describe.serial('comprehensive POS visual audit', () => {
     fs.rmSync(OUTPUT_ROOT, { recursive: true, force: true });
     writeManifest();
   });
-
   test.afterAll(() => writeManifest());
 
   for (const [viewportName, viewport] of selectedViewports()) {
     test(`public states - ${viewportName}`, async ({ page }) => {
       await page.setViewportSize(viewport);
-
       await page.goto('/login');
       await settle(page);
       await capture(page, { role: 'public', viewport: viewportName, route: '/login', state: 'empty-login' });
@@ -297,22 +269,11 @@ test.describe.serial('comprehensive POS visual audit', () => {
 
       await page.goto('/customer-display?channel=visual-audit', { waitUntil: 'domcontentloaded' });
       await settle(page);
-      await capture(page, {
-        role: 'public',
-        viewport: viewportName,
-        route: '/customer-display?channel=visual-audit',
-        state: 'unpaired-customer-display',
-      });
+      await capture(page, { role: 'public', viewport: viewportName, route: '/customer-display?channel=visual-audit', state: 'unpaired-customer-display' });
 
       await page.goto('/orders', { waitUntil: 'domcontentloaded' });
       await settle(page);
-      await capture(page, {
-        role: 'public',
-        viewport: viewportName,
-        route: '/orders',
-        state: 'unauthenticated-protected-route',
-        note: 'Protected route without session; expected login/auth-required surface',
-      });
+      await capture(page, { role: 'public', viewport: viewportName, route: '/orders', state: 'unauthenticated-protected-route', note: 'Protected route without session; expected login/auth-required surface' });
     });
 
     for (const roleCase of selectedRoles()) {
