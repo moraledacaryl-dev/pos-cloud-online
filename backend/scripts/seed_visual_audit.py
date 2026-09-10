@@ -7,6 +7,7 @@ from datetime import date
 from decimal import Decimal
 
 from app.db.database import SessionLocal
+from app.models.entities import Register
 from app.schemas.common import CatalogItemCreate, OrderCreate, OrderLineCreate, RegisterSessionOpen
 from app.services.pos_service import (
     create_catalog_item,
@@ -82,12 +83,23 @@ def main():
         if not registers:
             raise RuntimeError("Visual audit seed expected at least one default register")
 
+        # Production correctly requires an Accounting drawer mapping before a shift can
+        # open. Give the disposable CI register a deterministic fake mapping rather than
+        # weakening or bypassing that invariant in application code.
+        register = db.get(Register, _id(registers[0]))
+        if not register:
+            raise RuntimeError("Visual audit seed could not load its default register")
+        if register.accounting_financial_account_id is None:
+            register.accounting_financial_account_id = 900001
+            register.accounting_financial_account_code = "VA-CASH-DRAWER"
+            db.commit()
+
         sessions = list_register_sessions(db, status="open", limit=20)
         if sessions:
             session_id = _id(sessions[0])
         else:
             opened = open_register_session(db, RegisterSessionOpen(
-                register_id=_id(registers[0]),
+                register_id=register.id,
                 business_date=date.today().isoformat(),
                 shift_name="Visual Audit Day Shift",
                 opening_float=Decimal("5000"),
