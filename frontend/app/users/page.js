@@ -40,9 +40,7 @@ export default function UsersPage() {
     });
   }, [users, userLinks, q]);
   const primaryRoleId = useMemo(() => roles.find((row) => row.name === form.role)?.id || null, [roles, form.role]);
-  const canSaveUser = !!form.username.trim()
-    && (!!form.id || !!form.password.trim())
-    && (form.role_ids || []).length > 0;
+  const canSaveUser = !!form.username.trim() && (!!form.id || !!form.password.trim()) && (form.role_ids || []).length > 0;
 
   useEffect(() => {
     if (!primaryRoleId || (form.role_ids || []).includes(primaryRoleId)) return;
@@ -66,9 +64,7 @@ export default function UsersPage() {
         setNotice('User created.');
       }
       const userId = form.id || saved?.id;
-      if (userId) {
-        await request(`/integrations/staff/user-links/${userId}`, { method: 'PUT', body: JSON.stringify({ staff_identity_id: form.staff_identity_id ? Number(form.staff_identity_id) : null }) });
-      }
+      if (userId) await request(`/integrations/staff/user-links/${userId}`, { method: 'PUT', body: JSON.stringify({ staff_identity_id: form.staff_identity_id ? Number(form.staff_identity_id) : null }) });
       setForm(blankForm);
       await loadAll();
     } catch (e) { setError(e.message || 'Failed to save user.'); }
@@ -97,8 +93,12 @@ export default function UsersPage() {
     } catch (e) { setError(e.message || 'Failed to update user status.'); }
   }
 
+  function linkedIdentity(row) {
+    return userLinks.find((link) => link.user_id === row.id)?.staff_identity || null;
+  }
+
   return (
-    <div className="stack">
+    <div className="stack users-page">
       <section className="section">
         <div className="toolbar">
           <div>
@@ -122,11 +122,7 @@ export default function UsersPage() {
           <label className="field">Active<select value={String(!!form.is_active)} onChange={(e) => setForm((prev) => ({ ...prev, is_active: e.target.value === 'true' }))}><option value="true">Active</option><option value="false">Inactive</option></select></label>
           <div style={{ gridColumn: '1 / -1' }}>
             <div className="small muted" style={{ marginBottom: 8 }}>Assigned roles</div>
-            <div className="row wrap">
-              {roles.map((row) => (
-                <button key={row.id} type="button" className={`stat-chip ${(form.role_ids || []).includes(row.id) ? 'active' : ''}`} aria-pressed={(form.role_ids || []).includes(row.id)} disabled={row.id === primaryRoleId} title={row.id === primaryRoleId ? 'The primary role is always assigned.' : undefined} onClick={() => toggleRole(row.id)}>{row.name}</button>
-              ))}
-            </div>
+            <div className="row wrap">{roles.map((row) => <button key={row.id} type="button" className={`stat-chip ${(form.role_ids || []).includes(row.id) ? 'active' : ''}`} aria-pressed={(form.role_ids || []).includes(row.id)} disabled={row.id === primaryRoleId} title={row.id === primaryRoleId ? 'The primary role is always assigned.' : undefined} onClick={() => toggleRole(row.id)}>{row.name}</button>)}</div>
           </div>
           <div className="row wrap"><button className="primary" type="submit" disabled={!canSaveUser}>{form.id ? 'Update User' : 'Save User'}</button>{form.id && <button type="button" className="secondary" onClick={() => setForm(blankForm)}>Cancel Edit</button>}</div>
         </form>
@@ -134,24 +130,52 @@ export default function UsersPage() {
 
       <section className="section">
         <h2>Current Users</h2>
-        <table className="table" tabIndex={0} aria-label="Scrollable data table" style={{ marginTop: 10 }}>
+        <table className="table users-table" tabIndex={0} aria-label="Current users" style={{ marginTop: 10 }}>
           <thead><tr><th>Username</th><th>Name</th><th>Staff Identity</th><th>Primary Role</th><th>Assigned Roles</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody>
-            {filteredUsers.map((row) => (
-              <tr key={row.id}>
-                <td>{row.username}</td>
-                <td>{row.full_name || '-'}</td>
-                <td>{(() => { const linked = userLinks.find((link) => link.user_id === row.id)?.staff_identity; return linked ? <><strong>{linked.employee_code}</strong><div className="small muted">{linked.display_name}</div></> : <span className="muted">Not linked</span>; })()}</td>
-                <td>{row.role}</td>
-                <td>{(row.roles || []).map((role) => role.name).join(', ') || '-'}</td>
-                <td><span className={`badge ${row.is_active ? 'success' : 'warn'}`}>{row.is_active ? 'active' : 'inactive'}</span></td>
-                <td><div className="row wrap"><button type="button" className="secondary" onClick={() => editUser(row)}>Edit</button><button type="button" className="secondary" onClick={() => setPendingArchive(row)}>{row.is_active ? 'Archive' : 'Reactivate'}</button></div></td>
-              </tr>
-            ))}
+            {filteredUsers.map((row) => {
+              const linked = linkedIdentity(row);
+              return <tr key={row.id}><td>{row.username}</td><td>{row.full_name || '-'}</td><td>{linked ? <><strong>{linked.employee_code}</strong><div className="small muted">{linked.display_name}</div></> : <span className="muted">Not linked</span>}</td><td>{row.role}</td><td>{(row.roles || []).map((role) => role.name).join(', ') || '-'}</td><td><span className={`badge ${row.is_active ? 'success' : 'warn'}`}>{row.is_active ? 'active' : 'inactive'}</span></td><td><div className="row wrap"><button type="button" className="secondary" onClick={() => editUser(row)}>Edit</button><button type="button" className="secondary" onClick={() => setPendingArchive(row)}>{row.is_active ? 'Archive' : 'Reactivate'}</button></div></td></tr>;
+            })}
             {!filteredUsers.length && <tr><td colSpan="7" className="muted">No users found.</td></tr>}
           </tbody>
         </table>
+
+        <div className="users-card-list" aria-label="Current users mobile list">
+          {filteredUsers.map((row) => {
+            const linked = linkedIdentity(row);
+            return (
+              <article className="user-mobile-card" key={row.id}>
+                <div className="user-mobile-card-head"><div><strong>{row.full_name || row.username}</strong><div className="small muted">@{row.username}</div></div><span className={`badge ${row.is_active ? 'success' : 'warn'}`}>{row.is_active ? 'active' : 'inactive'}</span></div>
+                <dl className="user-mobile-meta">
+                  <div><dt>Staff Identity</dt><dd>{linked ? <><strong>{linked.employee_code}</strong><span>{linked.display_name}</span></> : 'Not linked'}</dd></div>
+                  <div><dt>Primary Role</dt><dd>{row.role}</dd></div>
+                  <div><dt>Assigned Roles</dt><dd>{(row.roles || []).map((role) => role.name).join(', ') || '-'}</dd></div>
+                </dl>
+                <div className="row wrap user-mobile-actions"><button type="button" className="secondary" onClick={() => editUser(row)}>Edit</button><button type="button" className="secondary" onClick={() => setPendingArchive(row)}>{row.is_active ? 'Archive' : 'Reactivate'}</button></div>
+              </article>
+            );
+          })}
+          {!filteredUsers.length && <p className="muted">No users found.</p>}
+        </div>
       </section>
+
+      <style jsx>{`
+        .users-card-list { display: none; }
+        @media (max-width: 760px) {
+          .users-table { display: none; }
+          .users-card-list { display: grid; gap: 10px; margin-top: 10px; }
+          .user-mobile-card { min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+          .user-mobile-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+          .user-mobile-meta { display: grid; gap: 8px; margin: 12px 0 0; }
+          .user-mobile-meta > div { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 10px; align-items: start; }
+          .user-mobile-meta dt { color: var(--muted); font-size: 11px; }
+          .user-mobile-meta dd { min-width: 0; margin: 0; overflow-wrap: anywhere; font-size: 13px; }
+          .user-mobile-meta dd span { display: block; color: var(--muted); font-size: 11px; }
+          .user-mobile-actions { margin-top: 12px; }
+          .user-mobile-actions button { flex: 1 1 120px; }
+        }
+      `}</style>
       <ActionModal
         open={!!pendingArchive}
         title={`${pendingArchive?.is_active ? 'Archive' : 'Reactivate'} ${pendingArchive?.full_name || pendingArchive?.username || 'this user'}?`}
