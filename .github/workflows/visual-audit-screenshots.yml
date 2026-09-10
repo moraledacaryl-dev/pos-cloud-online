@@ -18,6 +18,7 @@ on:
         type: boolean
   pull_request:
     paths:
+      - 'backend/scripts/seed_visual_audit.py'
       - 'frontend/e2e/visual-audit.spec.mjs'
       - 'frontend/package.json'
       - '.github/workflows/visual-audit-screenshots.yml'
@@ -101,7 +102,7 @@ jobs:
           npm ci
           npx playwright install --with-deps chromium
 
-      - name: Migrate and provision visual-audit users
+      - name: Migrate and provision visual-audit users and scenarios
         working-directory: backend
         run: |
           alembic upgrade head
@@ -109,6 +110,7 @@ jobs:
           ADMIN_USERNAME=ci-manager ADMIN_FULL_NAME='Visual Audit Manager' ADMIN_ROLE=manager ADMIN_PASSWORD='CiManagerPassword-2026!' python scripts/create_admin.py
           ADMIN_USERNAME=ci-cashier ADMIN_FULL_NAME='Visual Audit Cashier' ADMIN_ROLE=cashier ADMIN_PASSWORD='CiCashierPassword-2026!' python scripts/create_admin.py
           ADMIN_USERNAME=ci-kitchen ADMIN_FULL_NAME='Visual Audit Kitchen' ADMIN_ROLE=kitchen ADMIN_PASSWORD='CiKitchenPassword-2026!' python scripts/create_admin.py
+          PYTHONPATH=. python scripts/seed_visual_audit.py
 
       - name: Build frontend
         working-directory: frontend
