@@ -285,6 +285,97 @@ async def validate_account_mapping(db: Session, account_id: int | None = None, a
     return {'ok': bool(match), 'account': match, 'count': len(rows)}
 
 
+async def sync_catalog_from_inventory(db: Session, *, force: bool = True) -> dict:
+    meta = setting_json(db, 'catalog_sync', default={}) or {}
+    last_sync_at = meta.get('last_sync_at')
+    if not force and last_sync_at:
+        try:
+            last_sync = datetime.fromisoformat(str(last_sync_at).replace('Z', '+00:00'))
+            if last_sync.tzinfo is None:
+                last_sync = last_sync.replace(tzinfo=timezone.utc)
+            if (datetime.now(timezone.utc) - last_sync).total_seconds() < 900:
+                return {'ok': True, 'skipped': True, 'reason': 'recently_synced', **meta}
+        except Exception:
+            pass
+    if not settings.inventory_integration_enabled:
+        raise ValueError('Inventory integration is disabled.')
+    base = (settings.inventory_api_base or '').strip()
+    token = (settings.inventory_integration_token or '').strip()
+    if not base or not token:
+        raise ValueError('Inventory catalog integration is not configured.')
+    async with httpx.AsyncClient(
+        timeout=settings.http_timeout_seconds,
+        headers={'Accept': 'application/json', 'X-Integration-Token': token},
+        follow_redirects=True,
+    ) as client:
+        res = await client.get(_join(base, settings.inventory_catalog_path))
+        if not 200 <= res.status_code < 300:
+            raise ValueError(f'Failed to fetch Inventory catalog: {res.text[:400]}')
+        payload = res.json() or {}
+    items = payload.get('items') if isinstance(payload, dict) else []
+    if not isinstance(items, list):
+        raise ValueError('Inventory catalog response did not contain an items list.')
+
+    touched = 0
+    seen_variants = set()
+    for source in items:
+        variant_id = str(source.get('variant_id') or '').strip()
+        menu_id = str(source.get('menu_item_id') or '').strip()
+        if not variant_id or not menu_id:
+            continue
+        seen_variants.add(variant_id)
+        row = db.query(CatalogItem).filter(CatalogItem.inventory_variant_id == variant_id).first()
+        sku = str(source.get('sku') or '').strip() or None
+        # Migration bridge: claim an existing Accounting-era row by the same durable SKU
+        # instead of creating a duplicate selling button.
+        if not row and sku:
+            row = db.query(CatalogItem).filter(CatalogItem.sku_code == sku).first()
+        active = bool(source.get('is_active', True)) and bool(source.get('pos_visible', True))
+        display = str(source.get('display_name') or source.get('menu_item_name') or sku or variant_id)
+        variant_name = str(source.get('variant_name') or '').strip() or None
+        if variant_name and variant_name.lower() not in {'regular', 'default'}:
+            display = f"{display} - {variant_name}"
+        values = {
+            'inventory_menu_item_id': menu_id,
+            'inventory_variant_id': variant_id,
+            'menu_item_name': source.get('menu_item_name') or display,
+            'sku_code': sku,
+            'variant_name': variant_name,
+            'display_name': display,
+            'category_name': source.get('category'),
+            'module_slug': 'restaurant',
+            'prep_station': _catalog_prep_station(source),
+            'price': float(source.get('price') or 0),
+            'is_active': active,
+            'is_available': row.availability_override if row and row.availability_override is not None else active,
+            'sort_order': int(source.get('sort_order') or 0),
+            'last_sync_at': now_iso(),
+            'accounting_hash': None,
+        }
+        if not row:
+            row = CatalogItem(**values)
+        else:
+            for key, value in values.items():
+                setattr(row, key, value)
+        db.add(row)
+        touched += 1
+
+    stale = db.query(CatalogItem).filter(CatalogItem.inventory_variant_id != None).all()
+    for row in stale:
+        if row.inventory_variant_id not in seen_variants:
+            row.is_active = False
+            row.is_available = False
+            db.add(row)
+    summary = {
+        'ok': True, 'source': 'inventory-procurement', 'transport': 'direct_inventory_api',
+        'imported_rows': touched, 'menu_items_seen': len({str(x.get('menu_item_id')) for x in items if x.get('menu_item_id')}),
+        'skus_seen': len(seen_variants), 'last_sync_at': now_iso(),
+    }
+    save_setting_json(db, 'catalog_sync', summary, username='sync_service')
+    db.commit()
+    return summary
+
+
 async def sync_catalog_from_accounting(db: Session, *, force: bool = True) -> dict:
     meta = setting_json(db, 'catalog_sync', default={}) or {}
     last_sync_at = meta.get('last_sync_at')
