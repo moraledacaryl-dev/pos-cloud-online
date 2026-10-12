@@ -93,6 +93,7 @@ class Settings(BaseSettings):
     inventory_api_base: str = 'https://inventory.hiddenoasis.app/api/v1'
     inventory_integration_token: str = ''
     inventory_pos_events_path: str = '/integrations/pos/events'
+    inventory_catalog_path: str = '/integrations/pos/catalog'
     operations_integration_enabled: bool = False
     operations_api_base: str = 'https://operations.hiddenoasis.app/api'
     operations_integration_key: str = ''

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { createCatalogItem, deleteCatalogItem, fetchCatalogItems, request, syncCatalogFromAccounting, updateCatalogItem } from '../../lib/api';
+import { createCatalogItem, deleteCatalogItem, fetchCatalogItems, request, syncCatalogFromInventory, updateCatalogItem } from '../../lib/api';
 import ActionModal from '../../components/ActionModal';
 
 function money(value) {
@@ -64,7 +64,7 @@ export default function CatalogPage() {
     setBusy(true);
     try {
       const res = await syncCatalogFromAccounting();
-      setNotice(`Refreshed ${res.imported_rows} POS selling rows through the Accounting compatibility API. Inventory remains the catalog business owner.`);
+      setNotice(`Refreshed ${res.imported_rows} POS selling rows directly from Inventory & Procurement.`);
       await loadItems();
     } catch (e) { setError(e.message || 'Failed to refresh the selling catalog.'); }
     finally { setBusy(false); }
@@ -103,7 +103,7 @@ export default function CatalogPage() {
           <div>
             <h1>Catalog</h1>
             <p className="muted">POS selling snapshot with local sold-out controls.</p>
-            <p className="small muted" style={{ marginTop: 4 }}>Inventory & Procurement owns product identity, SKUs, recipes, stock, and master availability. Accounting currently transports the compatible menu feed. POS stores a selling snapshot and may only apply local availability overrides.</p>
+            <p className="small muted" style={{ marginTop: 4 }}>Inventory & Procurement owns product identity, SKUs, recipes, stock, pricing, and master availability. POS refreshes this selling snapshot directly from Inventory and may apply local sold-out overrides.</p>
             <div className="row wrap" style={{ marginTop: 8 }}>
               <span className={`badge ${statusClass}`}>{catalogStatus?.state === 'fresh' ? 'Catalog fresh' : catalogStatus?.state === 'stale' ? 'Catalog stale' : 'Catalog not synced'}</span>
               <span className="small muted">Last refresh: {formatSyncAge(catalogStatus)}</span>
@@ -157,7 +157,7 @@ export default function CatalogPage() {
             <thead><tr><th>Display</th><th>SKU / Variant</th><th>Station</th><th>Price</th><th>Source</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>
               {rows.map((row) => (
-                <tr key={row.id}><td><strong>{row.display_name}</strong>{!row.external_menu_item_id && !row.external_sku_id && <div className="small error-text">Local only — will not sync</div>}</td><td>{row.sku_code || '-'}</td><td>{row.prep_station || '-'}</td><td>{money(row.price)}</td><td>{row.external_menu_item_id || row.external_sku_id ? <span className="badge info">Upstream catalog</span> : <span className="badge warn">Emergency fallback</span>}</td><td><span className={`badge ${row.is_available ? 'success' : 'warn'}`}>{row.is_available ? 'available' : 'sold out'}</span></td><td><div className="row wrap">{!row.external_menu_item_id && !row.external_sku_id && <button type="button" className="secondary" onClick={() => editItem(row)}>Edit fallback</button>}<button type="button" className={row.is_available ? 'secondary' : 'primary'} onClick={() => toggleAvailability(row)}>{row.is_available ? 'Mark Sold Out' : 'Restore to POS'}</button>{!row.external_menu_item_id && !row.external_sku_id && <button type="button" className="danger" onClick={() => setPendingDelete(row)}>Delete fallback</button>}</div></td></tr>
+                <tr key={row.id}><td><strong>{row.display_name}</strong>{!row.external_menu_item_id && !row.external_sku_id && <div className="small error-text">Local only — will not sync</div>}</td><td>{row.sku_code || '-'}</td><td>{row.prep_station || '-'}</td><td>{money(row.price)}</td><td>{row.external_menu_item_id || row.external_sku_id ? <span className="badge info">Inventory catalog</span> : <span className="badge warn">Emergency fallback</span>}</td><td><span className={`badge ${row.is_available ? 'success' : 'warn'}`}>{row.is_available ? 'available' : 'sold out'}</span></td><td><div className="row wrap">{!row.external_menu_item_id && !row.external_sku_id && <button type="button" className="secondary" onClick={() => editItem(row)}>Edit fallback</button>}<button type="button" className={row.is_available ? 'secondary' : 'primary'} onClick={() => toggleAvailability(row)}>{row.is_available ? 'Mark Sold Out' : 'Restore to POS'}</button>{!row.external_menu_item_id && !row.external_sku_id && <button type="button" className="danger" onClick={() => setPendingDelete(row)}>Delete fallback</button>}</div></td></tr>
               ))}
             </tbody>
           </table>
