@@ -63,7 +63,7 @@ export default function CatalogPage() {
     setError(''); setNotice('');
     setBusy(true);
     try {
-      const res = await syncCatalogFromAccounting();
+      const res = await syncCatalogFromInventory();
       setNotice(`Refreshed ${res.imported_rows} POS selling rows directly from Inventory & Procurement.`);
       await loadItems();
     } catch (e) { setError(e.message || 'Failed to refresh the selling catalog.'); }
