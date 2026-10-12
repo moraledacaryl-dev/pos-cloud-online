@@ -124,6 +124,8 @@ class CatalogItem(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     external_menu_item_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     external_sku_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    inventory_menu_item_id: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    inventory_variant_id: Mapped[str | None] = mapped_column(String(80), nullable=True, unique=True, index=True)
     menu_item_name: Mapped[str] = mapped_column(String(180), index=True)
     sku_code: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
     variant_name: Mapped[str | None] = mapped_column(String(180), nullable=True)
