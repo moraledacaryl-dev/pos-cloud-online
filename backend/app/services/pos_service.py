@@ -607,6 +607,8 @@ def _serialize_catalog_item(row: CatalogItem) -> dict:
         'id': row.id,
         'external_menu_item_id': row.external_menu_item_id,
         'external_sku_id': row.external_sku_id,
+        'inventory_menu_item_id': row.inventory_menu_item_id,
+        'inventory_variant_id': row.inventory_variant_id,
         'menu_item_name': row.menu_item_name,
         'sku_code': row.sku_code,
         'variant_name': row.variant_name,
@@ -1037,11 +1039,11 @@ def update_catalog_item(db: Session, item_id: int, payload: CatalogItemUpdate):
     if not row:
         raise ValueError('Catalog item not found.')
     data = payload.model_dump(exclude_unset=True)
-    is_synced = bool(row.external_menu_item_id or row.external_sku_id)
+    is_synced = bool(row.inventory_menu_item_id or row.inventory_variant_id or row.external_menu_item_id or row.external_sku_id)
     if is_synced:
         forbidden = set(data) - {'is_available'}
         if forbidden:
-            raise ValueError('Accounting owns synced catalog details. POS can only set a local sold-out override.')
+            raise ValueError('Inventory owns synced catalog details. POS can only set a local sold-out override.')
         if 'is_available' in data:
             requested = bool(data['is_available'])
             row.availability_override = False if not requested else None
@@ -1062,8 +1064,8 @@ def delete_catalog_item(db: Session, item_id: int):
     row = db.get(CatalogItem, int(item_id))
     if not row:
         raise ValueError('Catalog item not found.')
-    if row.external_menu_item_id or row.external_sku_id:
-        raise ValueError('Accounting-owned catalog items cannot be deleted from POS.')
+    if row.inventory_menu_item_id or row.inventory_variant_id or row.external_menu_item_id or row.external_sku_id:
+        raise ValueError('Inventory-owned catalog items cannot be deleted from POS.')
     db.delete(row)
     db.commit()
     return {'ok': True}
