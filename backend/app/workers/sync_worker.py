@@ -6,11 +6,11 @@ from app.db.database import SessionLocal
 from app.services import sync_service
 from app.services.accounting_review_defaults import install_accounting_review_transport
 from app.services.inventory_integration import run_inventory_outbox_sync
-from app.services.sync_service import sync_catalog_from_inventory
 from app.services.operations_integration import run_operations_outbox_sync
 from app.services.sync_service import (
     record_sync_worker_heartbeat,
     run_outbox_sync,
+    sync_catalog_from_inventory,
     sync_in_house_bookings_from_accounting,
 )
 
