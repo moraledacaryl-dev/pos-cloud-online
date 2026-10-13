@@ -30,7 +30,13 @@ def should_reverse_inventory_for_void(order_before_void: dict) -> bool:
 
 
 def should_reverse_inventory_for_refund(order_after_refund: dict) -> bool:
-    return str(order_after_refund.get('refund_status') or '').strip().lower() == 'fully_refunded'
+    """Financial refunds never imply a physical stock return.
+
+    A future quantity-aware return/disposition event must explicitly authorize any
+    stock restoration. This prevents prepared/served food from recreating consumed
+    recipe ingredients merely because the customer received a refund.
+    """
+    return False
 
 
 def build_inventory_event(order: dict, event_type: str) -> dict:
