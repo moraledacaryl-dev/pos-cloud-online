@@ -586,7 +586,7 @@ async def _push_room_charge_request(client: httpx.AsyncClient, base: str, config
     posting = (payload or {}).get('room_charge_posting') or {}
     if not posting:
         return None
-    path = config.get('current_erp_receivables_path') or '/receivables'
+    path = config.get('current_erp_pos_room_charge_path') or '/integrations/pos/room-charge'
     receivable_payload = {
         'source_type': 'pos_room_charge_reversal' if (posting.get('charge_amount') or 0) < 0 else 'pos_room_charge',
         'source_id': posting.get('id'),
@@ -594,18 +594,12 @@ async def _push_room_charge_request(client: httpx.AsyncClient, base: str, config
         'receivable_type': 'guest_balance',
         'transaction_date': posting.get('service_date') or posting.get('business_date'),
         'gross_amount': posting.get('charge_amount') or 0,
-        'amount_collected': 0,
-        'status': 'open' if (posting.get('charge_amount') or 0) > 0 else 'closed',  # For reversals, maybe closed or negative
-        'notes': json.dumps({
-            'source': 'dedicated_pos_cloud',
-            'order_no': payload.get('order', {}).get('order_no'),
-            'room_number': posting.get('room_number'),
-            'service_type': posting.get('service_type'),
-            'posting_uuid': posting.get('posting_uuid'),
-        }, ensure_ascii=False),
-        'bir_include': False,
         'external_source': 'dedicated_pos_cloud',
         'external_id': f"room-charge:{posting.get('posting_uuid') or posting.get('id')}",
+        'posting_uuid': posting.get('posting_uuid'),
+        'order_no': payload.get('order', {}).get('order_no'),
+        'room_number': posting.get('room_number'),
+        'service_type': posting.get('service_type'),
         'reverses_source_type': payload.get('reverses_source_type'),
         'reverses_source_id': payload.get('reverses_source_id'),
     }
