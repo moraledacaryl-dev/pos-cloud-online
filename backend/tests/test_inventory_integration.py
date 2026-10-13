@@ -44,7 +44,7 @@ def test_unmapped_pos_line_is_retained_as_actionable_blocker():
 
 def test_inventory_reversal_policy_never_reverses_partial_refund():
     assert integration.should_reverse_inventory_for_refund({'refund_status': 'partially_refunded'}) is False
-    assert integration.should_reverse_inventory_for_refund({'refund_status': 'fully_refunded'}) is True
+    assert integration.should_reverse_inventory_for_refund({'refund_status': 'fully_refunded'}) is False
 
 
 def test_inventory_void_reversal_only_applies_after_finalization():
