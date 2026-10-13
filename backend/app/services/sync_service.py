@@ -337,13 +337,22 @@ async def sync_catalog_from_inventory(db: Session, *, force: bool = True) -> dic
             if not price.is_finite() or price < 0:
                 raise InvalidOperation
             sort_order = int(source.get('sort_order') or 0)
+            with_drink_price = None if source.get('with_drink_price') is None else Decimal(str(source.get('with_drink_price')))
+            if with_drink_price is not None and (not with_drink_price.is_finite() or with_drink_price < 0 or with_drink_price > price):
+                raise InvalidOperation
         except (InvalidOperation, TypeError, ValueError):
             raise ValueError(f'Inventory catalog row {index + 1} has an invalid price or sort_order.')
-        validated_items.append((source, menu_id, variant_id, price, sort_order))
+        pricing_role = str(source.get('pricing_role') or 'standard').strip().lower()
+        if pricing_role not in {'standard', 'drink', 'pastry'}:
+            raise ValueError(f'Inventory catalog row {index + 1} has an invalid pricing_role.')
+        modifier_groups = source.get('modifier_groups') or []
+        if not isinstance(modifier_groups, list):
+            raise ValueError(f'Inventory catalog row {index + 1} has invalid modifier_groups.')
+        validated_items.append((source, menu_id, variant_id, price, with_drink_price, pricing_role, modifier_groups, sort_order))
 
     touched = 0
     seen_variants = set()
-    for source, menu_id, variant_id, price, sort_order in validated_items:
+    for source, menu_id, variant_id, price, with_drink_price, pricing_role, modifier_groups, sort_order in validated_items:
         seen_variants.add(variant_id)
         row = db.query(CatalogItem).filter(CatalogItem.inventory_variant_id == variant_id).first()
         sku = str(source.get('sku') or '').strip() or None
@@ -369,6 +378,9 @@ async def sync_catalog_from_inventory(db: Session, *, force: bool = True) -> dic
             'module_slug': 'restaurant',
             'prep_station': _catalog_prep_station(source),
             'price': price,
+            'with_drink_price': with_drink_price,
+            'pricing_role': pricing_role,
+            'modifier_groups_json': json.dumps(modifier_groups, ensure_ascii=False),
             'is_active': active,
             'is_available': row.availability_override if row and row.availability_override is not None else active,
             'sort_order': sort_order,

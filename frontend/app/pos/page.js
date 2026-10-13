@@ -339,6 +339,25 @@ export default function PosPage() {
       return (room && rowRoom === room) || (guest && rowGuest === guest);
     }) || null;
   }, [inHouseBookings, tableLabel, guestName]);
+  useEffect(() => {
+    const hasDrink = cart.some((line) => catalog.find((item) => String(item.id) === String(line.catalog_item_id))?.pricing_role === 'drink');
+    setCart((prev) => {
+      let changed = false;
+      const next = prev.map((line) => {
+        const item = catalog.find((candidate) => String(candidate.id) === String(line.catalog_item_id));
+        if (!item) return line;
+        const profile = getProductProfile(item);
+        const groups = [...(line.metadata?.groups || []), ...(line.metadata?.bundles || [])];
+        const modifierDelta = groups.flatMap((g) => g.selections || []).reduce((sum, opt) => sum + num(opt.price_delta), 0);
+        const base = hasDrink && item.pricing_role === 'pastry' && item.with_drink_price != null ? num(item.with_drink_price) : num(item.price);
+        const price = Math.round((base + modifierDelta) * 100) / 100;
+        if (num(line.price) === price && num(line.base_price) === base) return line;
+        changed = true;
+        return recalcLine({ ...line, base_price: base, price });
+      });
+      return changed ? next : prev;
+    });
+  }, [catalog, cart]);
   const cartTotals = useMemo(() => calculateCartTotals(cart), [cart]);
   const totalApplied = useMemo(() => payments.reduce((sum, row) => sum + num(row.amount_applied), 0), [payments]);
   const folioApplied = useMemo(() => payments.filter((row) => row.tender_type === 'room_charge').reduce((sum, row) => sum + num(row.amount_applied), 0), [payments]);
@@ -665,7 +684,7 @@ export default function PosPage() {
     event.preventDefault(); setError(''); setNotice('');
     try { await openRegisterSession({ ...openSessionForm, register_id: Number(openSessionForm.register_id), opening_float: num(openSessionForm.opening_float) }); setNotice('Register session opened.'); await loadAll({ silent: true }); } catch (e) { setError(e.message || 'Failed to open session.'); }
   }
-  function buildOrderPayload() { return { register_session_id: Number(sessionId), approved_by_user_id: discountApprovalUserId || null, order_type: orderType, source_channel: 'pos', guest_name: guestName || null, service_area: activeArea || null, table_label: tableLabel || null, seat_count: seatCount ? Number(seatCount) : null, note: note || null, lines: cart.map((row) => ({ catalog_item_id: row.catalog_item_id, quantity: row.quantity, unit_price: row.price, discount_amount: num(row.discount_amount), note: row.note || null })) }; }
+  function buildOrderPayload() { return { register_session_id: Number(sessionId), approved_by_user_id: discountApprovalUserId || null, order_type: orderType, source_channel: 'pos', guest_name: guestName || null, service_area: activeArea || null, table_label: tableLabel || null, seat_count: seatCount ? Number(seatCount) : null, note: note || null, lines: cart.map((row) => ({ catalog_item_id: row.catalog_item_id, quantity: row.quantity, unit_price: row.price, discount_amount: num(row.discount_amount), modifiers: (row.metadata?.groups || []).map((group) => ({ id: group.id, labels: (group.selections || []).map((option) => option.label) })), note: row.note || null })) }; }
   function likelyConnectionError(err) {
     return !browserOnline || /failed to fetch|network|load failed|connection|offline|timeout/i.test(String(err?.message || ''));
   }

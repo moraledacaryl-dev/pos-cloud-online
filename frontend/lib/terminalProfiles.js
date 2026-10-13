@@ -26,8 +26,8 @@ export function getProductProfile(item) {
     profile_key: explicit?.profile_key || slug(item?.display_name || item?.menu_item_name),
     customer_display_name: explicit?.customer_display_name || item?.display_name || item?.menu_item_name,
     prompt_note_label: explicit?.prompt_note_label || '',
-    modifier_groups: [],
-    bundle_choices: [],
+    modifier_groups: explicit?.modifier_groups || item?.modifier_groups || [],
+    bundle_choices: explicit?.bundle_choices || [],
     shortcuts: [],
   };
 }
