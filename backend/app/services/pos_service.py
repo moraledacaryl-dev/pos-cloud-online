@@ -617,6 +617,9 @@ def _serialize_catalog_item(row: CatalogItem) -> dict:
         'module_slug': row.module_slug,
         'prep_station': normalize_kds_station(row.prep_station or row.module_slug),
         'price': row.price,
+        'with_drink_price': row.with_drink_price,
+        'pricing_role': row.pricing_role,
+        'modifier_groups': json.loads(row.modifier_groups_json or '[]'),
         'tax_rate': row.tax_rate,
         'service_charge_rate': row.service_charge_rate,
         'is_active': bool(row.is_active),
@@ -1326,6 +1329,13 @@ def _rebuild_order_lines(db: Session, row: PosOrder, line_payloads):
     tax_amount = Decimal('0')
     service_charge = Decimal('0')
     stations = []
+    payload_catalog = []
+    for source_line in line_payloads or []:
+        source_id = getattr(source_line, 'catalog_item_id', None)
+        if source_id is None and isinstance(source_line, dict): source_id = source_line.get('catalog_item_id')
+        source_catalog = db.get(CatalogItem, int(source_id or 0))
+        if source_catalog: payload_catalog.append(source_catalog)
+    has_qualifying_drink = any(c.pricing_role == 'drink' and c.is_active and c.is_available for c in payload_catalog)
     for item in line_payloads or []:
         catalog_item_id = getattr(item, 'catalog_item_id', None)
         if catalog_item_id is None and isinstance(item, dict):
@@ -1343,8 +1353,9 @@ def _rebuild_order_lines(db: Session, row: PosOrder, line_payloads):
         if unit_price_value is None and isinstance(item, dict):
             unit_price_value = item.get('unit_price')
         catalog_price = _money(catalog.price)
-        unit_price = _money(unit_price_value if unit_price_value is not None else catalog_price)
-        if unit_price != catalog_price:
+        qualified_pastry_price = _money(catalog.with_drink_price) if has_qualifying_drink and catalog.pricing_role == 'pastry' and catalog.with_drink_price is not None else catalog_price
+        unit_price = _money(unit_price_value if unit_price_value is not None else qualified_pastry_price)
+        if unit_price != qualified_pastry_price:
             raise ValueError(
                 f'{catalog.display_name or catalog.menu_item_name} price does not match the current catalog price. '
                 'Refresh the catalog and use the discount workflow for an authorized reduction.'
