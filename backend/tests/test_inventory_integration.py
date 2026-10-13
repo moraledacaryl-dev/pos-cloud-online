@@ -142,3 +142,24 @@ def test_inventory_worker_follows_canonical_redirects(monkeypatch):
     assert captured['client']['follow_redirects'] is True
     assert captured['client']['headers']['X-Integration-Token'] == 'inventory-test-token'
     assert captured['url'] == 'https://inventory.hiddenoasis.app/api/integrations/pos/events'
+
+
+def test_inventory_event_is_suppressed_not_lost_when_delivery_disabled(monkeypatch):
+    row = SimpleNamespace(status='inventory_pending', last_error=None)
+
+    class FakeQuery:
+        def filter(self, *args, **kwargs): return self
+        def order_by(self, *args, **kwargs): return self
+        def limit(self, *args, **kwargs): return self
+        def all(self): return [row]
+
+    class FakeDb:
+        def query(self, *args, **kwargs): return FakeQuery()
+        def add(self, value): pass
+        def commit(self): pass
+
+    monkeypatch.setattr(integration.settings, 'inventory_integration_enabled', False)
+    result = asyncio.run(integration.run_inventory_outbox_sync(FakeDb(), limit=10))
+    assert result['skipped'] == 1
+    assert row.status == 'suppressed'
+    assert 'not enabled' in row.last_error
