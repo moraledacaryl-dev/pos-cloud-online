@@ -357,7 +357,7 @@ export default function PosPage() {
       });
       return changed ? next : prev;
     });
-  }, [catalog, cart.map((line) => String(line.catalog_item_id)).join('|')]);
+  }, [catalog, cart]);
   const cartTotals = useMemo(() => calculateCartTotals(cart), [cart]);
   const totalApplied = useMemo(() => payments.reduce((sum, row) => sum + num(row.amount_applied), 0), [payments]);
   const folioApplied = useMemo(() => payments.filter((row) => row.tender_type === 'room_charge').reduce((sum, row) => sum + num(row.amount_applied), 0), [payments]);
