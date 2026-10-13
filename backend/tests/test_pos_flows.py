@@ -348,7 +348,7 @@ def test_synced_catalog_items_only_allow_local_availability_override():
         update_catalog_item(db, item.id, CatalogItemUpdate(price=150))
         assert False, 'synced catalog price edit should fail'
     except ValueError as exc:
-        assert 'Accounting owns synced catalog details' in str(exc)
+        assert 'Inventory owns synced catalog details' in str(exc)
 
 
 def test_table_transfer_and_merge_are_atomic_backend_operations():
