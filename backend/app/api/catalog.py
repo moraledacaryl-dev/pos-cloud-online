@@ -6,7 +6,7 @@ from app.db.database import get_db
 from app.schemas.common import CatalogItemCreate, CatalogItemUpdate
 from app.services.catalog_policy import build_catalog_sync_status
 from app.services.pos_service import create_catalog_item, delete_catalog_item, list_catalog_items, setting_json, update_catalog_item
-from app.services.sync_service import sync_catalog_from_accounting, sync_catalog_from_inventory
+from app.services.sync_service import sync_catalog_from_inventory
 
 router = APIRouter()
 
@@ -53,17 +53,6 @@ async def sync_from_inventory(db: Session = Depends(get_db), user=Depends(requir
     try:
         result = await sync_catalog_from_inventory(db, force=True)
         result['ownership'] = build_catalog_sync_status(result)['ownership']
-        return result
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.post('/sync-from-accounting')
-async def sync_from_accounting(db: Session = Depends(get_db), user=Depends(require_permissions('catalog.manage', 'sync.manage'))):
-    try:
-        result = await sync_catalog_from_accounting(db, force=True)
-        result['ownership'] = build_catalog_sync_status(result)['ownership']
-        result['transport'] = 'accounting_compatibility_api'
         return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
