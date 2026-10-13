@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import httpx
@@ -312,24 +313,46 @@ async def sync_catalog_from_inventory(db: Session, *, force: bool = True) -> dic
         if not 200 <= res.status_code < 300:
             raise ValueError(f'Failed to fetch Inventory catalog: {res.text[:400]}')
         payload = res.json() or {}
-    items = payload.get('items') if isinstance(payload, dict) else []
+    items = payload.get('items') if isinstance(payload, dict) else None
     if not isinstance(items, list):
         raise ValueError('Inventory catalog response did not contain an items list.')
+    if not items:
+        raise ValueError('Inventory catalog returned zero items; refusing to deactivate the last known selling catalog.')
 
-    touched = 0
-    seen_variants = set()
-    for source in items:
+    # Validate the complete upstream snapshot before mutating the local catalog.
+    validated_items = []
+    seen_payload_variants = set()
+    for index, source in enumerate(items):
+        if not isinstance(source, dict):
+            raise ValueError(f'Inventory catalog row {index + 1} is not an object.')
         variant_id = str(source.get('variant_id') or '').strip()
         menu_id = str(source.get('menu_item_id') or '').strip()
         if not variant_id or not menu_id:
-            continue
+            raise ValueError(f'Inventory catalog row {index + 1} is missing menu_item_id or variant_id.')
+        if variant_id in seen_payload_variants:
+            raise ValueError(f'Inventory catalog contains duplicate variant_id {variant_id}.')
+        seen_payload_variants.add(variant_id)
+        try:
+            price = Decimal(str(source.get('price')))
+            if not price.is_finite() or price < 0:
+                raise InvalidOperation
+            sort_order = int(source.get('sort_order') or 0)
+        except (InvalidOperation, TypeError, ValueError):
+            raise ValueError(f'Inventory catalog row {index + 1} has an invalid price or sort_order.')
+        validated_items.append((source, menu_id, variant_id, price, sort_order))
+
+    touched = 0
+    seen_variants = set()
+    for source, menu_id, variant_id, price, sort_order in validated_items:
         seen_variants.add(variant_id)
         row = db.query(CatalogItem).filter(CatalogItem.inventory_variant_id == variant_id).first()
         sku = str(source.get('sku') or '').strip() or None
-        # Migration bridge: claim an existing Accounting-era row by the same durable SKU
-        # instead of creating a duplicate selling button.
+        # Migration bridge: claim an existing row only when the SKU match is unique.
         if not row and sku:
-            row = db.query(CatalogItem).filter(CatalogItem.sku_code == sku).first()
+            sku_matches = db.query(CatalogItem).filter(CatalogItem.sku_code == sku).limit(2).all()
+            if len(sku_matches) > 1:
+                raise ValueError(f'Cannot safely bridge Inventory SKU {sku}: multiple POS catalog rows use it.')
+            row = sku_matches[0] if sku_matches else None
         active = bool(source.get('is_active', True)) and bool(source.get('pos_visible', True))
         display = str(source.get('display_name') or source.get('menu_item_name') or sku or variant_id)
         variant_name = str(source.get('variant_name') or '').strip() or None
@@ -345,10 +368,10 @@ async def sync_catalog_from_inventory(db: Session, *, force: bool = True) -> dic
             'category_name': source.get('category'),
             'module_slug': 'restaurant',
             'prep_station': _catalog_prep_station(source),
-            'price': float(source.get('price') or 0),
+            'price': price,
             'is_active': active,
             'is_available': row.availability_override if row and row.availability_override is not None else active,
-            'sort_order': int(source.get('sort_order') or 0),
+            'sort_order': sort_order,
             'last_sync_at': now_iso(),
             'accounting_hash': None,
         }

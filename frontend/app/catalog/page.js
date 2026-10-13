@@ -95,6 +95,7 @@ export default function CatalogPage() {
   }
 
   const statusClass = catalogStatus?.state === 'fresh' ? 'success' : 'warn';
+  const isManagedItem = (row) => Boolean(row.inventory_variant_id || row.inventory_menu_item_id || row.external_menu_item_id || row.external_sku_id);
 
   return (
     <div className="stack">
@@ -157,7 +158,7 @@ export default function CatalogPage() {
             <thead><tr><th>Display</th><th>SKU / Variant</th><th>Station</th><th>Price</th><th>Source</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>
               {rows.map((row) => (
-                <tr key={row.id}><td><strong>{row.display_name}</strong>{!row.external_menu_item_id && !row.external_sku_id && <div className="small error-text">Local only — will not sync</div>}</td><td>{row.sku_code || '-'}</td><td>{row.prep_station || '-'}</td><td>{money(row.price)}</td><td>{row.external_menu_item_id || row.external_sku_id ? <span className="badge info">Inventory catalog</span> : <span className="badge warn">Emergency fallback</span>}</td><td><span className={`badge ${row.is_available ? 'success' : 'warn'}`}>{row.is_available ? 'available' : 'sold out'}</span></td><td><div className="row wrap">{!row.external_menu_item_id && !row.external_sku_id && <button type="button" className="secondary" onClick={() => editItem(row)}>Edit fallback</button>}<button type="button" className={row.is_available ? 'secondary' : 'primary'} onClick={() => toggleAvailability(row)}>{row.is_available ? 'Mark Sold Out' : 'Restore to POS'}</button>{!row.external_menu_item_id && !row.external_sku_id && <button type="button" className="danger" onClick={() => setPendingDelete(row)}>Delete fallback</button>}</div></td></tr>
+                <tr key={row.id}><td><strong>{row.display_name}</strong>{!isManagedItem(row) && <div className="small error-text">Local only — will not sync</div>}</td><td>{row.sku_code || '-'}</td><td>{row.prep_station || '-'}</td><td>{money(row.price)}</td><td>{isManagedItem(row) ? <span className="badge info">Inventory catalog</span> : <span className="badge warn">Emergency fallback</span>}</td><td><span className={`badge ${row.is_available ? 'success' : 'warn'}`}>{row.is_available ? 'available' : 'sold out'}</span></td><td><div className="row wrap">{!isManagedItem(row) && <button type="button" className="secondary" onClick={() => editItem(row)}>Edit fallback</button>}<button type="button" className={row.is_available ? 'secondary' : 'primary'} onClick={() => toggleAvailability(row)}>{row.is_available ? 'Mark Sold Out' : 'Restore to POS'}</button>{!isManagedItem(row) && <button type="button" className="danger" onClick={() => setPendingDelete(row)}>Delete fallback</button>}</div></td></tr>
               ))}
             </tbody>
           </table>
