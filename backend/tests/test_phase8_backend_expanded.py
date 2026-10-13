@@ -33,7 +33,6 @@ from app.services.pos_service import (
     open_register_session,
     pay_order,
     reopen_register_session,
-    save_setting_json,
     update_catalog_item,
     update_room_charge_posting_status,
 )
