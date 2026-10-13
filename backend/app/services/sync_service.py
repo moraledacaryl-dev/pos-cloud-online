@@ -613,44 +613,33 @@ async def _push_room_charge_request(client: httpx.AsyncClient, base: str, config
 
 
 async def _push_order(client: httpx.AsyncClient, base: str, config: dict, payload: dict):
-    path = config.get('current_erp_sales_path') or '/menu/sales'
-    existing = await _find_current_erp_sale(client, base, path, payload.get('order_no'))
-    if existing:
-        return None
-    lines = []
-    for line in payload.get('lines') or []:
-        external_menu_item_id = line.get('external_menu_item_id')
-        if not external_menu_item_id:
-            raise ValueError(f"Order {payload.get('order_no')} has a line without external_menu_item_id. Sync catalog from accounting first.")
-        lines.append({
-            'menu_item_id': external_menu_item_id,
-            'sku_id': line.get('external_sku_id'),
+    path = config.get('current_erp_pos_order_path') or '/integrations/pos/order'
+    lines = [
+        {
+            'catalog_item_id': line.get('catalog_item_id'),
+            'inventory_menu_item_id': line.get('inventory_menu_item_id'),
+            'inventory_variant_id': line.get('inventory_variant_id'),
+            'sku_code': line.get('sku_code'),
+            'item_name': line.get('item_name_snapshot'),
             'quantity': line.get('quantity'),
             'unit_price': line.get('unit_price'),
             'discount_amount': line.get('discount_amount') or 0,
             'notes': line.get('note'),
-        })
+        }
+        for line in payload.get('lines') or []
+    ]
     payment_breakdown = payload.get('payment_breakdown') or []
     payment_method = payload.get('primary_tender') or 'cash'
     if len(payment_breakdown) > 1:
         payment_method = 'mixed'
     mapped = {
         'order_no': payload.get('order_no'),
+        'order_uuid': payload.get('order_uuid'),
+        'external_id': payload.get('order_uuid') or payload.get('order_no'),
         'order_date': payload.get('business_date'),
         'payment_method': payment_method,
         'channel': payload.get('order_type') or payload.get('source_channel'),
         'counterparty': payload.get('guest_name') or 'Walk-in Guest',
-        'notes': json.dumps({
-            'source': 'dedicated_pos_cloud',
-            'order_uuid': payload.get('order_uuid'),
-            'table_label': payload.get('table_label'),
-            'payments': payment_breakdown,
-        }, ensure_ascii=False),
-        'strict_inventory': False,
-        'mutate_inventory': False,
-        'auto_post_accounting': False,
-        'external_source': 'dedicated_pos_cloud',
-        'external_id': payload.get('order_uuid') or payload.get('order_no'),
         'lines': lines,
     }
     return await client.post(_join(base, path), json=mapped)
