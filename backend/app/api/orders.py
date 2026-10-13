@@ -2,7 +2,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_permissions
-from app.core.settings import settings
 from app.db.database import get_db
 from app.models.entities import PosOrder
 from app.schemas.common import (
