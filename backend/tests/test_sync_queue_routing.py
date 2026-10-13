@@ -82,6 +82,7 @@ def test_accounting_sale_transport_never_mutates_inventory(monkeypatch):
     }
     asyncio.run(sync_service._push_order(Client(), 'https://accounting.example/api', {}, payload))
     assert captured['json']['strict_inventory'] is False
+    assert captured['json']['mutate_inventory'] is False
 
 
 def test_accounting_void_transport_never_reverses_inventory():
