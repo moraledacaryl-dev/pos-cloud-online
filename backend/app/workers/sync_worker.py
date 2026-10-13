@@ -10,7 +10,7 @@ from app.services.operations_integration import run_operations_outbox_sync
 from app.services.sync_service import (
     record_sync_worker_heartbeat,
     run_outbox_sync,
-    sync_catalog_from_accounting,
+    sync_catalog_from_inventory,
     sync_in_house_bookings_from_accounting,
 )
 
@@ -29,7 +29,7 @@ async def loop_forever():
                     booking_result = {'ok': False, 'error': str(exc)}
                     logger.warning('room charge booking sync failed: %s', exc)
                 try:
-                    catalog_result = await sync_catalog_from_accounting(db, force=False)
+                    catalog_result = await sync_catalog_from_inventory(db, force=False)
                 except Exception as exc:
                     catalog_result = {'ok': False, 'error': str(exc)}
                     logger.warning('catalog sync failed: %s', exc)

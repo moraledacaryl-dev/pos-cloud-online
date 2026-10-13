@@ -162,7 +162,6 @@ export const createCatalogItem = (payload) => request('/catalog/items', { method
 export const updateCatalogItem = (id, payload) => request(`/catalog/items/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
 export const deleteCatalogItem = (id) => request(`/catalog/items/${id}`, { method: 'DELETE' });
 export const syncCatalogFromInventory = () => request('/catalog/sync-from-inventory', { method: 'POST' });
-export const syncCatalogFromAccounting = () => request('/catalog/sync-from-accounting', { method: 'POST' });
 export const fetchRecipeDishes = (params = {}) => request(`/recipes/dishes${qs(params)}`);
 export const fetchRecipeDocuments = (params = {}) => request(`/recipes/${qs(params)}`);
 export const fetchRecipePdf = (menuItemId) => blobRequest(`/recipes/${encodeURIComponent(menuItemId)}/pdf`);

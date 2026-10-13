@@ -8,7 +8,8 @@ def test_catalog_status_never_synced():
     assert status['state'] == 'never_synced'
     assert status['ok'] is False
     assert status['ownership']['business_owner'] == 'inventory-procurement'
-    assert status['ownership']['compatibility_transport'] == 'accounting-program-online'
+    assert status['ownership']['catalog_source'] == 'inventory-procurement'
+    assert 'compatibility_transport' not in status['ownership']
 
 
 def test_catalog_status_fresh():
