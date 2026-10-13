@@ -163,3 +163,8 @@ def test_inventory_event_is_suppressed_not_lost_when_delivery_disabled(monkeypat
     assert result['skipped'] == 1
     assert row.status == 'suppressed'
     assert 'not enabled' in row.last_error
+
+
+def test_financial_refund_never_implies_physical_stock_return():
+    assert should_reverse_inventory_for_refund({'refund_status': 'partially_refunded'}) is False
+    assert should_reverse_inventory_for_refund({'refund_status': 'fully_refunded'}) is False
