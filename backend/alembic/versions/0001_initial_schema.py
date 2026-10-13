@@ -28,7 +28,7 @@ POST_INITIAL_TABLES = {
 # later revisions must therefore be temporarily removed from that metadata during
 # a fresh bootstrap, otherwise their owning migration sees duplicate columns.
 POST_INITIAL_COLUMNS = {
-    'catalog_items': {'inventory_menu_item_id', 'inventory_variant_id'},  # owned by 0011
+    'catalog_items': {'inventory_menu_item_id', 'inventory_variant_id', 'with_drink_price', 'pricing_role', 'modifier_groups_json'},  # owned by 0011/0012
 }
 POST_INITIAL_INDEXES = {
     'catalog_items': {
