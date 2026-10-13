@@ -160,7 +160,7 @@ def test_void_contract_posts_reversal_only_when_sale_exists():
     assert res.status_code == 200
     url, body = client.posts[0]
     assert url == 'https://acct.test/menu/sales/77/void'
-    assert body['reverse_inventory'] is True
+    assert body['reverse_inventory'] is False
 
 
 def test_cash_movement_and_reconciliation_contract_payloads_are_stable():

@@ -44,7 +44,7 @@ def test_unmapped_pos_line_is_retained_as_actionable_blocker():
 
 def test_inventory_reversal_policy_never_reverses_partial_refund():
     assert integration.should_reverse_inventory_for_refund({'refund_status': 'partially_refunded'}) is False
-    assert integration.should_reverse_inventory_for_refund({'refund_status': 'fully_refunded'}) is True
+    assert integration.should_reverse_inventory_for_refund({'refund_status': 'fully_refunded'}) is False
 
 
 def test_inventory_void_reversal_only_applies_after_finalization():
@@ -142,3 +142,29 @@ def test_inventory_worker_follows_canonical_redirects(monkeypatch):
     assert captured['client']['follow_redirects'] is True
     assert captured['client']['headers']['X-Integration-Token'] == 'inventory-test-token'
     assert captured['url'] == 'https://inventory.hiddenoasis.app/api/integrations/pos/events'
+
+
+def test_inventory_event_is_suppressed_not_lost_when_delivery_disabled(monkeypatch):
+    row = SimpleNamespace(status='inventory_pending', last_error=None)
+
+    class FakeQuery:
+        def filter(self, *args, **kwargs): return self
+        def order_by(self, *args, **kwargs): return self
+        def limit(self, *args, **kwargs): return self
+        def all(self): return [row]
+
+    class FakeDb:
+        def query(self, *args, **kwargs): return FakeQuery()
+        def add(self, value): pass
+        def commit(self): pass
+
+    monkeypatch.setattr(integration.settings, 'inventory_integration_enabled', False)
+    result = asyncio.run(integration.run_inventory_outbox_sync(FakeDb(), limit=10))
+    assert result['skipped'] == 1
+    assert row.status == 'suppressed'
+    assert 'not enabled' in row.last_error
+
+
+def test_financial_refund_never_implies_physical_stock_return():
+    assert integration.should_reverse_inventory_for_refund({'refund_status': 'partially_refunded'}) is False
+    assert integration.should_reverse_inventory_for_refund({'refund_status': 'fully_refunded'}) is False

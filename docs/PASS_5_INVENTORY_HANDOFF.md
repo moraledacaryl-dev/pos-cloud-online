@@ -39,12 +39,13 @@ A void queues `sale_voided` only if the order had already reached `paid` or `fol
 
 ### Refund
 
-Inventory currently supports full-sale reversal, not quantity-aware partial stock reversal. Therefore:
+A financial refund does not prove that physical stock was returned. Therefore:
 
 - partial refund: financial refund only; no Inventory stock reversal
-- fully refunded order: queue one deterministic `sale_refunded` full reversal
+- fully refunded order: financial refund only; no automatic Inventory stock reversal
+- void of an already-finalized sale remains the explicit full-sale reversal path
 
-This prevents a partial monetary refund from restoring the entire recipe to stock. Quantity-aware physical returns require a future Inventory contract before POS may send partial stock reversals.
+Physical returns require a separate quantity-aware disposition contract (for example `restore_stock`, `waste`, or `no_stock_change`) before POS may restore stock. This prevents prepared or served food from recreating consumed recipe ingredients merely because the customer received a refund.
 
 ## Idempotency
 

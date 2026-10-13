@@ -2,7 +2,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_permissions
-from app.core.settings import settings
 from app.db.database import get_db
 from app.models.entities import PosOrder
 from app.schemas.common import (
@@ -140,8 +139,7 @@ def settle_order(order_id: int, payload: OrderPayPayload, db: Session = Depends(
         order_snapshot = get_order(db, order_id)
         validate_payment_control(order_snapshot, payload.payments)
         result = pay_order(db, order_id, payload, user_id=getattr(current_user, 'id', None))
-        if settings.inventory_integration_enabled:
-            enqueue_inventory_event(db, result, 'sale_completed')
+        enqueue_inventory_event(db, result, 'sale_completed')
         enqueue_operations_event(
             db,
             'order.finalized',
@@ -194,7 +192,7 @@ def cancel_order(order_id: int, payload: OrderVoidPayload, db: Session = Depends
             requested_reason=payload.reason,
         ) as grant:
             result = void_order(db, order_id, payload.reason, user_id=getattr(current_user, 'id', None), approved_by_user_id=grant['approved_by_user_id'])
-        if settings.inventory_integration_enabled and should_reverse_inventory_for_void(pre_void):
+        if should_reverse_inventory_for_void(pre_void):
             enqueue_inventory_event(db, result, 'sale_voided')
         enqueue_operations_event(
             db,
@@ -237,7 +235,7 @@ def refund_order(order_id: int, payload: RefundCreate, db: Session = Depends(get
         ):
             result = create_refund(db, order_id, payload, cashier_user_id=getattr(current_user, 'id', None))
         order_after_refund = get_order(db, order_id)
-        if settings.inventory_integration_enabled and should_reverse_inventory_for_refund(order_after_refund):
+        if should_reverse_inventory_for_refund(order_after_refund):
             enqueue_inventory_event(db, order_after_refund, 'sale_refunded')
         refund_id = result.get('id') if isinstance(result, dict) else getattr(result, 'id', order_id)
         enqueue_operations_event(
