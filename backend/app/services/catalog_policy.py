@@ -6,7 +6,7 @@ CATALOG_STALE_AFTER_MINUTES = 24 * 60
 
 CATALOG_OWNERSHIP = {
     'business_owner': 'inventory-procurement',
-    'compatibility_transport': 'accounting-program-online',
+    'catalog_source': 'inventory-procurement',
     'pos_role': 'selling_snapshot_and_local_availability',
     'master_fields': [
         'external_menu_item_id',
