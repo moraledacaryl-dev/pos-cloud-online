@@ -76,13 +76,13 @@ jobs:
         run: |
           alembic upgrade 0008_manager_approval_grants
           alembic upgrade head
-          alembic current | grep 0011_inventory_catalog_ids
-          alembic heads | grep 0011_inventory_catalog_ids
+          alembic current | grep 0012_catalog_pricing_rules
+          alembic heads | grep 0012_catalog_pricing_rules
           alembic check
           alembic downgrade 0009_customer_display_devices
           alembic current | grep 0009_customer_display_devices
           alembic upgrade head
-          alembic current | grep 0011_inventory_catalog_ids
+          alembic current | grep 0012_catalog_pricing_rules
       - name: Run full backend suite against PostgreSQL
         run: python -m pytest tests -q
       - name: Run PostgreSQL approval and financial concurrency regressions
