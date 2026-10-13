@@ -778,6 +778,7 @@ async def _push_order(client: httpx.AsyncClient, base: str, config: dict, payloa
             'payments': payment_breakdown,
         }, ensure_ascii=False),
         'strict_inventory': False,
+        'mutate_inventory': False,
         'auto_post_accounting': False,
         'external_source': 'dedicated_pos_cloud',
         'external_id': payload.get('order_uuid') or payload.get('order_no'),
