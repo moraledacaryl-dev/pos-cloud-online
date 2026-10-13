@@ -1354,8 +1354,24 @@ def _rebuild_order_lines(db: Session, row: PosOrder, line_payloads):
             unit_price_value = item.get('unit_price')
         catalog_price = _money(catalog.price)
         qualified_pastry_price = _money(catalog.with_drink_price) if has_qualifying_drink and catalog.pricing_role == 'pastry' and catalog.with_drink_price is not None else catalog_price
-        unit_price = _money(unit_price_value if unit_price_value is not None else qualified_pastry_price)
-        if unit_price != qualified_pastry_price:
+        requested_modifiers = getattr(item, 'modifiers', None)
+        if requested_modifiers is None and isinstance(item, dict): requested_modifiers = item.get('modifiers')
+        configured_groups = json.loads(catalog.modifier_groups_json or '[]')
+        groups_by_id = {str(g.get('id')): g for g in configured_groups if isinstance(g, dict) and g.get('id')}
+        modifier_total = Decimal('0')
+        for selected_group in requested_modifiers or []:
+            group = groups_by_id.get(str(selected_group.get('id') or ''))
+            if not group: raise ValueError(f'{catalog.display_name} contains an invalid modifier group.')
+            allowed = {str(o.get('label')): o for o in group.get('options', []) if isinstance(o, dict)}
+            labels = selected_group.get('labels') or []
+            if group.get('mode') != 'multi' and len(labels) > 1: raise ValueError(f'{catalog.display_name} modifier allows only one selection.')
+            for label in labels:
+                option = allowed.get(str(label))
+                if not option: raise ValueError(f'{catalog.display_name} contains an invalid modifier option.')
+                modifier_total += _money(option.get('price_delta') or 0)
+        expected_unit_price = _money(qualified_pastry_price + modifier_total)
+        unit_price = _money(unit_price_value if unit_price_value is not None else expected_unit_price)
+        if unit_price != expected_unit_price:
             raise ValueError(
                 f'{catalog.display_name or catalog.menu_item_name} price does not match the current catalog price. '
                 'Refresh the catalog and use the discount workflow for an authorized reduction.'
