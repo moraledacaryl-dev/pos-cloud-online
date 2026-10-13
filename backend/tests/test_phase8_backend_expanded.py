@@ -37,7 +37,7 @@ from app.services.pos_service import (
     update_catalog_item,
     update_room_charge_posting_status,
 )
-from app.services.sync_service import sync_catalog_from_accounting
+from app.services.sync_service import sync_catalog_from_inventory
 
 
 class DummyResponse:
@@ -61,54 +61,39 @@ class DummyAsyncClient:
         return False
 
     async def get(self, url, params=None):
-        if url.endswith('/menu/items'):
-            return DummyResponse([
-                {'id': 101, 'name': 'Club Sandwich', 'category': 'Meals', 'module_slug': 'restaurant', 'price': 240, 'updated_at': '2026-04-20T12:00:00Z', 'is_active': True},
-                {'id': 102, 'name': 'Iced Coffee', 'category': 'Beverages', 'module_slug': 'restaurant', 'price': 120, 'updated_at': '2026-04-20T12:00:00Z', 'is_active': True},
-            ])
-        if url.endswith('/menu/skus'):
-            return DummyResponse([
-                {'id': 201, 'menu_item_id': 102, 'sku_code': 'DRINK-001', 'variant_name': 'Regular', 'price': 120, 'updated_at': '2026-04-20T12:00:00Z', 'is_active': True},
-            ])
-        return DummyResponse([], 404)
+        if url.endswith('/integrations/pos/catalog'):
+            return DummyResponse({'items': [
+                {'menu_item_id': '101', 'variant_id': '201', 'menu_item_name': 'Club Sandwich', 'display_name': 'Club Sandwich', 'sku': 'MEAL-001', 'variant_name': 'Regular', 'category': 'Meals', 'price': '240', 'is_active': True, 'pos_visible': True},
+                {'menu_item_id': '102', 'variant_id': '202', 'menu_item_name': 'Iced Coffee', 'display_name': 'Iced Coffee', 'sku': 'DRINK-001', 'variant_name': 'Regular', 'category': 'Beverages', 'price': '120', 'is_active': True, 'pos_visible': True},
+            ]})
+        return DummyResponse({}, 404)
 
 
-def test_sync_catalog_from_accounting_imports_items_with_and_without_skus(monkeypatch):
+def test_sync_catalog_from_inventory_imports_authoritative_variants(monkeypatch):
     db = make_session()
-    save_setting_json(db, 'accounting_sync', {
-        'api_base': 'http://127.0.0.1/api',
-        'catalog_items_path': '/menu/items',
-        'catalog_skus_path': '/menu/skus',
-    }, username='test')
+    monkeypatch.setattr('app.services.sync_service.settings.inventory_integration_enabled', True)
+    monkeypatch.setattr('app.services.sync_service.settings.inventory_api_base', 'http://inventory.test/api/v1')
+    monkeypatch.setattr('app.services.sync_service.settings.inventory_integration_token', 'test-token')
+    monkeypatch.setattr('app.services.sync_service.settings.inventory_catalog_path', '/integrations/pos/catalog')
     monkeypatch.setattr('app.services.sync_service.httpx.AsyncClient', DummyAsyncClient)
-    result = asyncio.run(sync_catalog_from_accounting(db))
+    result = asyncio.run(sync_catalog_from_inventory(db))
     assert result['ok'] is True
+    assert result['source'] == 'inventory-procurement'
     assert result['menu_items_seen'] == 2
-    assert result['skus_seen'] == 1
-    items = db.query(CatalogItem).order_by(CatalogItem.external_menu_item_id.asc(), CatalogItem.external_sku_id.asc()).all()
+    assert result['skus_seen'] == 2
+    items = db.query(CatalogItem).order_by(CatalogItem.inventory_variant_id.asc()).all()
     assert len(items) == 2
-    simple_item = next((item for item in items if item.external_sku_id is None), None)
-    variant_item = next((item for item in items if item.external_sku_id is not None), None)
-    assert simple_item is not None
-    assert simple_item.external_menu_item_id == 101
-    assert simple_item.display_name == 'Club Sandwich'
-    assert simple_item.menu_item_name == 'Club Sandwich'
-    assert simple_item.category_name == 'Meals'
-    assert simple_item.module_slug == 'restaurant'
-    assert simple_item.prep_station == 'kitchen'
-    assert variant_item is not None
-    assert variant_item.external_menu_item_id == 102
-    assert variant_item.external_sku_id == 201
-    assert variant_item.variant_name == 'Regular'
-    assert variant_item.category_name == 'Beverages'
-    assert variant_item.module_slug == 'restaurant'
-    assert variant_item.prep_station == 'kitchen'
+    assert items[0].inventory_menu_item_id == '101'
+    assert items[0].inventory_variant_id == '201'
+    assert items[0].display_name == 'Club Sandwich'
+    assert items[0].category_name == 'Meals'
+    assert items[0].prep_station == 'kitchen'
 
-    update_catalog_item(db, simple_item.id, CatalogItemUpdate(is_available=False))
-    asyncio.run(sync_catalog_from_accounting(db))
-    db.refresh(simple_item)
-    assert simple_item.is_available is False
-    assert simple_item.availability_override is False
+    update_catalog_item(db, items[0].id, CatalogItemUpdate(is_available=False))
+    asyncio.run(sync_catalog_from_inventory(db))
+    db.refresh(items[0])
+    assert items[0].is_available is False
+    assert items[0].availability_override is False
 
 
 def make_session():
