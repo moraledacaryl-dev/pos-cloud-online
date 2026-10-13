@@ -777,7 +777,7 @@ async def _push_order(client: httpx.AsyncClient, base: str, config: dict, payloa
             'table_label': payload.get('table_label'),
             'payments': payment_breakdown,
         }, ensure_ascii=False),
-        'strict_inventory': True,
+        'strict_inventory': False,
         'auto_post_accounting': False,
         'external_source': 'dedicated_pos_cloud',
         'external_id': payload.get('order_uuid') or payload.get('order_no'),
@@ -799,7 +799,7 @@ async def _push_order_void(client: httpx.AsyncClient, base: str, config: dict, p
     body = {
         'reason': payload.get('reason') or 'Voided in POS',
         'void_date': payload.get('business_date'),
-        'reverse_inventory': True,
+        'reverse_inventory': False,
         'auto_post_accounting': False,
     }
     return await client.post(_join(base, f"{path}/{sale_id}/void"), json=body)
