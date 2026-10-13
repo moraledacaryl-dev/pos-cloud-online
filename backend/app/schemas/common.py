@@ -150,6 +150,7 @@ class OrderLineCreate(BaseModel):
     quantity: Decimal = Decimal('1')
     unit_price: Decimal | None = None
     discount_amount: Decimal = Decimal('0')
+    modifiers: list[dict[str, Any]] = Field(default_factory=list)
     note: str | None = None
     kitchen_status: str | None = None
 
