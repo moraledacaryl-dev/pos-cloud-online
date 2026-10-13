@@ -78,11 +78,14 @@ def test_accounting_sale_transport_never_mutates_inventory(monkeypatch):
     payload = {
         'order_uuid': 'ownership-order-1', 'order_no': 'POS-OWN-1',
         'business_date': '2026-10-13', 'primary_tender': 'cash',
-        'lines': [{'external_menu_item_id': 10, 'external_sku_id': 20, 'quantity': 1, 'unit_price': 100}],
+        'lines': [{'inventory_menu_item_id': 'menu-10', 'inventory_variant_id': 'variant-20', 'sku_code': 'SKU-20', 'quantity': 1, 'unit_price': 100}],
     }
     asyncio.run(sync_service._push_order(Client(), 'https://accounting.example/api', {}, payload))
-    assert captured['json']['strict_inventory'] is False
-    assert captured['json']['mutate_inventory'] is False
+    assert captured['url'] == 'https://accounting.example/api/integrations/pos/order'
+    assert captured['json']['lines'][0]['inventory_menu_item_id'] == 'menu-10'
+    assert captured['json']['lines'][0]['inventory_variant_id'] == 'variant-20'
+    assert 'strict_inventory' not in captured['json']
+    assert 'mutate_inventory' not in captured['json']
 
 
 def test_accounting_void_transport_never_reverses_inventory():

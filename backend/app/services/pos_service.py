@@ -846,6 +846,8 @@ def _serialize_order(row: PosOrder, include_lines: bool = True, db: Session | No
                 'catalog_item_id': line.catalog_item_id,
                 'external_menu_item_id': line.external_menu_item_id,
                 'external_sku_id': line.external_sku_id,
+                'inventory_menu_item_id': line.catalog_item.inventory_menu_item_id if getattr(line, 'catalog_item', None) else None,
+                'inventory_variant_id': line.catalog_item.inventory_variant_id if getattr(line, 'catalog_item', None) else None,
                 'item_name_snapshot': line.item_name_snapshot,
                 'prep_station': normalize_kds_station(line.prep_station),
                 'quantity': line.quantity,

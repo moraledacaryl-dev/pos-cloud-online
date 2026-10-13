@@ -107,14 +107,14 @@ def test_sale_contract_maps_split_tender_to_mixed_accounting_payload():
     pay_order(db, order['id'], OrderPayPayload(payments=[OrderPaymentCreate(tender_type='cash', amount_applied=120, amount_received=120), OrderPaymentCreate(tender_type='card', amount_applied=80, amount_received=80, accounting_financial_account_id=9, reference_no='CARD-7788')]))
     outbox = db.query(SyncOutboxEvent).filter(SyncOutboxEvent.event_type == 'order.finalized').first()
     payload = json.loads(outbox.payload_json)
-    client = FakeClient({('https://acct.test/menu/sales', None): []})
+    client = FakeClient()
     res = asyncio.run(_push_order(client, 'https://acct.test', {}, payload))
     assert res.status_code == 200
     _url, body = client.posts[0]
     assert body['payment_method'] == 'mixed'
-    assert body['external_source'] == 'dedicated_pos_cloud'
     assert body['external_id'] == payload['order_uuid']
-    assert body['lines'][0]['menu_item_id'] == 3001
+    assert client.posts[0][0] == 'https://acct.test/integrations/pos/order'
+    assert 'menu_item_id' not in body['lines'][0]
 
 
 def test_refund_contract_maps_to_outgoing_cashflow_payload():
