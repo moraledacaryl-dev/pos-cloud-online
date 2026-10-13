@@ -117,6 +117,33 @@ def test_sale_contract_maps_split_tender_to_mixed_accounting_payload():
     assert 'menu_item_id' not in body['lines'][0]
 
 
+def test_room_charge_uses_dedicated_accounting_review_intake_with_reversal_lineage():
+    payload = {
+        'order': {'order_no': 'POS-ROOM-7'},
+        'room_charge_posting': {
+            'id': 88,
+            'posting_uuid': 'room-posting-88',
+            'guest_label': 'Guest Seven',
+            'room_number': '7',
+            'service_date': '2026-10-13',
+            'service_type': 'restaurant',
+            'charge_amount': -450,
+        },
+        'reverses_source_type': 'pos_room_charge',
+        'reverses_source_id': 77,
+    }
+    client = FakeClient()
+    res = asyncio.run(__import__('app.services.sync_service', fromlist=['_push_room_charge_request'])._push_room_charge_request(client, 'https://acct.test', {}, payload))
+    assert res.status_code == 200
+    url, body = client.posts[0]
+    assert url == 'https://acct.test/integrations/pos/room-charge'
+    assert body['source_type'] == 'pos_room_charge_reversal'
+    assert body['gross_amount'] == -450
+    assert body['posting_uuid'] == 'room-posting-88'
+    assert body['reverses_source_type'] == 'pos_room_charge'
+    assert body['reverses_source_id'] == 77
+
+
 def test_refund_contract_maps_to_outgoing_cashflow_payload():
     db = make_session()
     manager, register, item = seed(db)
