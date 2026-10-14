@@ -136,6 +136,8 @@ class CatalogItem(Base, TimestampMixin):
     price: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
     with_drink_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
     pricing_role: Mapped[str] = mapped_column(String(24), default='standard')
+    pricing_tags_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    conditional_prices_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     modifier_groups_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     tax_rate: Mapped[Decimal] = mapped_column(Numeric(9, 6), default=0)
     service_charge_rate: Mapped[Decimal] = mapped_column(Numeric(9, 6), default=0)
