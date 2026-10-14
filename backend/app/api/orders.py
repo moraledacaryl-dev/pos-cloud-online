@@ -237,6 +237,28 @@ def refund_order(order_id: int, payload: RefundCreate, db: Session = Depends(get
         order_after_refund = get_order(db, order_id)
         if should_reverse_inventory_for_refund(order_after_refund):
             enqueue_inventory_event(db, order_after_refund, 'sale_refunded')
+        return_lines = []
+        order_lines = {int(line.get('id')): line for line in (order_after_refund.get('lines') or []) if line.get('id') is not None}
+        for requested in (payload.lines or []):
+            disposition = str(requested.inventory_disposition or 'no_stock_change').strip().lower()
+            if disposition == 'no_stock_change':
+                continue
+            if disposition not in {'restore_stock', 'waste'}:
+                raise ValueError('inventory_disposition must be one of: no_stock_change, restore_stock, waste.')
+            if not requested.order_line_id or requested.quantity is None or requested.quantity <= 0:
+                raise ValueError('Physical Inventory return requires an order line and positive quantity.')
+            source_line = order_lines.get(int(requested.order_line_id))
+            if not source_line:
+                raise ValueError('Physical Inventory return references an unknown order line.')
+            return_lines.append({
+                'external_product_id': source_line.get('sku_code') or source_line.get('external_sku_id'),
+                'quantity': float(requested.quantity),
+                'inventory_disposition': disposition,
+                'catalog_item_id': source_line.get('catalog_item_id'),
+                'item_name': source_line.get('item_name_snapshot'),
+            })
+        if return_lines:
+            enqueue_inventory_event(db, order_after_refund, 'sale_returned', return_lines=return_lines)
         refund_id = result.get('id') if isinstance(result, dict) else getattr(result, 'id', order_id)
         enqueue_operations_event(
             db,
