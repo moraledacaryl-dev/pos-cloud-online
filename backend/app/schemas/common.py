@@ -227,6 +227,7 @@ class RefundLineCreate(BaseModel):
     order_line_id: int | None = None
     quantity: Decimal | None = None
     amount: Decimal | None = None
+    inventory_disposition: str = 'no_stock_change'
     note: str | None = None
 
 
