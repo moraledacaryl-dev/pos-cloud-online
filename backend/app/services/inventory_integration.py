@@ -14,6 +14,7 @@ INVENTORY_EVENT_TYPES = {
     'sale_completed': 'inventory.sale_completed',
     'sale_voided': 'inventory.sale_voided',
     'sale_refunded': 'inventory.sale_refunded',
+    'sale_returned': 'inventory.sale_returned',
 }
 
 
@@ -39,7 +40,7 @@ def should_reverse_inventory_for_refund(order_after_refund: dict) -> bool:
     return False
 
 
-def build_inventory_event(order: dict, event_type: str) -> dict:
+def build_inventory_event(order: dict, event_type: str, *, return_lines: list[dict] | None = None) -> dict:
     if event_type not in INVENTORY_EVENT_TYPES:
         raise ValueError(f'Unsupported Inventory event type: {event_type}')
     order_uuid = str(order.get('order_uuid') or '').strip()
@@ -48,8 +49,9 @@ def build_inventory_event(order: dict, event_type: str) -> dict:
 
     lines = []
     unmapped_lines = []
-    for line in order.get('lines') or []:
-        external_product_id = str(line.get('sku_code') or line.get('external_sku_id') or '').strip()
+    source_lines = return_lines if event_type == 'sale_returned' else (order.get('lines') or [])
+    for line in source_lines:
+        external_product_id = str(line.get('external_product_id') or line.get('sku_code') or line.get('external_sku_id') or '').strip()
         quantity = float(line.get('quantity') or 0)
         if quantity <= 0:
             continue
@@ -60,7 +62,13 @@ def build_inventory_event(order: dict, event_type: str) -> dict:
                 'quantity': quantity,
             })
             continue
-        lines.append({'external_product_id': external_product_id, 'quantity': quantity})
+        event_line = {'external_product_id': external_product_id, 'quantity': quantity}
+        if event_type == 'sale_returned':
+            disposition = str(line.get('inventory_disposition') or '').strip().lower()
+            if disposition not in {'restore_stock', 'waste'}:
+                raise ValueError('Returned Inventory lines require restore_stock or waste disposition.')
+            event_line['inventory_disposition'] = disposition
+        lines.append(event_line)
 
     return {
         'external_event_id': f'pos:{order_uuid}:{event_type}',
@@ -73,8 +81,8 @@ def build_inventory_event(order: dict, event_type: str) -> dict:
     }
 
 
-def enqueue_inventory_event(db: Session, order: dict, event_type: str) -> SyncOutboxEvent:
-    payload = build_inventory_event(order, event_type)
+def enqueue_inventory_event(db: Session, order: dict, event_type: str, *, return_lines: list[dict] | None = None) -> SyncOutboxEvent:
+    payload = build_inventory_event(order, event_type, return_lines=return_lines)
     row = create_outbox_event(
         db,
         aggregate_type='order',
