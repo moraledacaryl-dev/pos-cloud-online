@@ -21,12 +21,10 @@ def db_session():
 
 
 def item(price, tags=None, prices=None):
-    import json
     return CatalogItem(price=Decimal(str(price)), pricing_tags_json=json.dumps(tags or []), conditional_prices_json=json.dumps(prices or []))
 
 
 def set_rules(db, rules):
-    import json
     row=SystemSetting(key="catalog_sync",value_json=json.dumps({"pricing_rules":rules}))
     db.add(row); db.commit()
 
