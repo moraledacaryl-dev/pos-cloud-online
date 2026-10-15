@@ -1338,7 +1338,8 @@ def _rebuild_order_lines(db: Session, row: PosOrder, line_payloads):
         source_id = getattr(source_line, 'catalog_item_id', None)
         if source_id is None and isinstance(source_line, dict): source_id = source_line.get('catalog_item_id')
         source_catalog = db.get(CatalogItem, int(source_id or 0))
-        if source_catalog: payload_catalog.append(source_catalog)
+        if source_catalog and source_catalog.is_active and source_catalog.is_available:
+            payload_catalog.append(source_catalog)
     from app.services.selling_rules import resolve_unit_price
 
     has_qualifying_drink = any(c.pricing_role == 'drink' and c.is_active and c.is_available for c in payload_catalog)
@@ -1359,7 +1360,7 @@ def _rebuild_order_lines(db: Session, row: PosOrder, line_payloads):
         if unit_price_value is None and isinstance(item, dict):
             unit_price_value = item.get('unit_price')
         catalog_price = _money(catalog.price)
-        if catalog.conditional_prices_json and catalog.pricing_tags_json:
+        if json.loads(catalog.conditional_prices_json or '[]') and json.loads(catalog.pricing_tags_json or '[]'):
             qualified_pastry_price = _money(resolve_unit_price(db, catalog, payload_catalog))
         else:
             qualified_pastry_price = _money(catalog.with_drink_price) if has_qualifying_drink and catalog.pricing_role == 'pastry' and catalog.with_drink_price is not None else catalog_price
