@@ -366,8 +366,11 @@ async def sync_catalog_from_inventory(db: Session, *, force: bool = True) -> dic
             raise ValueError(f'Inventory catalog row {index + 1} has invalid selling-rule metadata.')
         normalized_prices=[]
         for cp in conditional_prices:
-            if not isinstance(cp,dict) or str(cp.get('rule_id') or '').strip() not in seen_rule_ids:
-                raise ValueError(f'Inventory catalog row {index + 1} references an unknown pricing rule.')
+            if not isinstance(cp, dict) or not str(cp.get('rule_id') or '').strip():
+                raise ValueError(f'Inventory catalog row {index + 1} has an invalid conditional pricing rule reference.')
+            # Inventory exports active rules only; ignore stale references to disabled rules.
+            if str(cp['rule_id']).strip() not in seen_rule_ids:
+                continue
             try:
                 cp_price=Decimal(str(cp.get('price')))
                 if not cp_price.is_finite() or cp_price < 0: raise InvalidOperation
