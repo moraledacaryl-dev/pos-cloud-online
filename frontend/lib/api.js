@@ -158,6 +158,7 @@ export const fetchPermissions = () => request('/auth/permissions');
 export const getDashboard = () => request('/dashboard/summary');
 
 export const fetchCatalogItems = (params = {}) => request(`/catalog/items${qs(params)}`);
+export const fetchCatalogPricingRules = () => request('/catalog/pricing-rules');
 export const createCatalogItem = (payload) => request('/catalog/items', { method: 'POST', body: JSON.stringify(payload) });
 export const updateCatalogItem = (id, payload) => request(`/catalog/items/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
 export const deleteCatalogItem = (id) => request(`/catalog/items/${id}`, { method: 'DELETE' });
