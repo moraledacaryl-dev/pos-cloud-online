@@ -33,7 +33,7 @@ def resolve_unit_price(db,item:CatalogItem,cart_items:list[CatalogItem])->Decima
     target_tags=pricing_tags(item)
     for cp in conditional_prices(item):
         rule=by_id.get(str(cp.get('rule_id')))
-        if not rule or str(rule.get('target_tag') or '') not in target_tags or str(rule.get('qualifier_tag') or '') not in cart_tags:
+        if not rule or rule.get('is_active', True) is False or str(rule.get('target_tag') or '') not in target_tags or str(rule.get('qualifier_tag') or '') not in cart_tags:
             continue
         try: price=Decimal(str(cp.get('price')))
         except Exception: continue
