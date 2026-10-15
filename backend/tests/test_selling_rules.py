@@ -1,7 +1,23 @@
+import json
 from decimal import Decimal
+
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+
+from app.db.database import Base
 
 from app.models.entities import CatalogItem, SystemSetting
 from app.services.selling_rules import resolve_unit_price
+
+
+@pytest.fixture
+def db_session():
+    engine = create_engine('sqlite:///:memory:')
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        yield session
+    engine.dispose()
 
 
 def item(price, tags=None, prices=None):
