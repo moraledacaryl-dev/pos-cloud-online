@@ -237,6 +237,13 @@ def refund_order(order_id: int, payload: RefundCreate, db: Session = Depends(get
         order_after_refund = get_order(db, order_id)
         if should_reverse_inventory_for_refund(order_after_refund):
             enqueue_inventory_event(db, order_after_refund, 'sale_refunded')
+        # Reject unsupported physical-return requests before interpreting them
+        # as stock movements. Financial refunds remain stock-neutral by default.
+        if payload.refund_mode != 'lines' and any(
+            str(line.inventory_disposition or 'no_stock_change').strip().lower() != 'no_stock_change'
+            for line in (payload.lines or [])
+        ):
+            raise ValueError('Physical returns require refund_mode=lines with explicit quantities.')
         return_lines = []
         order_lines = {int(line.get('id')): line for line in (order_after_refund.get('lines') or []) if line.get('id') is not None}
         for requested in (payload.lines or []):
