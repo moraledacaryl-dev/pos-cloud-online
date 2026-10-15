@@ -6,7 +6,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.db.database import Base
-
 from app.models.entities import CatalogItem, SystemSetting
 from app.services.selling_rules import resolve_unit_price
 
