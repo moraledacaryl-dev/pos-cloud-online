@@ -619,6 +619,8 @@ def _serialize_catalog_item(row: CatalogItem) -> dict:
         'price': row.price,
         'with_drink_price': row.with_drink_price,
         'pricing_role': row.pricing_role,
+        'pricing_tags': json.loads(row.pricing_tags_json or '[]'),
+        'conditional_prices': json.loads(row.conditional_prices_json or '[]'),
         'modifier_groups': json.loads(row.modifier_groups_json or '[]'),
         'tax_rate': row.tax_rate,
         'service_charge_rate': row.service_charge_rate,
