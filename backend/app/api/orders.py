@@ -240,11 +240,15 @@ def refund_order(order_id: int, payload: RefundCreate, db: Session = Depends(get
                 continue
             if disposition not in {'restore_stock', 'waste'}:
                 raise ValueError('inventory_disposition must be one of: no_stock_change, restore_stock, waste.')
+            if disposition == 'restore_stock':
+                raise ValueError('Recipe-consumed items cannot restore ingredients; use a controlled finished-goods stock receipt.')
             if not requested.order_line_id or requested.quantity is None or requested.quantity <= 0:
                 raise ValueError('Physical Inventory return requires an order line and positive quantity.')
             source_line = order_lines.get(int(requested.order_line_id))
             if not source_line:
                 raise ValueError('Physical Inventory return references an unknown order line.')
+            if not (source_line.get('sku_code') or source_line.get('external_sku_id')):
+                raise ValueError('Physical Inventory return requires a mapped external product identifier.')
             return_lines.append({
                 'external_product_id': source_line.get('sku_code') or source_line.get('external_sku_id'),
                 'quantity': float(requested.quantity),
