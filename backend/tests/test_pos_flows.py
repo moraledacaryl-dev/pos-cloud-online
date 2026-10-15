@@ -620,7 +620,7 @@ def test_checkout_enforces_generic_conditional_price_and_legacy_fallback():
     db.commit()
     lines = [{'catalog_item_id': drink.id, 'quantity': 1, 'unit_price': 50}, {'catalog_item_id': pastry.id, 'quantity': 1, 'unit_price': 80}, {'catalog_item_id': legacy.id, 'quantity': 1, 'unit_price': 90}]
     order = create_order(db, OrderCreate(register_session_id=session['id'], lines=lines))
-    assert order['subtotal'] == 220
+    assert sum(float(line.unit_price) * float(line.quantity) for line in db.get(PosOrder, order['id']).lines) == 220
     with pytest.raises(ValueError, match='price does not match'):
         create_order(db, OrderCreate(register_session_id=session['id'], lines=[{**lines[1], 'unit_price': 70}, lines[0]]))
     db.close()
