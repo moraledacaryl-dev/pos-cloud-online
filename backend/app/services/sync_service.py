@@ -319,6 +319,20 @@ async def sync_catalog_from_inventory(db: Session, *, force: bool = True) -> dic
     if not items:
         raise ValueError('Inventory catalog returned zero items; refusing to deactivate the last known selling catalog.')
 
+    pricing_rules = payload.get('pricing_rules') or []
+    if not isinstance(pricing_rules, list):
+        raise ValueError('Inventory catalog response has invalid pricing_rules.')
+    normalized_rules = []
+    seen_rule_ids = set()
+    for rule in pricing_rules:
+        if not isinstance(rule, dict) or not str(rule.get('id') or '').strip():
+            raise ValueError('Inventory catalog contains an invalid pricing rule.')
+        rule_id = str(rule['id']).strip()
+        if rule_id in seen_rule_ids:
+            raise ValueError(f'Inventory catalog contains duplicate pricing rule {rule_id}.')
+        seen_rule_ids.add(rule_id)
+        normalized_rules.append({'id': rule_id, 'name': str(rule.get('name') or rule_id), 'qualifier_tag': str(rule.get('qualifier_tag') or '').strip(), 'target_tag': str(rule.get('target_tag') or '').strip(), 'priority': int(rule.get('priority') or 100)})
+
     # Validate the complete upstream snapshot before mutating the local catalog.
     validated_items = []
     seen_payload_variants = set()
@@ -346,13 +360,25 @@ async def sync_catalog_from_inventory(db: Session, *, force: bool = True) -> dic
         if pricing_role not in {'standard', 'drink', 'pastry'}:
             raise ValueError(f'Inventory catalog row {index + 1} has an invalid pricing_role.')
         modifier_groups = source.get('modifier_groups') or []
-        if not isinstance(modifier_groups, list):
-            raise ValueError(f'Inventory catalog row {index + 1} has invalid modifier_groups.')
-        validated_items.append((source, menu_id, variant_id, price, with_drink_price, pricing_role, modifier_groups, sort_order))
+        pricing_tags = source.get('pricing_tags') or []
+        conditional_prices = source.get('conditional_prices') or []
+        if not isinstance(modifier_groups, list) or not isinstance(pricing_tags, list) or not isinstance(conditional_prices, list):
+            raise ValueError(f'Inventory catalog row {index + 1} has invalid selling-rule metadata.')
+        normalized_prices=[]
+        for cp in conditional_prices:
+            if not isinstance(cp,dict) or str(cp.get('rule_id') or '').strip() not in seen_rule_ids:
+                raise ValueError(f'Inventory catalog row {index + 1} references an unknown pricing rule.')
+            try:
+                cp_price=Decimal(str(cp.get('price')))
+                if not cp_price.is_finite() or cp_price < 0: raise InvalidOperation
+            except (InvalidOperation,TypeError,ValueError):
+                raise ValueError(f'Inventory catalog row {index + 1} has an invalid conditional price.')
+            normalized_prices.append({'rule_id':str(cp['rule_id']).strip(),'price':str(cp_price)})
+        validated_items.append((source, menu_id, variant_id, price, with_drink_price, pricing_role, modifier_groups, [str(x).strip() for x in pricing_tags if str(x).strip()], normalized_prices, sort_order))
 
     touched = 0
     seen_variants = set()
-    for source, menu_id, variant_id, price, with_drink_price, pricing_role, modifier_groups, sort_order in validated_items:
+    for source, menu_id, variant_id, price, with_drink_price, pricing_role, modifier_groups, pricing_tags, conditional_prices, sort_order in validated_items:
         seen_variants.add(variant_id)
         row = db.query(CatalogItem).filter(CatalogItem.inventory_variant_id == variant_id).first()
         sku = str(source.get('sku') or '').strip() or None
@@ -380,6 +406,8 @@ async def sync_catalog_from_inventory(db: Session, *, force: bool = True) -> dic
             'price': price,
             'with_drink_price': with_drink_price,
             'pricing_role': pricing_role,
+            'pricing_tags_json': json.dumps(pricing_tags, ensure_ascii=False),
+            'conditional_prices_json': json.dumps(conditional_prices, ensure_ascii=False),
             'modifier_groups_json': json.dumps(modifier_groups, ensure_ascii=False),
             'is_active': active,
             'is_available': row.availability_override if row and row.availability_override is not None else active,
@@ -404,7 +432,7 @@ async def sync_catalog_from_inventory(db: Session, *, force: bool = True) -> dic
     summary = {
         'ok': True, 'source': 'inventory-procurement', 'transport': 'direct_inventory_api',
         'imported_rows': touched, 'menu_items_seen': len({str(x.get('menu_item_id')) for x in items if x.get('menu_item_id')}),
-        'skus_seen': len(seen_variants), 'last_sync_at': now_iso(),
+        'skus_seen': len(seen_variants), 'pricing_rules': normalized_rules, 'last_sync_at': now_iso(),
     }
     save_setting_json(db, 'catalog_sync', summary, username='sync_service')
     db.commit()
