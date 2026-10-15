@@ -6,6 +6,7 @@ from decimal import Decimal
 from app.models.entities import CatalogItem
 from app.services.pos_service import setting_json
 
+
 def _json_list(raw):
     try:
         value=json.loads(raw or "[]")
