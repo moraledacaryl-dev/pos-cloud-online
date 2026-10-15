@@ -2036,8 +2036,10 @@ def create_refund(db: Session, order_id: int, payload: RefundCreate, cashier_use
                 raise ValueError('Refund line quantity must be greater than zero.')
             already_qty = _quantity(refunded_qty_by_line.get(source_line.id, Decimal('0')))
             remaining_qty = _quantity(max(_quantity(source_line.quantity) - already_qty, Decimal('0')))
-            if requested_qty - remaining_qty >= QUANTITY_QUANTUM:
+            if requested_qty > remaining_qty:
                 raise ValueError(f'Refund quantity exceeds remaining refundable quantity for {source_line.item_name_snapshot}.')
+            # Include earlier lines in this same request, not just prior refunds.
+            refunded_qty_by_line[source_line.id] = _quantity(already_qty + requested_qty)
             source_quantity = _quantity(source_line.quantity)
             ratio = requested_qty / (source_quantity or Decimal('1'))
             line_total = _money(_money(source_line.line_total) * ratio)
