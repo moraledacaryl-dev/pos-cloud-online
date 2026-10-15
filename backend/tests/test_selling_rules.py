@@ -59,3 +59,14 @@ def test_generic_rule_does_not_apply_to_wrong_target_tag(db_session):
     qualifier = item(50, ['qualifier'])
     set_rules(db_session, [{'id': 'r1', 'qualifier_tag': 'qualifier', 'target_tag': 'target'}])
     assert resolve_unit_price(db_session, target, [qualifier, target]) == Decimal('100')
+
+
+def test_nonfinite_or_negative_conditional_prices_are_ignored(db_session):
+    target = item(100, ['target'], [
+        {'rule_id': 'r1', 'price': 'NaN'},
+        {'rule_id': 'r1', 'price': '-10'},
+        {'rule_id': 'r1', 'price': 'Infinity'},
+    ])
+    qualifier = item(50, ['qualifier'])
+    set_rules(db_session, [{'id': 'r1', 'qualifier_tag': 'qualifier', 'target_tag': 'target'}])
+    assert resolve_unit_price(db_session, target, [qualifier, target]) == Decimal('100')
