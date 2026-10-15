@@ -1,6 +1,8 @@
 from __future__ import annotations
+
 import json
 from decimal import Decimal
+
 from app.models.entities import CatalogItem
 from app.services.pos_service import setting_json
 
