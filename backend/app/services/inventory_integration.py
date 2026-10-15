@@ -40,7 +40,7 @@ def should_reverse_inventory_for_refund(order_after_refund: dict) -> bool:
     return False
 
 
-def build_inventory_event(order: dict, event_type: str, *, return_lines: list[dict] | None = None) -> dict:
+def build_inventory_event(order: dict, event_type: str, *, return_lines: list[dict] | None = None, return_id: str | None = None) -> dict:
     if event_type not in INVENTORY_EVENT_TYPES:
         raise ValueError(f'Unsupported Inventory event type: {event_type}')
     order_uuid = str(order.get('order_uuid') or '').strip()
@@ -70,8 +70,10 @@ def build_inventory_event(order: dict, event_type: str, *, return_lines: list[di
             event_line['inventory_disposition'] = disposition
         lines.append(event_line)
 
+    if event_type == 'sale_returned' and not return_id:
+        raise ValueError('Physical returns require a unique refund identifier.')
     return {
-        'external_event_id': f'pos:{order_uuid}:{event_type}',
+        'external_event_id': f'pos:{order_uuid}:{event_type}:{return_id}' if return_id else f'pos:{order_uuid}:{event_type}',
         'external_sale_id': order_uuid,
         'pos_system': 'hidden-oasis-pos',
         'event_type': event_type,
@@ -81,8 +83,8 @@ def build_inventory_event(order: dict, event_type: str, *, return_lines: list[di
     }
 
 
-def enqueue_inventory_event(db: Session, order: dict, event_type: str, *, return_lines: list[dict] | None = None) -> SyncOutboxEvent:
-    payload = build_inventory_event(order, event_type, return_lines=return_lines)
+def enqueue_inventory_event(db: Session, order: dict, event_type: str, *, return_lines: list[dict] | None = None, return_id: str | None = None) -> SyncOutboxEvent:
+    payload = build_inventory_event(order, event_type, return_lines=return_lines, return_id=return_id)
     row = create_outbox_event(
         db,
         aggregate_type='order',
