@@ -37,5 +37,7 @@ def resolve_unit_price(db,item:CatalogItem,cart_items:list[CatalogItem])->Decima
             continue
         try: price=Decimal(str(cp.get('price')))
         except Exception: continue
+        if not price.is_finite() or price < 0:
+            continue
         candidates.append((price,int(rule.get('priority') or 100),str(rule.get('id')),price))
     return min(candidates,key=lambda x:(x[0],x[1],x[2]))[3] if candidates else regular
