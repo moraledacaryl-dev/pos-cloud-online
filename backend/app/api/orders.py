@@ -257,9 +257,9 @@ def refund_order(order_id: int, payload: RefundCreate, db: Session = Depends(get
                 'catalog_item_id': source_line.get('catalog_item_id'),
                 'item_name': source_line.get('item_name_snapshot'),
             })
-        if return_lines:
-            enqueue_inventory_event(db, order_after_refund, 'sale_returned', return_lines=return_lines)
         refund_id = result.get('id') if isinstance(result, dict) else getattr(result, 'id', order_id)
+        if return_lines:
+            enqueue_inventory_event(db, order_after_refund, 'sale_returned', return_lines=return_lines, return_id=str(refund_id))
         enqueue_operations_event(
             db,
             'refund.review_needed',
