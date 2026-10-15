@@ -2025,6 +2025,7 @@ def create_refund(db: Session, order_id: int, payload: RefundCreate, cashier_use
     elif refund_mode == 'lines':
         if not payload.lines:
             raise ValueError('Refund by line requires at least one refund line.')
+        requested_qty_by_line = dict(refunded_qty_by_line)
         for req in payload.lines:
             if not req.order_line_id:
                 raise ValueError('Refund line requires order_line_id.')
@@ -2034,12 +2035,12 @@ def create_refund(db: Session, order_id: int, payload: RefundCreate, cashier_use
             requested_qty = _quantity(req.quantity)
             if requested_qty <= 0:
                 raise ValueError('Refund line quantity must be greater than zero.')
-            already_qty = _quantity(refunded_qty_by_line.get(source_line.id, Decimal('0')))
+            already_qty = _quantity(requested_qty_by_line.get(source_line.id, Decimal('0')))
             remaining_qty = _quantity(max(_quantity(source_line.quantity) - already_qty, Decimal('0')))
             if requested_qty > remaining_qty:
                 raise ValueError(f'Refund quantity exceeds remaining refundable quantity for {source_line.item_name_snapshot}.')
             # Include earlier lines in this same request, not just prior refunds.
-            refunded_qty_by_line[source_line.id] = _quantity(already_qty + requested_qty)
+            requested_qty_by_line[source_line.id] = _quantity(already_qty + requested_qty)
             source_quantity = _quantity(source_line.quantity)
             ratio = requested_qty / (source_quantity or Decimal('1'))
             line_total = _money(_money(source_line.line_total) * ratio)
