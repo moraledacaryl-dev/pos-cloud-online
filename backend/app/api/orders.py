@@ -224,19 +224,7 @@ def order_refunds(order_id: int, db: Session = Depends(get_db), user=Depends(req
 def refund_order(order_id: int, payload: RefundCreate, db: Session = Depends(get_db), current_user=Depends(require_permissions('orders.manage'))):
     try:
         _assert_order_action(db, order_id, 'refund')
-        with consume_protected_approval(
-            db,
-            requester=current_user,
-            payload=payload,
-            approval_type='refund',
-            entity_type='refund',
-            entity_id=order_id,
-            requested_reason=payload.reason_text or payload.reason_code or 'Refund',
-        ):
-            result = create_refund(db, order_id, payload, cashier_user_id=getattr(current_user, 'id', None))
-        order_after_refund = get_order(db, order_id)
-        if should_reverse_inventory_for_refund(order_after_refund):
-            enqueue_inventory_event(db, order_after_refund, 'sale_refunded')
+        order_before_refund = get_order(db, order_id)
         # Reject unsupported physical-return requests before interpreting them
         # as stock movements. Financial refunds remain stock-neutral by default.
         if payload.refund_mode != 'lines' and any(
@@ -245,7 +233,7 @@ def refund_order(order_id: int, payload: RefundCreate, db: Session = Depends(get
         ):
             raise ValueError('Physical returns require refund_mode=lines with explicit quantities.')
         return_lines = []
-        order_lines = {int(line.get('id')): line for line in (order_after_refund.get('lines') or []) if line.get('id') is not None}
+        order_lines = {int(line.get('id')): line for line in (order_before_refund.get('lines') or []) if line.get('id') is not None}
         for requested in (payload.lines or []):
             disposition = str(requested.inventory_disposition or 'no_stock_change').strip().lower()
             if disposition == 'no_stock_change':
@@ -264,6 +252,19 @@ def refund_order(order_id: int, payload: RefundCreate, db: Session = Depends(get
                 'catalog_item_id': source_line.get('catalog_item_id'),
                 'item_name': source_line.get('item_name_snapshot'),
             })
+        with consume_protected_approval(
+            db,
+            requester=current_user,
+            payload=payload,
+            approval_type='refund',
+            entity_type='refund',
+            entity_id=order_id,
+            requested_reason=payload.reason_text or payload.reason_code or 'Refund',
+        ):
+            result = create_refund(db, order_id, payload, cashier_user_id=getattr(current_user, 'id', None))
+        order_after_refund = get_order(db, order_id)
+        if should_reverse_inventory_for_refund(order_after_refund):
+            enqueue_inventory_event(db, order_after_refund, 'sale_refunded')
         refund_id = result.get('id') if isinstance(result, dict) else getattr(result, 'id', order_id)
         if return_lines:
             enqueue_inventory_event(db, order_after_refund, 'sale_returned', return_lines=return_lines, return_id=str(refund_id))
