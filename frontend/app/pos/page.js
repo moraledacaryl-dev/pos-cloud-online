@@ -344,7 +344,7 @@ export default function PosPage() {
     }) || null;
   }, [inHouseBookings, tableLabel, guestName]);
   useEffect(() => {
-    const cartItems = cart.map((line) => catalog.find((item) => String(item.id) === String(line.catalog_item_id))).filter(Boolean);
+    const cartItems = cart.map((line) => catalog.find((item) => String(item.id) === String(line.catalog_item_id))).filter((item) => item && item.is_active !== false && item.is_available !== false);
     const cartTags = new Set(cartItems.flatMap((item) => item.pricing_tags || []));
     const hasDrink = cartItems.some((item) => item.pricing_role === 'drink');
     setCart((prev) => {
