@@ -45,3 +45,17 @@ def test_generic_conditional_price_uses_lowest_then_priority(db_session):
         {"id":"tie","qualifier_tag":"qualifier","target_tag":"target","priority":30},
     ])
     assert resolve_unit_price(db_session,target,[qualifier,target]) == Decimal("85")
+
+
+def test_inactive_generic_rule_does_not_discount(db_session):
+    target = item(100, ['target'], [{'rule_id': 'disabled', 'price': '70'}])
+    qualifier = item(50, ['qualifier'])
+    set_rules(db_session, [{'id': 'disabled', 'qualifier_tag': 'qualifier', 'target_tag': 'target', 'is_active': False}])
+    assert resolve_unit_price(db_session, target, [qualifier, target]) == Decimal('100')
+
+
+def test_generic_rule_does_not_apply_to_wrong_target_tag(db_session):
+    target = item(100, ['other'], [{'rule_id': 'r1', 'price': '70'}])
+    qualifier = item(50, ['qualifier'])
+    set_rules(db_session, [{'id': 'r1', 'qualifier_tag': 'qualifier', 'target_tag': 'target'}])
+    assert resolve_unit_price(db_session, target, [qualifier, target]) == Decimal('100')
