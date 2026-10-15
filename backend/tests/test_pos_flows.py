@@ -624,3 +624,18 @@ def test_checkout_enforces_generic_conditional_price_and_legacy_fallback():
     with pytest.raises(ValueError, match='price does not match'):
         create_order(db, OrderCreate(register_session_id=session['id'], lines=[{**lines[1], 'unit_price': 70}, lines[0]]))
     db.close()
+
+
+def test_unavailable_qualifier_cannot_trigger_generic_checkout_discount():
+    from app.models.entities import SystemSetting
+    db = make_session()
+    register = seed_register(db)
+    session = open_register_session(db, RegisterSessionOpen(register_id=register.id, business_date='2026-04-19', shift_name='AM', opening_float=0))
+    qualifier = CatalogItem(menu_item_name='Unavailable drink', display_name='Unavailable drink', category_name='Cafe', module_slug='cafe', prep_station='bar', price=50, pricing_tags_json='["qualifier"]', is_active=True, is_available=False)
+    target = CatalogItem(menu_item_name='Target', display_name='Target', category_name='Cafe', module_slug='cafe', prep_station='kitchen', price=100, pricing_tags_json='["target"]', conditional_prices_json='[{"rule_id":"combo","price":"80"}]', is_active=True, is_available=True)
+    db.add_all([qualifier, target, SystemSetting(key='catalog_sync', value_json=json.dumps({'pricing_rules':[{'id':'combo','qualifier_tag':'qualifier','target_tag':'target'}]}))])
+    db.commit()
+    lines = [{'catalog_item_id': qualifier.id, 'quantity': 1, 'unit_price': 50}, {'catalog_item_id': target.id, 'quantity': 1, 'unit_price': 80}]
+    with pytest.raises(ValueError, match='price does not match'):
+        create_order(db, OrderCreate(register_session_id=session['id'], lines=lines))
+    db.close()
