@@ -1337,6 +1337,8 @@ def _rebuild_order_lines(db: Session, row: PosOrder, line_payloads):
         if source_id is None and isinstance(source_line, dict): source_id = source_line.get('catalog_item_id')
         source_catalog = db.get(CatalogItem, int(source_id or 0))
         if source_catalog: payload_catalog.append(source_catalog)
+    from app.services.selling_rules import resolve_unit_price
+
     has_qualifying_drink = any(c.pricing_role == 'drink' and c.is_active and c.is_available for c in payload_catalog)
     for item in line_payloads or []:
         catalog_item_id = getattr(item, 'catalog_item_id', None)
@@ -1355,7 +1357,10 @@ def _rebuild_order_lines(db: Session, row: PosOrder, line_payloads):
         if unit_price_value is None and isinstance(item, dict):
             unit_price_value = item.get('unit_price')
         catalog_price = _money(catalog.price)
-        qualified_pastry_price = _money(catalog.with_drink_price) if has_qualifying_drink and catalog.pricing_role == 'pastry' and catalog.with_drink_price is not None else catalog_price
+        if catalog.conditional_prices_json and catalog.pricing_tags_json:
+            qualified_pastry_price = _money(resolve_unit_price(db, catalog, payload_catalog))
+        else:
+            qualified_pastry_price = _money(catalog.with_drink_price) if has_qualifying_drink and catalog.pricing_role == 'pastry' and catalog.with_drink_price is not None else catalog_price
         requested_modifiers = getattr(item, 'modifiers', None)
         if requested_modifiers is None and isinstance(item, dict): requested_modifiers = item.get('modifiers')
         configured_groups = json.loads(catalog.modifier_groups_json or '[]')
