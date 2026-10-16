@@ -209,6 +209,47 @@ def test_partial_line_refund_allocates_non_cash_refund_event():
     assert any(e.event_type == 'payment.refunded' for e in events)
 
 
+
+def test_duplicate_refund_lines_cannot_exceed_original_quantity():
+    db = make_session()
+    register = seed_register(db)
+    item = seed_catalog(db)
+    manager = seed_manager(db)
+    session = open_register_session(db, RegisterSessionOpen(register_id=register.id, business_date='2026-04-19', shift_name='AM', opening_float=0))
+    order = create_order(db, OrderCreate(register_session_id=session['id'], guest_name='Guest', lines=[{'catalog_item_id': item.id, 'quantity': 2, 'unit_price': 100, 'discount_amount': 0}]))
+    paid = pay_order(db, order['id'], OrderPayPayload(payments=[OrderPaymentCreate(tender_type='gcash', amount_applied=200, amount_received=200, accounting_financial_account_id=2, reference_no='GC-3')]))
+    line_id = paid['lines'][0]['id']
+
+    with pytest.raises(ValueError, match='quantity'):
+        create_refund(db, order['id'], RefundCreate(
+            refund_mode='lines', reason_code='wrong_item', approved_by_user_id=manager.id,
+            lines=[{'order_line_id': line_id, 'quantity': 2}, {'order_line_id': line_id, 'quantity': 1}],
+        ), cashier_user_id=manager.id)
+
+    assert list_kitchen_lines(db, station='kitchen')[0]['quantity'] == 2
+
+
+def test_duplicate_refund_lines_within_quantity_leave_correct_kitchen_balance():
+    db = make_session()
+    register = seed_register(db)
+    item = seed_catalog(db)
+    manager = seed_manager(db)
+    session = open_register_session(db, RegisterSessionOpen(register_id=register.id, business_date='2026-04-19', shift_name='AM', opening_float=0))
+    order = create_order(db, OrderCreate(register_session_id=session['id'], guest_name='Guest', lines=[{'catalog_item_id': item.id, 'quantity': 3, 'unit_price': 100, 'discount_amount': 0}]))
+    paid = pay_order(db, order['id'], OrderPayPayload(payments=[OrderPaymentCreate(tender_type='gcash', amount_applied=300, amount_received=300, accounting_financial_account_id=2, reference_no='GC-4')]))
+    line_id = paid['lines'][0]['id']
+    refund = create_refund(db, order['id'], RefundCreate(
+        refund_mode='lines', reason_code='wrong_item', approved_by_user_id=manager.id,
+        lines=[{'order_line_id': line_id, 'quantity': 1}, {'order_line_id': line_id, 'quantity': 1}],
+    ), cashier_user_id=manager.id)
+
+    assert refund['refunded_amount'] == 200
+    kitchen_rows = list_kitchen_lines(db, station='kitchen')
+    assert len(kitchen_rows) == 1
+    assert kitchen_rows[0]['quantity'] == 1
+    assert kitchen_rows[0]['refunded_quantity'] == 2
+
+
 def test_full_amount_refund_removes_order_from_active_kitchen_queue():
     db = make_session()
     register = seed_register(db)
