@@ -41,6 +41,7 @@ import {
   serializeCustomerDisplay,
   updateLineWithDiscount,
 } from '../../lib/terminalProfiles';
+import { resolveConditionalBasePrice } from '../../lib/conditionalPricing.mjs';
 import { loadLastReceipt, printCloseSessionPacket, printReceipt, saveLastReceipt } from '../../lib/receipt';
 import { listOfflineDrafts, removeOfflineDraft, saveOfflineDraft } from '../../lib/offlineDrafts';
 import { useCurrentUser } from '../../lib/useCurrentUser';
@@ -355,14 +356,7 @@ export default function PosPage() {
         const profile = getProductProfile(item);
         const groups = [...(line.metadata?.groups || []), ...(line.metadata?.bundles || [])];
         const modifierDelta = groups.flatMap((g) => g.selections || []).reduce((sum, opt) => sum + num(opt.price_delta), 0);
-        const genericCandidates = (item.conditional_prices || []).flatMap((conditional) => {
-          const rule = pricingRules.find((candidate) => String(candidate.id) === String(conditional.rule_id));
-          if (!rule || rule.is_active === false || !(item.pricing_tags || []).includes(rule.target_tag) || !cartTags.has(rule.qualifier_tag)) return [];
-          const price = Number(conditional.price);
-          return Number.isFinite(price) && price >= 0 ? [{ price, priority: Number(rule.priority ?? 100), id: String(rule.id) }] : [];
-        }).sort((a, b) => a.price - b.price || a.priority - b.priority || a.id.localeCompare(b.id));
-        const legacyBase = hasDrink && item.pricing_role === 'pastry' && item.with_drink_price != null ? num(item.with_drink_price) : num(item.price);
-        const base = (item.conditional_prices || []).length && (item.pricing_tags || []).length ? (genericCandidates[0]?.price ?? num(item.price)) : legacyBase;
+        const base = resolveConditionalBasePrice(item, cartItems, pricingRules);
         const price = Math.round((base + modifierDelta) * 100) / 100;
         if (num(line.price) === price && num(line.base_price) === base) return line;
         changed = true;
