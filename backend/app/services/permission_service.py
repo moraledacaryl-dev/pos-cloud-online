@@ -139,9 +139,6 @@ def ensure_permissions_seed(db: Session, *, commit: bool = True):
         touched += 1
 
     if touched:
-        if commit:
-        db.commit()
-    else:
         db.flush()
 
     permission_by_key = {row.key: row for row in db.query(Permission).all()}
@@ -167,7 +164,10 @@ def ensure_permissions_seed(db: Session, *, commit: bool = True):
                     db.add(link)
                 continue
             db.add(RolePermission(role_id=role.id, permission_id=permission.id, allowed=True))
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
 
 
 def list_permissions(db: Session):
