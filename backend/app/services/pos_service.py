@@ -1926,14 +1926,14 @@ def _refund_no_from_id(refund_id: int, business_date: str):
     return f'RFD-{ymd}-{int(refund_id):06d}'
 
 
-def _approval_user_for_refund(db: Session, approved_by_user_id: int | None):
+def _approval_user_for_refund(db: Session, approved_by_user_id: int | None, *, commit: bool = True):
     if not approved_by_user_id:
         raise ValueError('A manager approval is required before a refund can be processed.')
     approved_user = db.get(__import__('app.models.entities', fromlist=['User']).User, int(approved_by_user_id))
     if not approved_user or not approved_user.is_active:
         raise ValueError('Approving user not found.')
     role_codes = {link.role.code for link in getattr(approved_user, 'user_roles', []) if getattr(link, 'role', None)}
-    permission_keys = set(get_user_permission_keys(db, approved_user))
+    permission_keys = set(get_user_permission_keys(db, approved_user, commit=commit))
     if approved_user.role not in {'owner', 'manager'} and not ({'owner', 'manager'} & role_codes) and 'orders.void' not in permission_keys and '*' not in permission_keys:
         raise ValueError('Refund approval requires an owner or manager account.')
     return approved_user
@@ -1965,7 +1965,7 @@ def create_refund(db: Session, order_id: int, payload: RefundCreate, cashier_use
     if row.status not in {'paid', 'folio_pending'}:
         raise ValueError('Only orders that have been paid or are folio pending can be refunded.')
 
-    approved_user = _approval_user_for_refund(db, payload.approved_by_user_id)
+    approved_user = _approval_user_for_refund(db, payload.approved_by_user_id, commit=commit)
 
     refunded_total_existing = _money(sum((_money(refund.refunded_amount) for refund in (row.refunds or [])), Decimal('0')))
     refundable_remaining = _money(max(_money(row.total_amount) - refunded_total_existing, Decimal('0')))
