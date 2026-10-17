@@ -290,3 +290,6 @@ def refund_order(order_id: int, payload: RefundCreate, db: Session = Depends(get
     except ValueError as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        db.rollback()
+        raise
