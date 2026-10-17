@@ -83,5 +83,8 @@ jobs:
       - name: Audit production dependency tree
         run: npm audit --omit=dev --audit-level=high
 
+      - name: Verify tracked development-only advisory scope
+        run: node scripts/check-dev-advisory-scope.mjs
+
       - name: Lint, test, build, and smoke frontend
         run: npm run verify
