@@ -229,6 +229,17 @@ def _publish_kds_refresh(stations: list[str] | None = None, reason: str = 'refre
         pass
 
 
+def publish_refund_kds_refresh(db: Session, order_id: int, refund_id: int | str):
+    """Notify kitchen clients after the calling refund transaction commits."""
+    order = db.get(PosOrder, int(order_id))
+    if order:
+        _publish_kds_refresh(
+            _order_stations(order),
+            reason='ticket_cancelled',
+            payload={'order_id': order.id, 'order_no': order.order_no, 'refund_id': refund_id},
+        )
+
+
 def normalize_kds_station(value: str | None) -> str:
     raw = str(value or '').strip().lower()
     return KDS_STATION_ALIASES.get(raw, raw or 'kitchen')
