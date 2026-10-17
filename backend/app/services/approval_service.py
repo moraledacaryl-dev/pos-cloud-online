@@ -108,11 +108,11 @@ def _write_grant_columns(db: Session, row_id: int, *, payload_digest: str | None
     )
 
 
-def user_can_manage_approvals(db: Session, user: User | None) -> bool:
+def user_can_manage_approvals(db: Session, user: User | None, *, commit: bool = True) -> bool:
     if not user or not user.is_active:
         return False
     try:
-        permissions = set(get_user_permission_keys(db, user))
+        permissions = set(get_user_permission_keys(db, user, commit=commit))
     except Exception:
         permissions = set()
     return '*' in permissions or 'approvals.manage' in permissions
@@ -401,7 +401,7 @@ def create_manager_approval(
 
     if requested_by_user_id and approved_by_user_id and int(requested_by_user_id) == int(approved_by_user_id):
         requester = db.get(User, int(requested_by_user_id))
-        if user_can_manage_approvals(db, requester):
+        if user_can_manage_approvals(db, requester, commit=commit):
             grant = request_approval(
                 db,
                 approval_type=approval_type,
