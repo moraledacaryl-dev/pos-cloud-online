@@ -283,6 +283,7 @@ def refund_order(order_id: int, payload: RefundCreate, db: Session = Depends(get
             subject_type='refund',
             subject_id=refund_id,
             external_user_id=getattr(current_user, 'id', None),
+            commit=False,
         )
         db.commit()
         return result
