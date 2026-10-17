@@ -9,6 +9,7 @@ import {
   createCashMovement,
   fetchAccountingAccounts,
   fetchCatalogItems,
+  fetchCatalogPricingRules,
   fetchInHouseBookings,
   fetchOrder,
   fetchOrders,
@@ -40,6 +41,7 @@ import {
   serializeCustomerDisplay,
   updateLineWithDiscount,
 } from '../../lib/terminalProfiles';
+import { resolveConditionalBasePrice } from '../../lib/conditionalPricing.mjs';
 import { loadLastReceipt, printCloseSessionPacket, printReceipt, saveLastReceipt } from '../../lib/receipt';
 import { listOfflineDrafts, removeOfflineDraft, saveOfflineDraft } from '../../lib/offlineDrafts';
 import { useCurrentUser } from '../../lib/useCurrentUser';
@@ -97,6 +99,7 @@ export default function PosPage() {
   const [search, setSearch] = useState('');
   const [barcode, setBarcode] = useState('');
   const [cart, setCart] = useState([]);
+  const [pricingRules, setPricingRules] = useState([]);
   const [guestName, setGuestName] = useState('');
   const [tableLabel, setTableLabel] = useState('');
   const [activeArea, setActiveArea] = useState('Lobby');
@@ -185,14 +188,16 @@ export default function PosPage() {
       setSessionsStatus('loading');
     }
     try {
-      const [catalogRows, sessionRows, orderRows, registerRows, accountRows] = await Promise.all([
+      const [catalogRows, sessionRows, orderRows, registerRows, accountRows, ruleRows] = await Promise.all([
         fetchCatalogItems({ active_only: true }),
         fetchRegisterSessions({ status: 'open', limit: 50 }),
         fetchOrders({ limit: 120 }),
         fetchRegisters(true),
         fetchAccountingAccounts().catch(() => []),
+        fetchCatalogPricingRules(),
       ]);
       setCatalog(Array.isArray(catalogRows) ? catalogRows : []);
+      setPricingRules(Array.isArray(ruleRows) ? ruleRows : []);
       const openRows = Array.isArray(sessionRows) ? sessionRows : [];
       setSessions(openRows);
       setSessionsStatus('loaded');
@@ -340,7 +345,9 @@ export default function PosPage() {
     }) || null;
   }, [inHouseBookings, tableLabel, guestName]);
   useEffect(() => {
-    const hasDrink = cart.some((line) => catalog.find((item) => String(item.id) === String(line.catalog_item_id))?.pricing_role === 'drink');
+    const cartItems = cart.map((line) => catalog.find((item) => String(item.id) === String(line.catalog_item_id))).filter((item) => item && item.is_active !== false && item.is_available !== false);
+    const cartTags = new Set(cartItems.flatMap((item) => item.pricing_tags || []));
+    const hasDrink = cartItems.some((item) => item.pricing_role === 'drink');
     setCart((prev) => {
       let changed = false;
       const next = prev.map((line) => {
@@ -349,7 +356,7 @@ export default function PosPage() {
         const profile = getProductProfile(item);
         const groups = [...(line.metadata?.groups || []), ...(line.metadata?.bundles || [])];
         const modifierDelta = groups.flatMap((g) => g.selections || []).reduce((sum, opt) => sum + num(opt.price_delta), 0);
-        const base = hasDrink && item.pricing_role === 'pastry' && item.with_drink_price != null ? num(item.with_drink_price) : num(item.price);
+        const base = resolveConditionalBasePrice(item, cartItems, pricingRules);
         const price = Math.round((base + modifierDelta) * 100) / 100;
         if (num(line.price) === price && num(line.base_price) === base) return line;
         changed = true;
@@ -357,7 +364,7 @@ export default function PosPage() {
       });
       return changed ? next : prev;
     });
-  }, [catalog, cart]);
+  }, [catalog, cart, pricingRules]);
   const cartTotals = useMemo(() => calculateCartTotals(cart), [cart]);
   const totalApplied = useMemo(() => payments.reduce((sum, row) => sum + num(row.amount_applied), 0), [payments]);
   const folioApplied = useMemo(() => payments.filter((row) => row.tender_type === 'room_charge').reduce((sum, row) => sum + num(row.amount_applied), 0), [payments]);

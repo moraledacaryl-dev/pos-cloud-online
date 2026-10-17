@@ -16,6 +16,12 @@ def items(active_only: bool = False, available_only: bool = False, q: str | None
     return list_catalog_items(db, active_only=active_only, available_only=available_only, q=q)
 
 
+@router.get('/pricing-rules')
+def catalog_pricing_rules(db: Session = Depends(get_db), user=Depends(require_permissions('catalog.view'))):
+    metadata = setting_json(db, 'catalog_sync', default={}) or {}
+    return [rule for rule in metadata.get('pricing_rules', []) if isinstance(rule, dict) and rule.get('is_active', True) is not False]
+
+
 @router.get('/status')
 def catalog_status(db: Session = Depends(get_db), user=Depends(require_permissions('catalog.view'))):
     return build_catalog_sync_status(setting_json(db, 'catalog_sync', default={}))
