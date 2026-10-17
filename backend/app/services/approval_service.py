@@ -222,7 +222,7 @@ def approve_grant(db: Session, approval_id: int, approver: User, decision_note: 
         raise ValueError('Approval not found.')
     if row.status != 'pending':
         raise ValueError('Approval is not pending.')
-    if not user_can_manage_approvals(db, approver):
+    if not user_can_manage_approvals(db, approver, commit=commit):
         raise ValueError('Approver does not have approvals.manage authority.')
     expires_at = _parse_time(_serialize(row, db).get('expires_at'))
     if expires_at and expires_at <= _utc_now():
