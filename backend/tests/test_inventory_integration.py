@@ -80,6 +80,31 @@ def test_inventory_outbox_uses_dedicated_pending_status(monkeypatch):
     assert captured['idempotency_key'] == 'inventory:pos:order-uuid-15:sale_completed'
 
 
+
+def test_inventory_outbox_deferred_commit_only_flushes(monkeypatch):
+    row = SimpleNamespace(status='pending', last_error='old')
+    calls = {'commits': 0, 'flushes': 0, 'refreshes': 0}
+
+    monkeypatch.setattr(integration, 'create_outbox_event', lambda db, **kwargs: row)
+
+    class FakeDb:
+        def add(self, value):
+            assert value is row
+        def commit(self):
+            calls['commits'] += 1
+        def flush(self):
+            calls['flushes'] += 1
+        def refresh(self, value):
+            assert value is row
+            calls['refreshes'] += 1
+
+    result = integration.enqueue_inventory_event(FakeDb(), order_payload(), 'sale_completed', commit=False)
+    assert result is row
+    assert row.status == 'inventory_pending'
+    assert calls == {'commits': 0, 'flushes': 1, 'refreshes': 1}
+
+
+
 def test_inventory_worker_follows_canonical_redirects(monkeypatch):
     payload = integration.build_inventory_event(order_payload(), 'sale_completed')
     row = SimpleNamespace(
