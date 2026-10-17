@@ -265,13 +265,13 @@ def refund_order(order_id: int, payload: RefundCreate, db: Session = Depends(get
             entity_id=order_id,
             requested_reason=payload.reason_text or payload.reason_code or 'Refund',
         ):
-            result = create_refund(db, order_id, payload, cashier_user_id=getattr(current_user, 'id', None))
+            result = create_refund(db, order_id, payload, cashier_user_id=getattr(current_user, 'id', None), commit=False)
         order_after_refund = get_order(db, order_id)
         if should_reverse_inventory_for_refund(order_after_refund):
-            enqueue_inventory_event(db, order_after_refund, 'sale_refunded')
+            enqueue_inventory_event(db, order_after_refund, 'sale_refunded', commit=False)
         refund_id = result.get('id') if isinstance(result, dict) else getattr(result, 'id', order_id)
         if return_lines:
-            enqueue_inventory_event(db, order_after_refund, 'sale_returned', return_lines=return_lines, return_id=str(refund_id))
+            enqueue_inventory_event(db, order_after_refund, 'sale_returned', return_lines=return_lines, return_id=str(refund_id), commit=False)
         enqueue_operations_event(
             db,
             'refund.review_needed',
@@ -284,6 +284,7 @@ def refund_order(order_id: int, payload: RefundCreate, db: Session = Depends(get
             subject_id=refund_id,
             external_user_id=getattr(current_user, 'id', None),
         )
+        db.commit()
         return result
     except ValueError as e:
         db.rollback()
