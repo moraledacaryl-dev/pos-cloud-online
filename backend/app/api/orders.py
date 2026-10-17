@@ -30,6 +30,7 @@ from app.services.pos_service import (
     list_refunds,
     merge_order_table,
     pay_order,
+    publish_refund_kds_refresh,
     set_order_status,
     transfer_order_table,
     update_order,
@@ -286,6 +287,20 @@ def refund_order(order_id: int, payload: RefundCreate, db: Session = Depends(get
             commit=False,
         )
         db.commit()
+        # Notify kitchen clients only after the refund and its integration outbox
+        # events have been durably committed.
+        previous_kitchen_status = {
+            int(line['id']): line.get('kitchen_status')
+            for line in (order_before_refund.get('lines') or [])
+            if line.get('id') is not None
+        }
+        kitchen_changed = any(
+            previous_kitchen_status.get(int(line['id'])) != line.get('kitchen_status')
+            for line in (order_after_refund.get('lines') or [])
+            if line.get('id') is not None and int(line['id']) in previous_kitchen_status
+        )
+        if kitchen_changed:
+            publish_refund_kds_refresh(db, order_id, refund_id)
         return result
     except ValueError as e:
         db.rollback()
