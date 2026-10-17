@@ -83,7 +83,7 @@ def build_inventory_event(order: dict, event_type: str, *, return_lines: list[di
     }
 
 
-def enqueue_inventory_event(db: Session, order: dict, event_type: str, *, return_lines: list[dict] | None = None, return_id: str | None = None) -> SyncOutboxEvent:
+def enqueue_inventory_event(db: Session, order: dict, event_type: str, *, return_lines: list[dict] | None = None, return_id: str | None = None, commit: bool = True) -> SyncOutboxEvent:
     payload = build_inventory_event(order, event_type, return_lines=return_lines, return_id=return_id)
     row = create_outbox_event(
         db,
@@ -97,7 +97,10 @@ def enqueue_inventory_event(db: Session, order: dict, event_type: str, *, return
         row.status = 'inventory_pending'
         row.last_error = None
         db.add(row)
-        db.commit()
+        if commit:
+            db.commit()
+        else:
+            db.flush()
         db.refresh(row)
     return row
 
