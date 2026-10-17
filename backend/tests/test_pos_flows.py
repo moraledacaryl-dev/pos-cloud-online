@@ -260,6 +260,11 @@ def test_deferred_refund_can_rollback_financial_and_accounting_outbox_changes():
     order = create_order(db, OrderCreate(register_session_id=session['id'], guest_name='Guest', lines=[{'catalog_item_id': item.id, 'quantity': 1, 'unit_price': 100, 'discount_amount': 0}]))
     pay_order(db, order['id'], OrderPayPayload(payments=[OrderPaymentCreate(tender_type='gcash', amount_applied=100, amount_received=100, accounting_financial_account_id=2, reference_no='GC-ROLLBACK')]))
     before_events = db.query(SyncOutboxEvent).count()
+    # A deferred refund must never invoke Session.commit internally.
+    original_commit = db.commit
+    def reject_early_commit():
+        raise AssertionError('Deferred refund unexpectedly committed the transaction')
+    db.commit = reject_early_commit
 
     refund = create_refund(db, order['id'], RefundCreate(
         refund_mode='lines', reason_code='wrong_item', approved_by_user_id=manager.id,
@@ -268,6 +273,7 @@ def test_deferred_refund_can_rollback_financial_and_accounting_outbox_changes():
     assert refund['refunded_amount'] == 100
     assert db.query(SyncOutboxEvent).count() > before_events
 
+    db.commit = original_commit
     db.rollback()
     db.expire_all()
     assert db.query(pos_service.Refund).filter(pos_service.Refund.order_id == order['id']).count() == 0
