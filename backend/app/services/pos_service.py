@@ -1951,7 +1951,7 @@ def list_refunds(db: Session, order_id: int):
     return [_serialize_refund(row, include_details=True) for row in rows]
 
 
-def create_refund(db: Session, order_id: int, payload: RefundCreate, cashier_user_id: int | None = None):
+def create_refund(db: Session, order_id: int, payload: RefundCreate, cashier_user_id: int | None = None, *, commit: bool = True):
     row = db.query(PosOrder).options(
         selectinload(PosOrder.lines),
         selectinload(PosOrder.payments),
@@ -2238,7 +2238,10 @@ def create_refund(db: Session, order_id: int, payload: RefundCreate, cashier_use
     db.add(refund_row)
     approval = _record_approval(db, approval_type='refund', entity_type='refund', entity_id=refund_row.id, requested_by_user_id=cashier_user_id, approved_by_user_id=approved_user.id, requested_reason=payload.reason_text or payload.reason_code or 'Refund processed', request_details={'refund_id': refund_row.id, 'order_id': row.id, 'refund_mode': refund_mode, 'refunded_amount': refund_amount}, required=True, commit=False)
     _audit_event(db, action='refund.created', entity_type='refund', entity_id=refund_row.id, user_id=cashier_user_id, details={'refund_id': refund_row.id, 'order_id': row.id, 'order_no': row.order_no, 'refunded_amount': refund_amount, 'approval_id': approval.get('id') if approval else None}, commit=False)
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     db.refresh(refund_row)
 
     refund_row = db.query(Refund).options(
@@ -2270,6 +2273,7 @@ def create_refund(db: Session, order_id: int, payload: RefundCreate, cashier_use
                 approved_by_user_id=approved_user.id,
                 source_order_id=row.id,
                 create_outbox=True,
+                commit=commit,
             )
         else:
             payment_payload = _serialize_refund(refund_row, include_details=True)
@@ -2290,8 +2294,11 @@ def create_refund(db: Session, order_id: int, payload: RefundCreate, cashier_use
                 idempotency_key=f'payment.refunded:{payment.id}',
             )
 
-    db.commit()
-    if kitchen_changed:
+    if commit:
+        db.commit()
+    else:
+        db.flush()
+    if kitchen_changed and commit:
         _publish_kds_refresh(_order_stations(row), reason='ticket_cancelled', payload={'order_id': row.id, 'order_no': row.order_no, 'refund_id': refund_row.id})
     return _serialize_refund(refund_row, include_details=True)
 
@@ -2348,6 +2355,7 @@ def create_cash_movement(
     approved_by_user_id: int | None = None,
     source_order_id: int | None = None,
     create_outbox: bool = True,
+    commit: bool = True,
 ):
     session = db.query(RegisterSession).options(selectinload(RegisterSession.register)).filter(RegisterSession.id == int(payload.register_session_id)).first()
     if not session:
@@ -2446,7 +2454,10 @@ def create_cash_movement(
                 payload=_serialize_cash_movement(db.query(CashMovement).options(selectinload(CashMovement.register), selectinload(CashMovement.destination_register), selectinload(CashMovement.source_order), selectinload(CashMovement.approved_by)).filter(CashMovement.id == row.id).first()),
                 idempotency_key=f'cash_movement.created:{row.id}',
             )
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     db.refresh(row)
     row = db.query(CashMovement).options(selectinload(CashMovement.register), selectinload(CashMovement.destination_register), selectinload(CashMovement.source_order), selectinload(CashMovement.approved_by)).filter(CashMovement.id == row.id).first()
     return _serialize_cash_movement(row)
