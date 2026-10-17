@@ -229,6 +229,17 @@ def _publish_kds_refresh(stations: list[str] | None = None, reason: str = 'refre
         pass
 
 
+def publish_refund_kds_refresh(db: Session, order_id: int, refund_id: int | str):
+    """Notify kitchen clients after the calling refund transaction commits."""
+    order = db.get(PosOrder, int(order_id))
+    if order:
+        _publish_kds_refresh(
+            _order_stations(order),
+            reason='ticket_cancelled',
+            payload={'order_id': order.id, 'order_no': order.order_no, 'refund_id': refund_id},
+        )
+
+
 def normalize_kds_station(value: str | None) -> str:
     raw = str(value or '').strip().lower()
     return KDS_STATION_ALIASES.get(raw, raw or 'kitchen')
@@ -1934,14 +1945,14 @@ def _refund_no_from_id(refund_id: int, business_date: str):
     return f'RFD-{ymd}-{int(refund_id):06d}'
 
 
-def _approval_user_for_refund(db: Session, approved_by_user_id: int | None):
+def _approval_user_for_refund(db: Session, approved_by_user_id: int | None, *, commit: bool = True):
     if not approved_by_user_id:
         raise ValueError('A manager approval is required before a refund can be processed.')
     approved_user = db.get(__import__('app.models.entities', fromlist=['User']).User, int(approved_by_user_id))
     if not approved_user or not approved_user.is_active:
         raise ValueError('Approving user not found.')
     role_codes = {link.role.code for link in getattr(approved_user, 'user_roles', []) if getattr(link, 'role', None)}
-    permission_keys = set(get_user_permission_keys(db, approved_user))
+    permission_keys = set(get_user_permission_keys(db, approved_user, commit=commit))
     if approved_user.role not in {'owner', 'manager'} and not ({'owner', 'manager'} & role_codes) and 'orders.void' not in permission_keys and '*' not in permission_keys:
         raise ValueError('Refund approval requires an owner or manager account.')
     return approved_user
@@ -1959,7 +1970,7 @@ def list_refunds(db: Session, order_id: int):
     return [_serialize_refund(row, include_details=True) for row in rows]
 
 
-def create_refund(db: Session, order_id: int, payload: RefundCreate, cashier_user_id: int | None = None):
+def create_refund(db: Session, order_id: int, payload: RefundCreate, cashier_user_id: int | None = None, *, commit: bool = True):
     row = db.query(PosOrder).options(
         selectinload(PosOrder.lines),
         selectinload(PosOrder.payments),
@@ -1973,7 +1984,7 @@ def create_refund(db: Session, order_id: int, payload: RefundCreate, cashier_use
     if row.status not in {'paid', 'folio_pending'}:
         raise ValueError('Only orders that have been paid or are folio pending can be refunded.')
 
-    approved_user = _approval_user_for_refund(db, payload.approved_by_user_id)
+    approved_user = _approval_user_for_refund(db, payload.approved_by_user_id, commit=commit)
 
     refunded_total_existing = _money(sum((_money(refund.refunded_amount) for refund in (row.refunds or [])), Decimal('0')))
     refundable_remaining = _money(max(_money(row.total_amount) - refunded_total_existing, Decimal('0')))
@@ -2033,6 +2044,7 @@ def create_refund(db: Session, order_id: int, payload: RefundCreate, cashier_use
     elif refund_mode == 'lines':
         if not payload.lines:
             raise ValueError('Refund by line requires at least one refund line.')
+        requested_qty_by_line = dict(refunded_qty_by_line)
         for req in payload.lines:
             if not req.order_line_id:
                 raise ValueError('Refund line requires order_line_id.')
@@ -2042,10 +2054,12 @@ def create_refund(db: Session, order_id: int, payload: RefundCreate, cashier_use
             requested_qty = _quantity(req.quantity)
             if requested_qty <= 0:
                 raise ValueError('Refund line quantity must be greater than zero.')
-            already_qty = _quantity(refunded_qty_by_line.get(source_line.id, Decimal('0')))
+            already_qty = _quantity(requested_qty_by_line.get(source_line.id, Decimal('0')))
             remaining_qty = _quantity(max(_quantity(source_line.quantity) - already_qty, Decimal('0')))
-            if requested_qty - remaining_qty >= QUANTITY_QUANTUM:
+            if requested_qty > remaining_qty:
                 raise ValueError(f'Refund quantity exceeds remaining refundable quantity for {source_line.item_name_snapshot}.')
+            # Include earlier lines in this same request, not just prior refunds.
+            requested_qty_by_line[source_line.id] = _quantity(already_qty + requested_qty)
             source_quantity = _quantity(source_line.quantity)
             ratio = requested_qty / (source_quantity or Decimal('1'))
             line_total = _money(_money(source_line.line_total) * ratio)
@@ -2243,7 +2257,10 @@ def create_refund(db: Session, order_id: int, payload: RefundCreate, cashier_use
     db.add(refund_row)
     approval = _record_approval(db, approval_type='refund', entity_type='refund', entity_id=refund_row.id, requested_by_user_id=cashier_user_id, approved_by_user_id=approved_user.id, requested_reason=payload.reason_text or payload.reason_code or 'Refund processed', request_details={'refund_id': refund_row.id, 'order_id': row.id, 'refund_mode': refund_mode, 'refunded_amount': refund_amount}, required=True, commit=False)
     _audit_event(db, action='refund.created', entity_type='refund', entity_id=refund_row.id, user_id=cashier_user_id, details={'refund_id': refund_row.id, 'order_id': row.id, 'order_no': row.order_no, 'refunded_amount': refund_amount, 'approval_id': approval.get('id') if approval else None}, commit=False)
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     db.refresh(refund_row)
 
     refund_row = db.query(Refund).options(
@@ -2275,6 +2292,7 @@ def create_refund(db: Session, order_id: int, payload: RefundCreate, cashier_use
                 approved_by_user_id=approved_user.id,
                 source_order_id=row.id,
                 create_outbox=True,
+                commit=commit,
             )
         else:
             payment_payload = _serialize_refund(refund_row, include_details=True)
@@ -2295,8 +2313,11 @@ def create_refund(db: Session, order_id: int, payload: RefundCreate, cashier_use
                 idempotency_key=f'payment.refunded:{payment.id}',
             )
 
-    db.commit()
-    if kitchen_changed:
+    if commit:
+        db.commit()
+    else:
+        db.flush()
+    if kitchen_changed and commit:
         _publish_kds_refresh(_order_stations(row), reason='ticket_cancelled', payload={'order_id': row.id, 'order_no': row.order_no, 'refund_id': refund_row.id})
     return _serialize_refund(refund_row, include_details=True)
 
@@ -2353,6 +2374,7 @@ def create_cash_movement(
     approved_by_user_id: int | None = None,
     source_order_id: int | None = None,
     create_outbox: bool = True,
+    commit: bool = True,
 ):
     session = db.query(RegisterSession).options(selectinload(RegisterSession.register)).filter(RegisterSession.id == int(payload.register_session_id)).first()
     if not session:
@@ -2451,7 +2473,10 @@ def create_cash_movement(
                 payload=_serialize_cash_movement(db.query(CashMovement).options(selectinload(CashMovement.register), selectinload(CashMovement.destination_register), selectinload(CashMovement.source_order), selectinload(CashMovement.approved_by)).filter(CashMovement.id == row.id).first()),
                 idempotency_key=f'cash_movement.created:{row.id}',
             )
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     db.refresh(row)
     row = db.query(CashMovement).options(selectinload(CashMovement.register), selectinload(CashMovement.destination_register), selectinload(CashMovement.source_order), selectinload(CashMovement.approved_by)).filter(CashMovement.id == row.id).first()
     return _serialize_cash_movement(row)

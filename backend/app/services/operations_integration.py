@@ -153,6 +153,7 @@ def enqueue_operations_event(
     subject_id: str | int | None = None,
     external_user_id: str | int | None = None,
     occurred_at: datetime | str | None = None,
+    commit: bool = True,
 ) -> SyncOutboxEvent | None:
     """Persist an Operations event for retry by the sync worker."""
     envelope = _build_envelope(
@@ -188,7 +189,10 @@ def enqueue_operations_event(
             status='operations_pending',
         )
     db.add(row)
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     db.refresh(row)
     return row
 

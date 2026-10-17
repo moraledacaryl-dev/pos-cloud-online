@@ -94,7 +94,7 @@ def _serialize_role(row: Role) -> dict:
     }
 
 
-def ensure_permissions_seed(db: Session):
+def ensure_permissions_seed(db: Session, *, commit: bool = True):
     existing_permissions = {row.key: row for row in db.query(Permission).all()}
     touched = 0
     for key, label, group_name in DEFAULT_PERMISSION_DEFS:
@@ -139,7 +139,7 @@ def ensure_permissions_seed(db: Session):
         touched += 1
 
     if touched:
-        db.commit()
+        db.flush()
 
     permission_by_key = {row.key: row for row in db.query(Permission).all()}
     roles = {row.code: row for row in db.query(Role).all()}
@@ -164,7 +164,10 @@ def ensure_permissions_seed(db: Session):
                     db.add(link)
                 continue
             db.add(RolePermission(role_id=role.id, permission_id=permission.id, allowed=True))
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
 
 
 def list_permissions(db: Session):
@@ -279,8 +282,8 @@ def get_user_roles(db: Session, user_id: int):
     }
 
 
-def get_user_permission_keys(db: Session, user: User) -> set[str]:
-    ensure_permissions_seed(db)
+def get_user_permission_keys(db: Session, user: User, *, commit: bool = True) -> set[str]:
+    ensure_permissions_seed(db, commit=commit)
     keys: set[str] = set()
     if user.role in {'owner', 'admin'}:
         return {'*'}

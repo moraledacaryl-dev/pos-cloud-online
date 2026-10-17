@@ -108,11 +108,11 @@ def _write_grant_columns(db: Session, row_id: int, *, payload_digest: str | None
     )
 
 
-def user_can_manage_approvals(db: Session, user: User | None) -> bool:
+def user_can_manage_approvals(db: Session, user: User | None, *, commit: bool = True) -> bool:
     if not user or not user.is_active:
         return False
     try:
-        permissions = set(get_user_permission_keys(db, user))
+        permissions = set(get_user_permission_keys(db, user, commit=commit))
     except Exception:
         permissions = set()
     return '*' in permissions or 'approvals.manage' in permissions
@@ -222,7 +222,7 @@ def approve_grant(db: Session, approval_id: int, approver: User, decision_note: 
         raise ValueError('Approval not found.')
     if row.status != 'pending':
         raise ValueError('Approval is not pending.')
-    if not user_can_manage_approvals(db, approver):
+    if not user_can_manage_approvals(db, approver, commit=commit):
         raise ValueError('Approver does not have approvals.manage authority.')
     expires_at = _parse_time(_serialize(row, db).get('expires_at'))
     if expires_at and expires_at <= _utc_now():
@@ -307,6 +307,7 @@ def consume_approval_grant(
     entity_type: str,
     entity_id: str | int | None,
     protected_payload: dict | list | None,
+    commit: bool = True,
 ) -> dict:
     row = _load_row(db, approval_uuid=approval_uuid, for_update=True)
     if not row:
@@ -334,7 +335,7 @@ def consume_approval_grant(
         db.flush()
         raise ValueError('Manager approval grant has expired.')
     approver = db.get(User, int(row.approved_by_user_id or 0))
-    if not user_can_manage_approvals(db, approver):
+    if not user_can_manage_approvals(db, approver, commit=commit):
         raise ValueError('Approving manager is inactive or no longer has approvals.manage authority.')
 
     consumed_at = _now_text()
@@ -401,7 +402,7 @@ def create_manager_approval(
 
     if requested_by_user_id and approved_by_user_id and int(requested_by_user_id) == int(approved_by_user_id):
         requester = db.get(User, int(requested_by_user_id))
-        if user_can_manage_approvals(db, requester):
+        if user_can_manage_approvals(db, requester, commit=commit):
             grant = request_approval(
                 db,
                 approval_type=approval_type,
@@ -421,6 +422,7 @@ def create_manager_approval(
                 entity_type=entity_type,
                 entity_id=entity_id,
                 protected_payload=request_details or {},
+                commit=commit,
             )
             if commit:
                 db.commit()

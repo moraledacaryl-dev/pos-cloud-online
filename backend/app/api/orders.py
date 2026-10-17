@@ -30,6 +30,7 @@ from app.services.pos_service import (
     list_refunds,
     merge_order_table,
     pay_order,
+    publish_refund_kds_refresh,
     set_order_status,
     transfer_order_table,
     update_order,
@@ -224,6 +225,38 @@ def order_refunds(order_id: int, db: Session = Depends(get_db), user=Depends(req
 def refund_order(order_id: int, payload: RefundCreate, db: Session = Depends(get_db), current_user=Depends(require_permissions('orders.manage'))):
     try:
         _assert_order_action(db, order_id, 'refund')
+        order_before_refund = get_order(db, order_id)
+        # Reject unsupported physical-return requests before interpreting them
+        # as stock movements. Financial refunds remain stock-neutral by default.
+        if payload.refund_mode != 'lines' and any(
+            str(line.inventory_disposition or 'no_stock_change').strip().lower() != 'no_stock_change'
+            for line in (payload.lines or [])
+        ):
+            raise ValueError('Physical returns require refund_mode=lines with explicit quantities.')
+        return_lines = []
+        order_lines = {int(line.get('id')): line for line in (order_before_refund.get('lines') or []) if line.get('id') is not None}
+        for requested in (payload.lines or []):
+            disposition = str(requested.inventory_disposition or 'no_stock_change').strip().lower()
+            if disposition == 'no_stock_change':
+                continue
+            if disposition not in {'restore_stock', 'waste'}:
+                raise ValueError('inventory_disposition must be one of: no_stock_change, restore_stock, waste.')
+            if disposition == 'restore_stock':
+                raise ValueError('Recipe-consumed items cannot restore ingredients; use a controlled finished-goods stock receipt.')
+            if not requested.order_line_id or requested.quantity is None or requested.quantity <= 0:
+                raise ValueError('Physical Inventory return requires an order line and positive quantity.')
+            source_line = order_lines.get(int(requested.order_line_id))
+            if not source_line:
+                raise ValueError('Physical Inventory return references an unknown order line.')
+            if not (source_line.get('sku_code') or source_line.get('external_sku_id')):
+                raise ValueError('Physical Inventory return requires a mapped external product identifier.')
+            return_lines.append({
+                'external_product_id': source_line.get('sku_code') or source_line.get('external_sku_id'),
+                'quantity': float(requested.quantity),
+                'inventory_disposition': disposition,
+                'catalog_item_id': source_line.get('catalog_item_id'),
+                'item_name': source_line.get('item_name_snapshot'),
+            })
         with consume_protected_approval(
             db,
             requester=current_user,
@@ -233,11 +266,13 @@ def refund_order(order_id: int, payload: RefundCreate, db: Session = Depends(get
             entity_id=order_id,
             requested_reason=payload.reason_text or payload.reason_code or 'Refund',
         ):
-            result = create_refund(db, order_id, payload, cashier_user_id=getattr(current_user, 'id', None))
+            result = create_refund(db, order_id, payload, cashier_user_id=getattr(current_user, 'id', None), commit=False)
         order_after_refund = get_order(db, order_id)
         if should_reverse_inventory_for_refund(order_after_refund):
-            enqueue_inventory_event(db, order_after_refund, 'sale_refunded')
+            enqueue_inventory_event(db, order_after_refund, 'sale_refunded', commit=False)
         refund_id = result.get('id') if isinstance(result, dict) else getattr(result, 'id', order_id)
+        if return_lines:
+            enqueue_inventory_event(db, order_after_refund, 'sale_returned', return_lines=return_lines, return_id=str(refund_id), commit=False)
         enqueue_operations_event(
             db,
             'refund.review_needed',
@@ -249,8 +284,27 @@ def refund_order(order_id: int, payload: RefundCreate, db: Session = Depends(get
             subject_type='refund',
             subject_id=refund_id,
             external_user_id=getattr(current_user, 'id', None),
+            commit=False,
         )
+        db.commit()
+        # Notify kitchen clients only after the refund and its integration outbox
+        # events have been durably committed.
+        previous_kitchen_status = {
+            int(line['id']): line.get('kitchen_status')
+            for line in (order_before_refund.get('lines') or [])
+            if line.get('id') is not None
+        }
+        kitchen_changed = any(
+            previous_kitchen_status.get(int(line['id'])) != line.get('kitchen_status')
+            for line in (order_after_refund.get('lines') or [])
+            if line.get('id') is not None and int(line['id']) in previous_kitchen_status
+        )
+        if kitchen_changed:
+            publish_refund_kds_refresh(db, order_id, refund_id)
         return result
     except ValueError as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        db.rollback()
+        raise

@@ -80,6 +80,60 @@ def test_inventory_outbox_uses_dedicated_pending_status(monkeypatch):
     assert captured['idempotency_key'] == 'inventory:pos:order-uuid-15:sale_completed'
 
 
+
+def test_inventory_outbox_deferred_commit_only_flushes(monkeypatch):
+    row = SimpleNamespace(status='pending', last_error='old')
+    calls = {'commits': 0, 'flushes': 0, 'refreshes': 0}
+
+    monkeypatch.setattr(integration, 'create_outbox_event', lambda db, **kwargs: row)
+
+    class FakeDb:
+        def add(self, value):
+            assert value is row
+        def commit(self):
+            calls['commits'] += 1
+        def flush(self):
+            calls['flushes'] += 1
+        def refresh(self, value):
+            assert value is row
+            calls['refreshes'] += 1
+
+    result = integration.enqueue_inventory_event(FakeDb(), order_payload(), 'sale_completed', commit=False)
+    assert result is row
+    assert row.status == 'inventory_pending'
+    assert calls == {'commits': 0, 'flushes': 1, 'refreshes': 1}
+
+
+
+
+def test_each_physical_return_has_unique_event_id():
+    first = integration.build_inventory_event(
+        order_payload(), 'sale_returned',
+        return_lines=[{'external_product_id': 'CAFE-001', 'quantity': 1, 'inventory_disposition': 'waste'}],
+        return_id='refund-101',
+    )
+    second = integration.build_inventory_event(
+        order_payload(), 'sale_returned',
+        return_lines=[{'external_product_id': 'CAFE-001', 'quantity': 1, 'inventory_disposition': 'waste'}],
+        return_id='refund-102',
+    )
+    assert first['external_event_id'] == 'pos:order-uuid-15:sale_returned:refund-101'
+    assert second['external_event_id'] == 'pos:order-uuid-15:sale_returned:refund-102'
+    assert first['external_event_id'] != second['external_event_id']
+    assert first['lines'] == [{'external_product_id': 'CAFE-001', 'quantity': 1.0, 'inventory_disposition': 'waste'}]
+
+
+def test_physical_return_requires_refund_id():
+    import pytest
+
+    with pytest.raises(ValueError, match='unique refund identifier'):
+        integration.build_inventory_event(
+            order_payload(), 'sale_returned',
+            return_lines=[{'external_product_id': 'CAFE-001', 'quantity': 1, 'inventory_disposition': 'waste'}],
+        )
+
+
+
 def test_inventory_worker_follows_canonical_redirects(monkeypatch):
     payload = integration.build_inventory_event(order_payload(), 'sale_completed')
     row = SimpleNamespace(
