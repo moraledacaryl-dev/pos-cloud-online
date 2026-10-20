@@ -42,7 +42,10 @@ def open_session(payload: RegisterSessionOpen, db: Session = Depends(get_db), cu
 @router.post('/{session_id}/close')
 def close_session(session_id: int, payload: RegisterSessionClose, db: Session = Depends(get_db), current_user=Depends(require_permissions('sessions.manage'))):
     try:
-        result = close_register_session(db, session_id, payload, user_id=getattr(current_user, 'id', None))
+        result = close_register_session(
+            db, session_id, payload, user_id=getattr(current_user, 'id', None),
+            commit=False,
+        )
         enqueue_operations_event(
             db,
             'session.closed',
@@ -53,11 +56,16 @@ def close_session(session_id: int, payload: RegisterSessionClose, db: Session = 
             subject_type='register_session',
             subject_id=session_id,
             external_user_id=getattr(current_user, 'id', None),
+            commit=False,
         )
+        db.commit()
         return result
     except ValueError as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        db.rollback()
+        raise
 
 
 @router.post('/{session_id}/reopen')
