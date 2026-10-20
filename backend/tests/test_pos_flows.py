@@ -1519,3 +1519,44 @@ def test_manual_cash_api_accepts_manager_authorized_paid_out_without_client_appr
     assert db.get(RegisterSession, session['id']).closing_expected_cash == Decimal('75.00')
     assert db.query(AuditLog).filter(AuditLog.action == 'cash_movement.created').count() == 2
     db.close()
+
+
+def test_authorized_cash_retry_does_not_replace_original_financial_audit_grant():
+    import app.api.cash as cash_api
+
+    db = make_session()
+    register = seed_register(db)
+    manager = seed_manager(db)
+    session = open_register_session(db, RegisterSessionOpen(
+        register_id=register.id, business_date='2026-04-19',
+        shift_name='AM', opening_float=100,
+    ))
+    key = str(uuid.uuid4())
+
+    def request():
+        return CashMovementCreate(
+            register_session_id=session['id'], direction='out',
+            movement_type='paid_out', amount=15, category='Supplies',
+            note='Urgent supplies', reference_no='SUP-RETRY',
+            client_request_id=key,
+        )
+
+    first = cash_api.add_cash_movement(request(), db=db, current_user=manager)
+    audit = db.query(AuditLog).filter(
+        AuditLog.action == 'cash_movement.created',
+        AuditLog.entity_id == str(first['id']),
+    ).one()
+    original_details = audit.details_json
+    assert 'approval_grant_uuid' in original_details
+
+    again = cash_api.add_cash_movement(request(), db=db, current_user=manager)
+    assert again['id'] == first['id']
+    db.expire_all()
+    recorded_audit = db.query(AuditLog).filter(
+        AuditLog.action == 'cash_movement.created',
+        AuditLog.entity_id == str(first['id']),
+    ).one()
+    assert recorded_audit.details_json == original_details
+    assert db.query(CashMovement).count() == 2  # Opening float and paid out.
+    assert db.get(RegisterSession, session['id']).closing_expected_cash == Decimal('85.00')
+    db.close()
