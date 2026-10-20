@@ -1,4 +1,5 @@
 import json
+import uuid
 from decimal import Decimal
 
 import pytest
@@ -16,6 +17,7 @@ from app.models.entities import (
     PosOrder,
     PosOrderLine,
     Register,
+    RegisterSession,
     RoomChargePosting,
     SyncOutboxEvent,
 )
@@ -30,10 +32,12 @@ from app.schemas.common import (
     OrderUpdate,
     OrderVoidPayload,
     RefundCreate,
+    RegisterSessionClose,
     RegisterSessionOpen,
     RoomChargePostingStatusUpdate,
 )
 from app.services.pos_service import (
+    close_register_session,
     create_cash_movement,
     create_catalog_item,
     create_in_house_booking_snapshot,
@@ -1270,4 +1274,247 @@ def test_historical_invalid_catalog_rate_cannot_enter_new_order():
         ]))
     db.rollback()
     assert db.query(PosOrder).count() == 0
+    db.close()
+
+
+
+def test_open_register_rolls_back_if_opening_float_cannot_be_recorded(monkeypatch):
+    db = make_session()
+    register = seed_register(db)
+
+    def broken_float(*_args, **_kwargs):
+        raise RuntimeError('Cash movement write failed')
+
+    monkeypatch.setattr(pos_service, 'create_cash_movement', broken_float)
+    with pytest.raises(RuntimeError, match='Cash movement write failed'):
+        open_register_session(db, RegisterSessionOpen(
+            register_id=register.id, business_date='2026-04-19',
+            shift_name='AM', opening_float=500,
+        ))
+    db.rollback()
+    assert db.query(RegisterSession).count() == 0
+    assert db.query(CashMovement).count() == 0
+    assert db.query(AuditLog).filter(AuditLog.action == 'session.opened').count() == 0
+    db.close()
+
+
+def test_open_register_commits_float_and_expected_cash_together():
+    db = make_session()
+    register = seed_register(db)
+    session = open_register_session(db, RegisterSessionOpen(
+        register_id=register.id, business_date='2026-04-19',
+        shift_name='AM', opening_float=350,
+    ))
+    assert session['status'] == 'open'
+    assert session['closing_expected_cash'] == Decimal('350.00')
+    movements = db.query(CashMovement).all()
+    assert len(movements) == 1
+    assert movements[0].movement_type == 'opening_float'
+    assert movements[0].amount == Decimal('350.00')
+    assert db.query(AuditLog).filter(AuditLog.action == 'session.opened').count() == 1
+    assert db.query(SyncOutboxEvent).filter(SyncOutboxEvent.event_type == 'cash_movement.created').count() == 1
+    db.close()
+
+
+def test_close_register_rolls_back_when_accounting_outbox_fails(monkeypatch):
+    db = make_session()
+    register = seed_register(db)
+    session = open_register_session(db, RegisterSessionOpen(
+        register_id=register.id, business_date='2026-04-19',
+        shift_name='AM', opening_float=150,
+    ))
+    original_create = pos_service.create_outbox_event
+
+    def fail_closed_outbox(*args, **kwargs):
+        if kwargs.get('event_type') == 'session.closed':
+            raise RuntimeError('Accounting outbox failure')
+        return original_create(*args, **kwargs)
+
+    monkeypatch.setattr(pos_service, 'create_outbox_event', fail_closed_outbox)
+    with pytest.raises(RuntimeError, match='Accounting outbox failure'):
+        close_register_session(db, session['id'], RegisterSessionClose(closing_actual_cash=150))
+    db.rollback()
+    db.expire_all()
+    shift = db.get(RegisterSession, session['id'])
+    assert shift.status == 'open'
+    assert shift.closing_actual_cash is None
+    assert db.query(SyncOutboxEvent).filter(SyncOutboxEvent.event_type == 'session.closed').count() == 0
+    db.close()
+
+
+def test_close_register_rolls_back_if_operations_enqueue_fails(monkeypatch):
+    import app.api.sessions as sessions_api
+
+    db = make_session()
+    register = seed_register(db)
+    session = open_register_session(db, RegisterSessionOpen(
+        register_id=register.id, business_date='2026-04-19',
+        shift_name='AM', opening_float=100,
+    ))
+
+    def fail_operations(*_args, **_kwargs):
+        raise RuntimeError('Operations enqueue failed')
+
+    monkeypatch.setattr(sessions_api, 'enqueue_operations_event', fail_operations)
+    with pytest.raises(RuntimeError, match='Operations enqueue failed'):
+        sessions_api.close_session(
+            session['id'], RegisterSessionClose(closing_actual_cash=100),
+            db=db, current_user=None,
+        )
+    db.expire_all()
+    shift = db.get(RegisterSession, session['id'])
+    assert shift.status == 'open'
+    assert shift.closing_actual_cash is None
+    assert db.query(AuditLog).filter(AuditLog.action == 'session.closed').count() == 0
+    assert db.query(SyncOutboxEvent).filter(SyncOutboxEvent.event_type == 'session.closed').count() == 0
+    db.close()
+
+
+def test_manual_cash_retry_reuses_existing_movement_and_does_not_double_drawer_balance():
+    db = make_session()
+    register = seed_register(db)
+    session = open_register_session(db, RegisterSessionOpen(
+        register_id=register.id, business_date='2026-04-19',
+        shift_name='AM', opening_float=0,
+    ))
+    request_id = str(uuid.uuid4())
+    payload = CashMovementCreate(
+        register_session_id=session['id'], direction='in', movement_type='paid_in',
+        amount=75, category='Change Fund', reference_no='CF-123',
+        note='Extra change', client_request_id=request_id,
+    )
+    first = create_cash_movement(db, payload)
+    second = create_cash_movement(db, payload)
+    assert first['id'] == second['id']
+    assert first['cash_event_uuid'] == second['cash_event_uuid']
+    assert db.query(CashMovement).count() == 1
+    assert db.query(SyncOutboxEvent).filter(SyncOutboxEvent.event_type == 'cash_movement.created').count() == 1
+    assert db.get(RegisterSession, session['id']).closing_expected_cash == Decimal('75.00')
+    # Retrying an accepted request after closing must not create another entry.
+    close_register_session(db, session['id'], RegisterSessionClose(closing_actual_cash=75))
+    replay = create_cash_movement(db, payload)
+    assert replay['id'] == first['id']
+    assert db.query(CashMovement).count() == 1
+    db.close()
+
+
+def test_manual_cash_idempotency_key_cannot_be_reused_for_different_amount():
+    db = make_session()
+    register = seed_register(db)
+    session = open_register_session(db, RegisterSessionOpen(
+        register_id=register.id, business_date='2026-04-19',
+        shift_name='AM', opening_float=0,
+    ))
+    key = str(uuid.uuid4())
+    first = CashMovementCreate(register_session_id=session['id'], direction='in',
+                               movement_type='paid_in', amount=100,
+                               client_request_id=key)
+    create_cash_movement(db, first)
+    with pytest.raises(ValueError, match='already used'):
+        create_cash_movement(db, CashMovementCreate(
+            register_session_id=session['id'], direction='in',
+            movement_type='paid_in', amount=200, client_request_id=key,
+        ))
+    db.rollback()
+    assert db.query(CashMovement).count() == 1
+    db.close()
+
+
+@pytest.mark.parametrize('request_id', ['not-a-uuid', str(uuid.uuid5(uuid.NAMESPACE_DNS, 'cash-test'))])
+def test_manual_cash_idempotency_rejects_malformed_request_id(request_id):
+    db = make_session()
+    register = seed_register(db)
+    session = open_register_session(db, RegisterSessionOpen(
+        register_id=register.id, business_date='2026-04-19',
+        shift_name='AM', opening_float=0,
+    ))
+    with pytest.raises(ValueError, match='UUIDv4'):
+        create_cash_movement(db, CashMovementCreate(
+            register_session_id=session['id'], direction='in',
+            movement_type='paid_in', amount=10, client_request_id=request_id,
+        ))
+    db.rollback()
+    assert db.query(CashMovement).count() == 0
+    db.close()
+
+
+def test_cash_api_rolls_back_cash_and_audit_if_operations_enqueue_fails(monkeypatch):
+    import app.api.cash as cash_api
+
+    db = make_session()
+    register = seed_register(db)
+    user = seed_manager(db)
+    session = open_register_session(db, RegisterSessionOpen(
+        register_id=register.id, business_date='2026-04-19',
+        shift_name='AM', opening_float=0,
+    ))
+
+    def fail_operations(*_args, **_kwargs):
+        raise RuntimeError('Operations enqueue failed')
+
+    monkeypatch.setattr(cash_api, 'enqueue_operations_event', fail_operations)
+    with pytest.raises(RuntimeError, match='Operations enqueue failed'):
+        cash_api.add_cash_movement(
+            CashMovementCreate(
+                register_session_id=session['id'], direction='in',
+                movement_type='paid_in', amount=25,
+                category='Change Fund', client_request_id=str(uuid.uuid4()),
+            ),
+            db=db, current_user=user,
+        )
+    db.expire_all()
+    assert db.query(CashMovement).count() == 0
+    assert db.get(RegisterSession, session['id']).closing_expected_cash == Decimal('0.00')
+    assert db.query(AuditLog).filter(AuditLog.action == 'cash_movement.created').count() == 0
+    db.close()
+
+
+def test_manual_cash_api_forbids_forged_system_sale_and_validates_transfer_direction():
+    from fastapi import HTTPException
+    import app.api.cash as cash_api
+
+    db = make_session()
+    register = seed_register(db)
+    user = seed_manager(db)
+    session = open_register_session(db, RegisterSessionOpen(
+        register_id=register.id, business_date='2026-04-19',
+        shift_name='AM', opening_float=0,
+    ))
+    with pytest.raises(HTTPException, match='not available for manual entry'):
+        cash_api.add_cash_movement(CashMovementCreate(
+            register_session_id=session['id'], direction='in',
+            movement_type='cash_sale', amount=50,
+        ), db=db, current_user=user)
+    with pytest.raises(HTTPException, match='direction out'):
+        cash_api.add_cash_movement(CashMovementCreate(
+            register_session_id=session['id'], direction='in',
+            movement_type='bank_deposit', amount=50, note='Bank run',
+            reference_no='BANK-123',
+        ), db=db, current_user=user)
+    assert db.query(CashMovement).count() == 0
+    db.close()
+
+
+def test_manual_cash_api_accepts_manager_authorized_paid_out_without_client_approver_id():
+    import app.api.cash as cash_api
+
+    db = make_session()
+    register = seed_register(db)
+    manager = seed_manager(db)
+    session = open_register_session(db, RegisterSessionOpen(
+        register_id=register.id, business_date='2026-04-19',
+        shift_name='AM', opening_float=100,
+    ))
+    movement = cash_api.add_cash_movement(
+        CashMovementCreate(
+            register_session_id=session['id'], direction='out',
+            movement_type='paid_out', amount=25, category='Supplies',
+            note='Urgent supplies', reference_no='SUP-1',
+            client_request_id=str(uuid.uuid4()),
+        ), db=db, current_user=manager,
+    )
+    assert movement['movement_type'] == 'paid_out'
+    assert db.query(CashMovement).count() == 2
+    assert db.get(RegisterSession, session['id']).closing_expected_cash == Decimal('75.00')
+    assert db.query(AuditLog).filter(AuditLog.action == 'cash_movement.created').count() == 2
     db.close()
