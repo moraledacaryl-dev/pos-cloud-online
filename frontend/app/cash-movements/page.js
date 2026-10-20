@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createCashMovement, fetchAccountingAccounts, fetchCashMovements, fetchRegisterSessions, fetchRegisters } from '../../lib/api';
 import { cashMovementLabel, humanizeCode } from '../../lib/displayLabels.mjs';
 
@@ -27,6 +27,9 @@ export default function CashMovementsPage() {
   const [form, setForm] = useState({ register_session_id: '', direction: 'out', movement_type: 'paid_out', category: '', amount: '', note: '', reference_no: '', accounting_financial_account_id: '', to_accounting_financial_account_id: '', destination_register_id: '', requires_approval: false });
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+  const pendingRequestRef = useRef(null);
 
   async function loadAll() {
     try {
@@ -76,6 +79,7 @@ export default function CashMovementsPage() {
 
   async function handleSubmit(event) {
     event.preventDefault();
+    if (submittingRef.current) return;
     setError(''); setNotice('');
     if (!form.register_session_id) return setError('Select an open register session.');
     if (!form.category.trim()) return setError('Choose or enter a clear category.');
@@ -83,8 +87,7 @@ export default function CashMovementsPage() {
     if (form.direction === 'out' && !form.reference_no.trim()) return setError('A receipt or reference number is required for cash leaving the drawer.');
     if (needsAccountDestination && !form.to_accounting_financial_account_id) return setError('Choose the destination financial account.');
     if (needsRegisterDestination && !form.destination_register_id) return setError('Choose the destination register.');
-    try {
-      await createCashMovement({
+    const payload = {
         ...form,
         register_session_id: Number(form.register_session_id),
         amount: Number(form.amount || 0),
@@ -92,11 +95,26 @@ export default function CashMovementsPage() {
         to_accounting_financial_account_id: form.to_accounting_financial_account_id ? Number(form.to_accounting_financial_account_id) : null,
         destination_register_id: form.destination_register_id ? Number(form.destination_register_id) : null,
         requires_approval: !!form.requires_approval || approvalRequired,
-      });
+      };
+    // Retain the idempotency key across network failures and retries of the
+    // same entry; a changed form is a distinct financial operation.
+    const signature = JSON.stringify(payload);
+    if (pendingRequestRef.current?.signature !== signature) {
+      pendingRequestRef.current = { signature, id: crypto.randomUUID() };
+    }
+    submittingRef.current = true;
+    setSubmitting(true);
+    try {
+      await createCashMovement({ ...payload, client_request_id: pendingRequestRef.current.id });
+      pendingRequestRef.current = null;
       setForm((prev) => ({ ...prev, amount: '', note: '', reference_no: '', to_accounting_financial_account_id: '', destination_register_id: '', requires_approval: approvalRequired }));
       setNotice('Cash movement recorded.');
       await loadAll();
     } catch (e) { setError(e.message || 'Failed to create cash movement.'); }
+    finally {
+      submittingRef.current = false;
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -132,7 +150,7 @@ export default function CashMovementsPage() {
             <span>Estimated drawer balance: {money(drawerBefore)} → {money(drawerAfter)}</span>
             <small>{form.requires_approval || approvalRequired ? 'Manager approval will be required.' : 'This event will be recorded in the audit trail.'}</small>
           </div>
-          <div className="row"><button className="primary" type="submit" disabled={!canSubmit}>Review and record</button></div>
+          <div className="row"><button className="primary" type="submit" disabled={!canSubmit || submitting}>{submitting ? 'Recording…' : 'Review and record'}</button></div>
         </form>
       </details>
 
