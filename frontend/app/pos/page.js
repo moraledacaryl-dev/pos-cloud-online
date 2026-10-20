@@ -726,10 +726,17 @@ export default function PosPage() {
       setError('Add at least one item before saving an offline draft.');
       return null;
     }
-    const draft = saveOfflineDraft(buildOfflineDraftSnapshot(reason), { ownerId: user?.id, ownerLabel: user?.display_name || user?.username || '', registerId: currentSession?.register_id || null });
-    refreshOfflineDrafts();
-    setNotice(`Offline emergency draft saved locally at ${new Date(draft.saved_at).toLocaleTimeString()}. Restore it when the POS connection is back.`);
-    return draft;
+    try {
+      const draft = saveOfflineDraft(buildOfflineDraftSnapshot(reason), { ownerId: user?.id, ownerLabel: user?.display_name || user?.username || '', registerId: currentSession?.register_id || null });
+      refreshOfflineDrafts();
+      setNotice(`Offline emergency draft saved locally at ${new Date(draft.saved_at).toLocaleTimeString()}. Restore it when the POS connection is back.`);
+      return draft;
+    } catch {
+      // An offline cashier cannot rely on browser storage in private mode,
+      // under quota pressure, or when the device blocks localStorage.
+      setError('The offline draft could not be saved on this device. Keep this screen open and record the order manually. Do not assume it has been stored.');
+      return null;
+    }
   }
   function restoreOfflineDraft(draft) {
     if (!draft) return;
@@ -777,8 +784,10 @@ export default function PosPage() {
     const missingRoomChargeContext = payments.find((row) => row.tender_type === 'room_charge' && !String(row.room_charge_booking_snapshot_id || row.room_charge_room_number || row.room_charge_guest_label || '').trim());
     if (missingRoomChargeContext) return setError('Select a room or guest before completing a room charge.');
     if (!browserOnline) {
-      saveCurrentOfflineDraft('payment-blocked-offline');
-      return setError('POS connection is offline. The cart was saved locally, but payment and room-charge posting must wait until the server is reachable.');
+      const draft = saveCurrentOfflineDraft('payment-blocked-offline');
+      return setError(draft
+        ? 'POS connection is offline. The cart was saved locally, but payment and room-charge posting must wait until the server is reachable.'
+        : 'POS is offline and the cart could not be saved to this device. Keep this screen open; do not accept payment or assume the order is recorded.');
     }
     if (Math.abs(totalApplied - cartTotals.total) > 0.01) return setError('Applied payment must equal cart total.');
     try {
@@ -788,7 +797,15 @@ export default function PosPage() {
       }));
       const receipt = { ...settled, receipt_profile: receiptProfile };
       setReceiptPreview(receipt); saveLastReceipt(receipt, { ownerId: user?.id, registerId: currentSession?.register_id }); setLastReceipt(receipt); setPaymentOpen(false); setNotice(settled.status === 'folio_pending' ? `Order ${order.order_no} finalized to pending folio.` : `Order ${order.order_no} paid.`); clearCart(); setTerminalScreen('spaces'); await loadAll({ silent: true });
-    } catch (e) { if (likelyConnectionError(e)) { saveCurrentOfflineDraft('payment-connection-failed'); return setError('Connection failed before payment could be confirmed. The cart was saved locally; verify Orders before taking payment again.'); } setError(e.message || 'Failed to pay order.'); }
+    } catch (e) {
+      if (likelyConnectionError(e)) {
+        const draft = saveCurrentOfflineDraft('payment-connection-failed');
+        return setError(draft
+          ? 'Connection failed before payment could be confirmed. The cart was saved locally; verify Orders before taking payment again.'
+          : 'Connection failed before payment could be confirmed and the offline draft could not be saved. Keep this screen open and verify Orders before taking payment again.');
+      }
+      setError(e.message || 'Failed to pay order.');
+    }
   }
   function openQuickClose() {
     if (!currentSession?.id) return setError('Select an open session first.');
