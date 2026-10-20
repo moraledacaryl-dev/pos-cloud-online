@@ -442,30 +442,68 @@ async def sync_catalog_from_inventory(db: Session, *, force: bool = True) -> dic
     return summary
 
 
-async def _current_erp_transaction_exists(client: httpx.AsyncClient, base: str, path: str, reference_no: str) -> bool:
-    if not reference_no:
+def _is_review_intake(path: str) -> bool:
+    # Accounting's Review Inbox endpoints accept POST and own their own
+    # durable, source-event-based idempotency. They are not GET collection APIs.
+    return '/integrations/pos-review/' in str(path or '')
+
+
+async def _current_erp_transaction_exists(
+    client: httpx.AsyncClient,
+    base: str,
+    path: str,
+    reference_no: str | None,
+    *,
+    external_id: str | None = None,
+) -> bool:
+    if not reference_no and not external_id:
         return False
-    res = await client.get(_join(base, path), params={'q': reference_no, 'limit': 50})
+    res = await client.get(_join(base, path), params={'q': reference_no or external_id, 'limit': 50})
     if not 200 <= res.status_code < 300:
-        return False
+        raise RuntimeError(f'Accounting transaction duplicate check failed with HTTP {res.status_code}.')
     rows = res.json() or []
-    return any(str(row.get('reference_no') or '') == str(reference_no) for row in rows)
+    if not isinstance(rows, list):
+        raise RuntimeError('Accounting transaction duplicate check returned an invalid response.')
+    if external_id:
+        # A paper receipt/provider reference can appear on both an incoming
+        # payment and its refund. Only the POS event identity proves a duplicate.
+        return any(
+            str(row.get('external_source') or '') == 'dedicated_pos_cloud'
+            and str(row.get('external_id') or '') == str(external_id)
+            for row in rows if isinstance(row, dict)
+        )
+    return any(str(row.get('reference_no') or '') == str(reference_no) for row in rows if isinstance(row, dict))
 
 
-async def _current_erp_transfer_exists(client: httpx.AsyncClient, base: str, path: str, reference_no: str) -> bool:
-    if not reference_no:
+async def _current_erp_transfer_exists(
+    client: httpx.AsyncClient,
+    base: str,
+    path: str,
+    reference_no: str | None,
+    *,
+    external_id: str | None = None,
+) -> bool:
+    if not reference_no and not external_id:
         return False
     res = await client.get(_join(base, path), params={'limit': 200})
     if not 200 <= res.status_code < 300:
-        return False
+        raise RuntimeError(f'Accounting transfer duplicate check failed with HTTP {res.status_code}.')
     rows = res.json() or []
-    return any(str(row.get('reference_no') or '') == str(reference_no) for row in rows)
+    if not isinstance(rows, list):
+        raise RuntimeError('Accounting transfer duplicate check returned an invalid response.')
+    if external_id:
+        return any(
+            str(row.get('external_source') or '') == 'dedicated_pos_cloud'
+            and str(row.get('external_id') or '') == str(external_id)
+            for row in rows if isinstance(row, dict)
+        )
+    return any(str(row.get('reference_no') or '') == str(reference_no) for row in rows if isinstance(row, dict))
 
 
 async def _find_current_erp_sale(client: httpx.AsyncClient, base: str, path: str, order_no: str) -> dict | None:
     res = await client.get(_join(base, path), params={'limit': 300})
     if not 200 <= res.status_code < 300:
-        return None
+        raise RuntimeError(f'Accounting sale lookup failed with HTTP {res.status_code}.')
     rows = res.json() or []
     for row in rows:
         if str(row.get('order_no') or '') == str(order_no):
@@ -477,7 +515,7 @@ async def _current_erp_reconciliation_exists(client: httpx.AsyncClient, base: st
     params = {'account_id': account_id, 'start_date': business_date, 'end_date': business_date, 'limit': 200}
     res = await client.get(_join(base, path), params=params)
     if not 200 <= res.status_code < 300:
-        return False
+        raise RuntimeError(f'Accounting reconciliation duplicate check failed with HTTP {res.status_code}.')
     rows = res.json() or []
     return any(str(row.get('shift_name') or '') == str(shift_name) for row in rows)
 
@@ -486,7 +524,17 @@ async def _push_cash_movement(client: httpx.AsyncClient, base: str, config: dict
     path = config.get('current_erp_cashflow_path') or '/cashflow/transactions'
     exists_path = config.get('current_erp_transactions_lookup_path') or path
     reference_no = payload.get('reference_no') or payload.get('cash_event_uuid')
-    if await _current_erp_transaction_exists(client, base, exists_path, reference_no):
+    # Pre-existing queued events retain their original external ID to prevent
+    # a historical retry from generating a second Accounting transaction.
+    version = int(payload.get('integration_identity_version') or 1)
+    external_id = (
+        f"cash-movement:{payload['cash_event_uuid']}"
+        if version >= 2 and payload.get('cash_event_uuid')
+        else reference_no
+    )
+    if not _is_review_intake(exists_path) and await _current_erp_transaction_exists(
+        client, base, exists_path, reference_no, external_id=external_id,
+    ):
         return None
     mapped = {
         'transaction_date': payload.get('event_date'),
@@ -508,7 +556,7 @@ async def _push_cash_movement(client: httpx.AsyncClient, base: str, config: dict
         'auto_post_accounting': False,
         'allow_overdraw': True,
         'external_source': 'dedicated_pos_cloud',
-        'external_id': reference_no,
+        'external_id': external_id,
     }
     return await client.post(_join(base, path), json=mapped)
 
@@ -516,7 +564,15 @@ async def _push_cash_movement(client: httpx.AsyncClient, base: str, config: dict
 async def _push_transfer(client: httpx.AsyncClient, base: str, config: dict, payload: dict):
     path = config.get('current_erp_transfers_path') or '/transfers'
     reference_no = payload.get('reference_no') or payload.get('cash_event_uuid')
-    if await _current_erp_transfer_exists(client, base, path, reference_no):
+    version = int(payload.get('integration_identity_version') or 1)
+    external_id = (
+        f"cash-transfer:{payload['cash_event_uuid']}"
+        if version >= 2 and payload.get('cash_event_uuid')
+        else reference_no
+    )
+    if not _is_review_intake(path) and await _current_erp_transfer_exists(
+        client, base, path, reference_no, external_id=external_id,
+    ):
         return None
     mapped = {
         'transfer_date': payload.get('transfer_date'),
@@ -529,7 +585,7 @@ async def _push_transfer(client: httpx.AsyncClient, base: str, config: dict, pay
         'auto_post_accounting': False,
         'allow_overdraw': True,
         'external_source': 'dedicated_pos_cloud',
-        'external_id': reference_no,
+        'external_id': external_id,
     }
     return await client.post(_join(base, path), json=mapped)
 
@@ -546,7 +602,11 @@ async def _push_payment_collection(client: httpx.AsyncClient, base: str, config:
     path = config.get('current_erp_cashflow_path') or '/cashflow/transactions'
     exists_path = config.get('current_erp_transactions_lookup_path') or path
     reference_no = payment.get('reference_no') or f"{payload.get('order_no')}:{tender}"
-    if await _current_erp_transaction_exists(client, base, exists_path, reference_no):
+    # Preserve older payment identity for already-queued events.
+    external_id = reference_no
+    if not _is_review_intake(exists_path) and await _current_erp_transaction_exists(
+        client, base, exists_path, reference_no, external_id=external_id,
+    ):
         return None
     mapped = {
         'transaction_date': payload.get('business_date'),
@@ -586,7 +646,10 @@ async def _push_payment_refund(client: httpx.AsyncClient, base: str, config: dic
     path = config.get('current_erp_cashflow_path') or '/cashflow/transactions'
     exists_path = config.get('current_erp_transactions_lookup_path') or path
     reference_no = payment.get('reference_no') or f"{payload.get('refund_no') or payload.get('order_no')}:refund:{tender}"
-    if await _current_erp_transaction_exists(client, base, exists_path, reference_no):
+    external_id = f"refund-payment:{payment.get('id')}"
+    if not _is_review_intake(exists_path) and await _current_erp_transaction_exists(
+        client, base, exists_path, reference_no, external_id=external_id,
+    ):
         return None
     mapped = {
         'transaction_date': payload.get('created_at') or payload.get('business_date'),
@@ -608,7 +671,7 @@ async def _push_payment_refund(client: httpx.AsyncClient, base: str, config: dic
         'auto_post_accounting': False,
         'allow_overdraw': True,
         'external_source': 'dedicated_pos_cloud',
-        'external_id': f"refund-payment:{payment.get('id')}",
+        'external_id': external_id,
     }
     return await client.post(_join(base, path), json=mapped)
 
@@ -674,7 +737,7 @@ async def _push_order_void(client: httpx.AsyncClient, base: str, config: dict, p
     path = config.get('current_erp_sales_path') or '/menu/sales'
     sale = await _find_current_erp_sale(client, base, path, payload.get('order_no'))
     if not sale:
-        return None
+        raise RuntimeError('Accounting sale has not appeared yet; retry the void after its sale is available.')
     if sale.get('status') == 'voided':
         return None
     sale_id = sale.get('id')
@@ -694,7 +757,10 @@ async def _push_reconciliation(client: httpx.AsyncClient, base: str, config: dic
         raise ValueError('Register drawer is not mapped to an Accounting financial account. Map the register before retrying this reconciliation.')
     path = config.get('current_erp_reconciliation_path') or '/reconciliations'
     exists_path = config.get('current_erp_reconciliations_lookup_path') or path
-    if await _current_erp_reconciliation_exists(client, base, exists_path, payload.get('register_accounting_financial_account_id'), payload.get('session_code'), payload.get('business_date')):
+    if not _is_review_intake(exists_path) and await _current_erp_reconciliation_exists(
+        client, base, exists_path, payload.get('register_accounting_financial_account_id'),
+        payload.get('session_code'), payload.get('business_date'),
+    ):
         return None
     mapped = {
         'financial_account_id': payload.get('register_accounting_financial_account_id'),
@@ -709,6 +775,18 @@ async def _push_reconciliation(client: httpx.AsyncClient, base: str, config: dic
         ],
     }
     return await client.post(_join(base, path), json=mapped)
+
+
+def _accounting_void_waits_for_sale(db: Session, row: SyncOutboxEvent) -> bool:
+    if row.event_type != 'order.voided':
+        return False
+    sale = db.query(SyncOutboxEvent).filter(
+        SyncOutboxEvent.aggregate_type == 'order',
+        SyncOutboxEvent.aggregate_id == row.aggregate_id,
+        SyncOutboxEvent.event_type == 'order.finalized',
+        SyncOutboxEvent.id < row.id,
+    ).order_by(SyncOutboxEvent.id.asc()).populate_existing().first()
+    return sale is not None and sale.status != 'synced'
 
 
 async def run_outbox_sync(db: Session, limit: int = 25) -> dict:
@@ -731,12 +809,16 @@ async def run_outbox_sync(db: Session, limit: int = 25) -> dict:
     synced = 0
     failed = 0
     blocked = 0
+    skipped = 0
     async with httpx.AsyncClient(
         timeout=settings.http_timeout_seconds,
         headers=_client_headers(config),
         follow_redirects=True,
     ) as client:
         for row in rows:
+            if _accounting_void_waits_for_sale(db, row):
+                skipped += 1
+                continue
             payload = _load_payload(row)
             row.last_attempt_at = now_iso()
             try:
@@ -816,7 +898,7 @@ async def run_outbox_sync(db: Session, limit: int = 25) -> dict:
                 failed += 1
                 db.add(row)
                 db.commit()
-    return {'ok': True, 'processed': len(rows), 'synced': synced, 'failed': failed, 'blocked': blocked}
+    return {'ok': blocked == 0, 'processed': len(rows) - skipped, 'synced': synced, 'failed': failed, 'blocked': blocked, 'skipped': skipped}
 
 
 async def retry_outbox_event(db: Session, event_id: int) -> dict:
@@ -841,6 +923,8 @@ async def retry_outbox_event(db: Session, event_id: int) -> dict:
         db.add(integration_row)
         db.commit()
         return await run_operations_outbox_sync(db, limit=1, event_id=event_id)
+    if _accounting_void_waits_for_sale(db, integration_row):
+        return {'ok': False, 'skipped': True, 'error': 'The original POS sale is not yet synced to Accounting.'}
     config = get_sync_config(db)
     base = (config.get('api_base') or '').strip()
     if not base:
