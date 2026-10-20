@@ -1224,15 +1224,14 @@ def open_register_session(db: Session, payload: RegisterSessionOpen, user_id: in
         shift_name=payload.shift_name,
         status='open',
         opened_by_user_id=user_id,
-        opening_float=_money(payload.opening_float),
+        opening_float=_validated_money(payload.opening_float, 'Opening float'),
         opening_note=payload.opening_note,
         opened_at_text=now_iso(),
-        closing_expected_cash=_money(payload.opening_float),
+        closing_expected_cash=_validated_money(payload.opening_float, 'Opening float'),
     )
     db.add(row)
-    db.commit()
-    db.refresh(row)
-    _audit_event(db, action='session.opened', entity_type='register_session', entity_id=row.id, user_id=user_id, details={'session_id': row.id, 'session_code': row.session_code, 'register_id': row.register_id, 'opening_float': row.opening_float})
+    db.flush()
+    _audit_event(db, action='session.opened', entity_type='register_session', entity_id=row.id, user_id=user_id, details={'session_id': row.id, 'session_code': row.session_code, 'register_id': row.register_id, 'opening_float': row.opening_float}, commit=False)
     if row.opening_float > 0:
         create_cash_movement(
             db,
@@ -1248,7 +1247,10 @@ def open_register_session(db: Session, payload: RegisterSessionOpen, user_id: in
             approved_by_user_id=user_id,
             source_order_id=None,
             create_outbox=True,
+            commit=False,
         )
+    # Do not leave an open session without its opening float, audit or outbox.
+    db.commit()
     row = db.query(RegisterSession).options(selectinload(RegisterSession.register), selectinload(RegisterSession.opened_by), selectinload(RegisterSession.orders)).filter(RegisterSession.id == row.id).first()
     return _serialize_session(row)
 
@@ -1281,7 +1283,7 @@ def get_register_session(db: Session, session_id: int):
     return data
 
 
-def close_register_session(db: Session, session_id: int, payload: RegisterSessionClose, user_id: int | None = None):
+def close_register_session(db: Session, session_id: int, payload: RegisterSessionClose, user_id: int | None = None, *, commit: bool = True):
     row = db.query(RegisterSession).options(selectinload(RegisterSession.register)).filter(RegisterSession.id == int(session_id)).with_for_update().first()
     if not row:
         raise ValueError('Register session not found.')
@@ -1289,9 +1291,9 @@ def close_register_session(db: Session, session_id: int, payload: RegisterSessio
         raise ValueError('Only open sessions can be closed.')
     if not row.register or not row.register.accounting_financial_account_id:
         raise ValueError('This register is missing its Accounting drawer mapping. Ask a manager to map the register before closing the shift.')
-    expected = compute_session_expected_cash(db, row.id)
+    expected = compute_session_expected_cash(db, row.id, commit=False)
     close_mode = (payload.close_mode or ('blind' if payload.blind_close else 'verified')).strip().lower()
-    row.closing_actual_cash = _money(payload.closing_actual_cash)
+    row.closing_actual_cash = _validated_money(payload.closing_actual_cash, 'Closing actual cash')
     row.variance_amount = _money(row.closing_actual_cash - expected)
     row.close_mode = close_mode
     row.blind_close = bool(payload.blind_close or close_mode == 'blind')
@@ -1313,8 +1315,7 @@ def close_register_session(db: Session, session_id: int, payload: RegisterSessio
     row.closed_at_text = now_iso()
     row.status = 'closed'
     db.add(row)
-    db.commit()
-    db.refresh(row)
+    db.flush()
     create_outbox_event(
         db,
         aggregate_type='register_session',
@@ -1337,8 +1338,11 @@ def close_register_session(db: Session, session_id: int, payload: RegisterSessio
             'register_accounting_financial_account_id': row.register.accounting_financial_account_id,
         },
     )
-    db.commit()
-    _audit_event(db, action='session.closed', entity_type='register_session', entity_id=row.id, user_id=user_id, details={'session_id': row.id, 'session_code': row.session_code, 'variance_amount': row.variance_amount, 'close_mode': close_mode, 'variance_note': row.variance_note, 'sign_off_name': row.close_sign_off_name})
+    _audit_event(db, action='session.closed', entity_type='register_session', entity_id=row.id, user_id=user_id, details={'session_id': row.id, 'session_code': row.session_code, 'variance_amount': row.variance_amount, 'close_mode': close_mode, 'variance_note': row.variance_note, 'sign_off_name': row.close_sign_off_name}, commit=False)
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     row = db.query(RegisterSession).options(selectinload(RegisterSession.register), selectinload(RegisterSession.opened_by), selectinload(RegisterSession.closed_by), selectinload(RegisterSession.orders)).filter(RegisterSession.id == row.id).first()
     return _serialize_session(row)
 
@@ -2510,6 +2514,50 @@ def void_order(db: Session, order_id: int, reason: str, user_id: int | None = No
     return result
 
 
+
+def _manual_cash_event_uuid(request_id: str | None) -> str:
+    if not request_id:
+        return str(uuid.uuid4())
+    try:
+        request_uuid = uuid.UUID(str(request_id))
+        if request_uuid.version != 4 or str(request_uuid) != str(request_id).lower():
+            raise ValueError
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise ValueError('Cash movement client_request_id must be a canonical UUIDv4.') from exc
+    # Reuse the existing unique cash_event_uuid column to prevent duplicate
+    # manual entries without changing historical records or requiring a migration.
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f'hidden-oasis-pos/manual-cash/{request_uuid}'))
+
+
+def _matching_manual_cash_replay(
+    stored: CashMovement,
+    *,
+    session_id: int,
+    direction: str,
+    movement_type: str,
+    amount: Decimal,
+    category: str | None,
+    note: str | None,
+    reference_no: str | None,
+    from_account_id: int | None,
+    to_account_id: int | None,
+    destination_register_id: int | None,
+) -> bool:
+    return (
+        stored.source_order_id is None
+        and stored.register_session_id == session_id
+        and stored.direction == direction
+        and stored.movement_type == movement_type
+        and _money(stored.amount) == amount
+        and (stored.category or '') == (category or '')
+        and (stored.note or '') == (note or '')
+        and (stored.reference_no or '') == (reference_no or '')
+        and stored.accounting_financial_account_id == from_account_id
+        and stored.to_accounting_financial_account_id == to_account_id
+        and stored.destination_register_id == destination_register_id
+    )
+
+
 def create_cash_movement(
     db: Session,
     payload: CashMovementCreate,
@@ -2518,13 +2566,14 @@ def create_cash_movement(
     create_outbox: bool = True,
     commit: bool = True,
 ):
-    session = db.query(RegisterSession).options(selectinload(RegisterSession.register)).filter(RegisterSession.id == int(payload.register_session_id)).first()
+    # Serialize all drawer writes against session close and each other.
+    session = db.query(RegisterSession).options(selectinload(RegisterSession.register)).filter(
+        RegisterSession.id == int(payload.register_session_id)
+    ).with_for_update().first()
     if not session:
         raise ValueError('Register session not found.')
-    if session.status != 'open' and not source_order_id:
-        raise ValueError('Manual cash movement requires an open register session.')
     explicit_approver = payload.approved_by_user_id or approved_by_user_id
-    amount = _money(payload.amount)
+    amount = _validated_money(payload.amount, 'Cash movement amount')
     if amount <= 0:
         raise ValueError('Cash movement amount must be greater than zero.')
     direction = str(payload.direction or '').strip().lower()
@@ -2532,6 +2581,10 @@ def create_cash_movement(
         raise ValueError('direction must be in or out.')
 
     movement_type = str(payload.movement_type or '').strip().lower()
+    # Refund/void reversals may be recorded after a shift closes; a new cash
+    # sale or manual drawer movement may not be posted to a closed shift.
+    if session.status != 'open' and (not source_order_id or movement_type == 'cash_sale'):
+        raise ValueError('Cash movements require an open register session.')
     transfer_types = {'safe_drop', 'bank_deposit', 'drawer_transfer'}
     transfer_requires_approval = movement_type in transfer_types
     requires_approval = bool(payload.requires_approval or transfer_requires_approval)
@@ -2554,8 +2607,31 @@ def create_cash_movement(
     if movement_type == 'drawer_transfer' and not destination_register and not payload.destination_register_id:
         raise ValueError('Drawer transfers require a destination register.')
 
+    cash_event_uuid = _manual_cash_event_uuid(
+        payload.client_request_id if source_order_id is None else None
+    )
+    if source_order_id is None and payload.client_request_id:
+        existing = db.query(CashMovement).filter(CashMovement.cash_event_uuid == cash_event_uuid).first()
+        if existing:
+            if not _matching_manual_cash_replay(
+                existing,
+                session_id=session.id, direction=direction, movement_type=movement_type,
+                amount=amount, category=payload.category, note=payload.note,
+                reference_no=payload.reference_no, from_account_id=from_account_id,
+                to_account_id=to_account_id,
+                destination_register_id=payload.destination_register_id,
+            ):
+                raise ValueError('Cash movement client_request_id was already used for a different operation.')
+            existing = db.query(CashMovement).options(
+                selectinload(CashMovement.register),
+                selectinload(CashMovement.destination_register),
+                selectinload(CashMovement.source_order),
+                selectinload(CashMovement.approved_by),
+            ).filter(CashMovement.id == existing.id).first()
+            return _serialize_cash_movement(existing)
+
     row = CashMovement(
-        cash_event_uuid=str(uuid.uuid4()),
+        cash_event_uuid=cash_event_uuid,
         register_session_id=session.id,
         register_id=session.register_id,
         source_order_id=source_order_id,
