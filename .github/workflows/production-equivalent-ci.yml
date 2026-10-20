@@ -275,6 +275,7 @@ jobs:
       E2E_OWNER_PASSWORD: CiOwnerPassword-2026!
       E2E_CASHIER_USERNAME: ci-cashier
       E2E_CASHIER_PASSWORD: CiCashierPassword-2026!
+      E2E_FINANCIAL_FIXTURES: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -301,6 +302,7 @@ jobs:
           alembic upgrade head
           ADMIN_USERNAME=ci-owner ADMIN_FULL_NAME='CI Owner' ADMIN_ROLE=owner ADMIN_PASSWORD='CiOwnerPassword-2026!' python scripts/create_admin.py
           ADMIN_USERNAME=ci-cashier ADMIN_FULL_NAME='CI Cashier' ADMIN_ROLE=cashier ADMIN_PASSWORD='CiCashierPassword-2026!' python scripts/create_admin.py
+          PYTHONPATH=. python scripts/seed_financial_browser_e2e.py
       - name: Build frontend
         working-directory: frontend
         run: npm run build
