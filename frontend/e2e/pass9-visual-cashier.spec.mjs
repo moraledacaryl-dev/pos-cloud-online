@@ -50,10 +50,14 @@ async function seedPaidVisualOrder(page, registerCode) {
   expect(register).toBeTruthy();
   expect(catalog).toBeTruthy();
   const date = new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
-  const session = await api(page, 'POST', '/register-sessions/open', {
-    register_id: register.id, business_date: date,
-    shift_name: 'CI Visual Audit', opening_float: '200.00',
-  });
+  // A failed assertion may cause Playwright to retry this test. Reuse the
+  // isolated drawer session rather than leaving the retry blocked on opening.
+  const openSessions = await api(page, 'GET', '/register-sessions?status=open&register_id=' + register.id);
+  const session = openSessions.find((row) => row.register_id === register.id) ||
+    await api(page, 'POST', '/register-sessions/open', {
+      register_id: register.id, business_date: date,
+      shift_name: 'CI Visual Audit', opening_float: '200.00',
+    });
   const guest = 'Visual Review ' + randomUUID().slice(0, 8);
   const order = await api(page, 'POST', '/orders', {
     register_session_id: session.id,
