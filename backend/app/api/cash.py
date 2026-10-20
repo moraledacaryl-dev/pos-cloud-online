@@ -30,7 +30,7 @@ def _approval_type(movement_type: str) -> str:
     return 'cash_paid_out' if movement_type == 'paid_out' else 'cash_adjustment'
 
 
-def _correct_cash_audit_attribution(db: Session, movement_id: int, current_user, grant: dict) -> None:
+def _correct_cash_audit_attribution(db: Session, movement_id: int, current_user, grant: dict, *, commit: bool = True) -> None:
     row = db.query(AuditLog).filter(
         AuditLog.action == 'cash_movement.created',
         AuditLog.entity_type == 'cash_movement',
@@ -52,10 +52,13 @@ def _correct_cash_audit_attribution(db: Session, movement_id: int, current_user,
     row.actor_username = current_user.username
     row.details_json = json.dumps(details, ensure_ascii=False, sort_keys=True)
     db.add(row)
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
 
 
-def _publish_cash_movement(db: Session, result: dict, payload: CashMovementCreate, current_user) -> None:
+def _publish_cash_movement(db: Session, result: dict, payload: CashMovementCreate, current_user, *, commit: bool = True) -> None:
     movement_id = result.get('id')
     if movement_id is None:
         return
@@ -70,13 +73,14 @@ def _publish_cash_movement(db: Session, result: dict, payload: CashMovementCreat
         payload={
             'movement_id': movement_id,
             'movement_type': movement_type,
-            'session_id': getattr(payload, 'session_id', None),
+            'session_id': payload.register_session_id,
             'category': getattr(payload, 'category', None),
             'requires_approval': movement_type in SENSITIVE_CASH_MOVEMENTS or bool(payload.requires_approval),
         },
         subject_type='cash_movement',
         subject_id=movement_id,
         external_user_id=getattr(current_user, 'id', None),
+        commit=commit,
     )
 
 
@@ -93,8 +97,12 @@ def add_cash_movement(payload: CashMovementCreate, db: Session = Depends(get_db)
         movement_type = str(payload.movement_type or '').strip().lower()
         requires_approval = movement_type in SENSITIVE_CASH_MOVEMENTS or bool(payload.requires_approval)
         if not requires_approval:
-            result = create_cash_movement(db, payload, approved_by_user_id=getattr(current_user, 'id', None))
-            _publish_cash_movement(db, result, payload, current_user)
+            result = create_cash_movement(
+                db, payload, approved_by_user_id=getattr(current_user, 'id', None),
+                commit=False,
+            )
+            _publish_cash_movement(db, result, payload, current_user, commit=False)
+            db.commit()
             return result
 
         with consume_protected_approval(
@@ -107,10 +115,19 @@ def add_cash_movement(payload: CashMovementCreate, db: Session = Depends(get_db)
             requested_reason=payload.note or payload.category or movement_type,
         ) as grant:
             payload.requires_approval = True
-            result = create_cash_movement(db, payload, approved_by_user_id=grant['approved_by_user_id'])
-        _correct_cash_audit_attribution(db, int(result['id']), current_user, grant)
-        _publish_cash_movement(db, result, payload, current_user)
+            result = create_cash_movement(
+                db, payload, approved_by_user_id=grant['approved_by_user_id'],
+                commit=False,
+            )
+            _correct_cash_audit_attribution(
+                db, int(result['id']), current_user, grant, commit=False,
+            )
+            _publish_cash_movement(db, result, payload, current_user, commit=False)
+        db.commit()
         return result
     except ValueError as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        db.rollback()
+        raise
