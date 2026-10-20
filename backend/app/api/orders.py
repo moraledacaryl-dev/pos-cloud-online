@@ -139,8 +139,8 @@ def settle_order(order_id: int, payload: OrderPayPayload, db: Session = Depends(
         _assert_order_action(db, order_id, 'pay')
         order_snapshot = get_order(db, order_id)
         validate_payment_control(order_snapshot, payload.payments)
-        result = pay_order(db, order_id, payload, user_id=getattr(current_user, 'id', None))
-        enqueue_inventory_event(db, result, 'sale_completed')
+        result = pay_order(db, order_id, payload, user_id=getattr(current_user, 'id', None), commit=False)
+        enqueue_inventory_event(db, result, 'sale_completed', commit=False)
         enqueue_operations_event(
             db,
             'order.finalized',
@@ -151,7 +151,9 @@ def settle_order(order_id: int, payload: OrderPayPayload, db: Session = Depends(
             subject_type='order',
             subject_id=order_id,
             external_user_id=getattr(current_user, 'id', None),
+            commit=False,
         )
+        db.commit()
         return result
     except ValueError as e:
         db.rollback()
