@@ -213,6 +213,20 @@ for (const scenario of [
           );
           expect(summaryColumns, 'Mobile KPI rail should show three metrics per row').toBe(3);
         }
+        if (scenario.label === 'desktop') {
+          // Capture the actual generated invoice popup, not a hand-drawn mockup.
+          // CI has no BIR registration; this must clearly say provisional.
+          await page.context().addInitScript(() => { window.print = () => {}; });
+          const popupPromise = page.waitForEvent('popup');
+          await page.getByRole('button', { name: 'Print / Reprint Sales Invoice' }).click();
+          const receiptPage = await popupPromise;
+          await expect(receiptPage.locator('.document-label')).toContainText('PROVISIONAL SALES RECORD');
+          await receiptPage.screenshot({
+            path: testInfo.outputPath(prefix + 'receipt-provisional--full.png'),
+            fullPage: true, animations: 'disabled',
+          });
+          await receiptPage.close();
+        }
         await page.getByRole('button', { name: 'Process Refund' }).click();
         await expect(page.getByRole('dialog', { name: 'Order action dialog' })).toBeVisible();
         await record(page, testInfo, captures, prefix + 'orders-refund-dialog');
