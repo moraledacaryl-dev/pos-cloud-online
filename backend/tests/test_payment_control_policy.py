@@ -69,8 +69,10 @@ def test_sensitive_cash_out_requires_controls():
         validate_cash_movement_control(cash('out', 'paid_out', 100))
     with pytest.raises(ValueError, match='reference number'):
         validate_cash_movement_control(cash('out', 'paid_out', 100, note='Petty cash'))
-    with pytest.raises(ValueError, match='manager approval'):
-        validate_cash_movement_control(cash('out', 'paid_out', 100, note='Petty cash', reference='PC-1'))
+    # The policy validates the cash fields; the API enforces the manager grant
+    # from an authenticated server-side approval instead of a client user ID.
+    valid = validate_cash_movement_control(cash('out', 'paid_out', 100, note='Petty cash', reference='PC-1'))
+    assert valid['ok'] is True
 
 
 def test_sensitive_cash_out_is_valid_with_approval():
