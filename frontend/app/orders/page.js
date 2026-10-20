@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createRefund, fetchOrders, fetchReceiptProfile, fetchRegisterSessions, voidOrder } from '../../lib/api';
 import { printReceipt, printRefundReceipt } from '../../lib/receipt';
 import ManagerOverrideModal from '../../components/ManagerOverrideModal';
@@ -47,6 +47,7 @@ export default function OrdersPage() {
   const [sessions, setSessions] = useState([]);
   const [filters, setFilters] = useState({ status: '', session_id: '', q: '', business_date: '', limit: 200 });
   const [selectedOrder, setSelectedOrder] = useState(null);
+  const detailRef = useRef(null);
   const [voidReason, setVoidReason] = useState('');
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
@@ -105,6 +106,18 @@ export default function OrdersPage() {
   function remainingLineQty(line) {
     if (!line) return 0;
     return Math.max(Number(line.quantity || 0) - Number(refundableMap[line.id] || 0), 0);
+  }
+
+  function showOrderDetails(order) {
+    setSelectedOrder(order);
+    if (window.matchMedia('(max-width: 760px)').matches) {
+      // On narrow screens the detail panel follows the list, so selecting an
+      // order without moving the viewport looks like nothing happened.
+      window.requestAnimationFrame(() => {
+        detailRef.current?.scrollIntoView({ behavior: 'auto', block: 'start' });
+        detailRef.current?.focus({ preventScroll: true });
+      });
+    }
   }
 
   async function doVoid(managerUser) {
@@ -207,8 +220,8 @@ export default function OrdersPage() {
             </thead>
             <tbody>
               {orders.map((row) => (
-                <tr key={row.id} className={selectedOrder?.id === row.id ? 'table-row-active' : ''} onClick={() => setSelectedOrder(row)} style={{ cursor: 'pointer' }}>
-                  <td><strong>{row.order_no}</strong><div className="small muted">{row.created_at ? new Date(row.created_at).toLocaleString() : row.business_date}</div></td>
+                <tr key={row.id} className={selectedOrder?.id === row.id ? 'table-row-active' : ''} onClick={() => showOrderDetails(row)} style={{ cursor: 'pointer' }}>
+                  <td><button type="button" className="orders-review-select" aria-label={`View details for order ${row.order_no}`} aria-pressed={selectedOrder?.id === row.id} onClick={(event) => { event.stopPropagation(); showOrderDetails(row); }}>{row.order_no}</button><div className="small muted">{row.created_at ? new Date(row.created_at).toLocaleString() : row.business_date}</div></td>
                   <td>{row.register_name || '-'}</td>
                   <td>
                     <span className={`badge ${orderDisplayState(row).tone}`}>{orderDisplayState(row).label}</span>
@@ -225,7 +238,7 @@ export default function OrdersPage() {
           </table>
         </section>
 
-        <section className="section orders-review-detail">
+        <section ref={detailRef} tabIndex={-1} className="section orders-review-detail" aria-label="Selected order details">
           <div className="toolbar">
             <h2>Order Detail</h2>
             {selectedOrder && selectedOrder.status !== 'paid' && selectedOrder.status !== 'voided' && <Link href={`/pos?order_id=${selectedOrder.id}`} className="secondary">Open in POS</Link>}
