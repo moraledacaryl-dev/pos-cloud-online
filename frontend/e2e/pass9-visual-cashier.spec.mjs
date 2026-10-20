@@ -117,6 +117,21 @@ async function record(page, testInfo, captures, label) {
       viewportHeight,
       documentWidth: html.scrollWidth,
       horizontalOverflow: Math.max(0, html.scrollWidth - viewportWidth),
+      ordersSummaryGrid: (() => {
+        const grid = document.querySelector('.orders-review-metrics');
+        if (!grid) return null;
+        return {
+          className: grid.className,
+          inlineStyle: grid.getAttribute('style'),
+          columns: getComputedStyle(grid).gridTemplateColumns,
+          cardCount: grid.children.length,
+        };
+      })(),
+      approvalCheckbox: (() => {
+        const input = document.querySelector('.field-inline > input[type="checkbox"]');
+        const b = input?.getBoundingClientRect();
+        return b ? { width: Math.round(b.width), height: Math.round(b.height) } : null;
+      })(),
       dialog: rect ? {
         left: Math.round(rect.left),
         right: Math.round(rect.right),
@@ -188,6 +203,12 @@ for (const scenario of [
         await page.getByRole('row').filter({ hasText: guest }).first().click();
         await expect(page.getByRole('button', { name: 'Process Refund' })).toBeVisible();
         await record(page, testInfo, captures, prefix + 'orders-paid-details');
+        if (scenario.label === 'mobile') {
+          const summaryColumns = await page.locator('.orders-review-metrics').evaluate(
+            (node) => getComputedStyle(node).gridTemplateColumns.split(' ').filter(Boolean).length,
+          );
+          expect(summaryColumns, 'Mobile KPI rail should show three metrics per row').toBe(3);
+        }
         await page.getByRole('button', { name: 'Process Refund' }).click();
         await expect(page.getByRole('dialog', { name: 'Order action dialog' })).toBeVisible();
         await record(page, testInfo, captures, prefix + 'orders-refund-dialog');
@@ -200,6 +221,8 @@ for (const scenario of [
         await page.getByRole('button', { name: /paid out/i }).first().click();
         await expect(page.getByText(/Estimated drawer balance:/)).toBeVisible();
         await record(page, testInfo, captures, prefix + 'cash-paid-out-form');
+        const approvalBox = await page.locator('.field-inline > input[type="checkbox"]').first().boundingBox();
+        expect(approvalBox?.width, 'Manager approval checkbox should not be a text-input-width tile').toBeLessThanOrEqual(22);
       }
 
       if (route === '/sessions') {
