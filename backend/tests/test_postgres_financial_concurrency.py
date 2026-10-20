@@ -8,9 +8,9 @@ if os.getenv('RUN_POSTGRES_INTEGRATION') != '1':
     pytest.skip('PostgreSQL integration test is enabled only in the production-equivalent CI job.', allow_module_level=True)
 
 from app.db.database import SessionLocal, engine
-from app.models.entities import CatalogItem, Outlet, Register, RegisterSession
-from app.schemas.common import OrderCreate, OrderPayPayload
-from app.services.pos_service import create_order, pay_order
+from app.models.entities import CashMovement, CatalogItem, Outlet, Register, RegisterSession
+from app.schemas.common import CashMovementCreate, OrderCreate, OrderPayPayload
+from app.services.pos_service import create_cash_movement, create_order, pay_order
 
 
 def _run_concurrently(function):
@@ -116,3 +116,49 @@ def test_postgres_row_lock_prevents_double_payment():
     outcomes = _run_concurrently(lambda db: f"ok:{pay_order(db, order_id, payload)['status']}")
     assert outcomes.count('ok:paid') == 1, outcomes
     assert sum('cannot be paid' in outcome for outcome in outcomes) == 1, outcomes
+
+
+def test_postgres_concurrent_manual_cash_retries_record_one_drawer_movement():
+    assert engine.dialect.name == 'postgresql'
+    suffix = uuid.uuid4().hex[:10]
+    with SessionLocal() as db:
+        outlet = Outlet(code=f'cash-out-{suffix}', name=f'Cash Outlet {suffix}', is_active=True)
+        db.add(outlet)
+        db.flush()
+        register = Register(
+            outlet_id=outlet.id, code=f'cash-reg-{suffix}',
+            name=f'Cash Register {suffix}', is_active=True,
+            accounting_financial_account_id=1,
+        )
+        db.add(register)
+        db.flush()
+        session = RegisterSession(
+            session_code=f'CASH-{suffix}', register_id=register.id,
+            business_date='2026-09-07', status='open',
+        )
+        db.add(session)
+        db.commit()
+        session_id = session.id
+
+    payload = CashMovementCreate(
+        register_session_id=session_id, direction='in',
+        movement_type='paid_in', amount=25,
+        category='Change fund', reference_no=f'FUND-{suffix}',
+        client_request_id=str(uuid.uuid4()),
+    )
+
+    outcomes = _run_concurrently(
+        lambda db: f"ok:{create_cash_movement(db, payload)['id']}",
+    )
+    assert len(outcomes) == 2, outcomes
+    assert all(outcome.startswith('ok:') for outcome in outcomes), outcomes
+    assert outcomes[0] == outcomes[1], outcomes
+
+    with SessionLocal() as db:
+        rows = db.query(CashMovement).filter(
+            CashMovement.register_session_id == session_id,
+        ).all()
+        assert len(rows) == 1
+        assert rows[0].amount == 25
+        db.refresh(db.get(RegisterSession, session_id))
+        assert db.get(RegisterSession, session_id).closing_expected_cash == 25
