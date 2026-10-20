@@ -42,6 +42,7 @@ import {
   updateLineWithDiscount,
 } from '../../lib/terminalProfiles';
 import { resolveConditionalBasePrice } from '../../lib/conditionalPricing.mjs';
+import { buildOrderWritePayload, buildPaymentWritePayload } from '../../lib/posPayloads.mjs';
 import { loadLastReceipt, printCloseSessionPacket, printReceipt, saveLastReceipt } from '../../lib/receipt';
 import { listOfflineDrafts, removeOfflineDraft, saveOfflineDraft } from '../../lib/offlineDrafts';
 import { useCurrentUser } from '../../lib/useCurrentUser';
@@ -691,7 +692,12 @@ export default function PosPage() {
     event.preventDefault(); setError(''); setNotice('');
     try { await openRegisterSession({ ...openSessionForm, register_id: Number(openSessionForm.register_id), opening_float: num(openSessionForm.opening_float) }); setNotice('Register session opened.'); await loadAll({ silent: true }); } catch (e) { setError(e.message || 'Failed to open session.'); }
   }
-  function buildOrderPayload() { return { register_session_id: Number(sessionId), approved_by_user_id: discountApprovalUserId || null, order_type: orderType, source_channel: 'pos', guest_name: guestName || null, service_area: activeArea || null, table_label: tableLabel || null, seat_count: seatCount ? Number(seatCount) : null, note: note || null, lines: cart.map((row) => ({ catalog_item_id: row.catalog_item_id, quantity: row.quantity, unit_price: row.price, discount_amount: num(row.discount_amount), modifiers: (row.metadata?.groups || []).map((group) => ({ id: group.id, labels: (group.selections || []).map((option) => option.label) })), note: row.note || null })) }; }
+  function buildOrderPayload() {
+    return buildOrderWritePayload({
+      sessionId, discountApprovalUserId, orderType, guestName, activeArea,
+      tableLabel, seatCount, note, cart,
+    });
+  }
   function likelyConnectionError(err) {
     return !browserOnline || /failed to fetch|network|load failed|connection|offline|timeout/i.test(String(err?.message || ''));
   }
@@ -777,7 +783,9 @@ export default function PosPage() {
     if (Math.abs(totalApplied - cartTotals.total) > 0.01) return setError('Applied payment must equal cart total.');
     try {
       const order = await saveOrUpdateOrder();
-      const settled = await payOrder(order.id, { payments: payments.map((row) => ({ tender_type: row.tender_type, amount_applied: num(row.amount_applied), amount_received: row.tender_type === 'room_charge' ? 0 : num(row.amount_received || row.amount_applied), reference_no: row.reference_no || null, accounting_financial_account_id: row.accounting_financial_account_id ? Number(row.accounting_financial_account_id) : null, room_charge_service_type: row.tender_type === 'room_charge' ? (row.room_charge_service_type || 'room_service') : null, room_charge_booking_date: row.tender_type === 'room_charge' ? (row.room_charge_booking_date || currentSession?.business_date || todayISO()) : null, room_charge_service_date: row.tender_type === 'room_charge' ? (row.room_charge_service_date || currentSession?.business_date || todayISO()) : null, room_charge_room_number: row.tender_type === 'room_charge' ? (row.room_charge_room_number || null) : null, room_charge_guest_label: row.tender_type === 'room_charge' ? (row.room_charge_guest_label || null) : null, room_charge_beds24_booking_id: row.tender_type === 'room_charge' ? (row.room_charge_beds24_booking_id || null) : null, room_charge_order_source: row.tender_type === 'room_charge' ? (row.room_charge_order_source || (orderType === 'room_service' ? 'room_service' : 'restaurant')) : null, room_charge_note: row.tender_type === 'room_charge' ? (row.room_charge_note || null) : null, room_charge_bill_to: row.tender_type === 'room_charge' ? (row.room_charge_bill_to || null) : null, room_charge_booking_snapshot_id: row.tender_type === 'room_charge' && row.room_charge_booking_snapshot_id ? Number(row.room_charge_booking_snapshot_id) : null })), note });
+      const settled = await payOrder(order.id, buildPaymentWritePayload({
+        payments, note, orderType, currentSession,
+      }));
       const receipt = { ...settled, receipt_profile: receiptProfile };
       setReceiptPreview(receipt); saveLastReceipt(receipt, { ownerId: user?.id, registerId: currentSession?.register_id }); setLastReceipt(receipt); setPaymentOpen(false); setNotice(settled.status === 'folio_pending' ? `Order ${order.order_no} finalized to pending folio.` : `Order ${order.order_no} paid.`); clearCart(); setTerminalScreen('spaces'); await loadAll({ silent: true });
     } catch (e) { if (likelyConnectionError(e)) { saveCurrentOfflineDraft('payment-connection-failed'); return setError('Connection failed before payment could be confirmed. The cart was saved locally; verify Orders before taking payment again.'); } setError(e.message || 'Failed to pay order.'); }
