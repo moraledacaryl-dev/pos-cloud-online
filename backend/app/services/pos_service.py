@@ -2674,6 +2674,7 @@ def create_cash_movement(
                 payload={
                     'id': row.id,
                     'cash_event_uuid': row.cash_event_uuid,
+                    'integration_identity_version': 2,
                     'movement_type': movement_type,
                     'transfer_date': row.event_date,
                     'from_account_id': from_account_id,
@@ -2693,7 +2694,17 @@ def create_cash_movement(
                 aggregate_type='cash_movement',
                 aggregate_id=row.id,
                 event_type='cash_movement.created',
-                payload=_serialize_cash_movement(db.query(CashMovement).options(selectinload(CashMovement.register), selectinload(CashMovement.destination_register), selectinload(CashMovement.source_order), selectinload(CashMovement.approved_by)).filter(CashMovement.id == row.id).first()),
+                payload={
+                    **_serialize_cash_movement(
+                        db.query(CashMovement).options(
+                            selectinload(CashMovement.register),
+                            selectinload(CashMovement.destination_register),
+                            selectinload(CashMovement.source_order),
+                            selectinload(CashMovement.approved_by),
+                        ).filter(CashMovement.id == row.id).first()
+                    ),
+                    'integration_identity_version': 2,
+                },
                 idempotency_key=f'cash_movement.created:{row.id}',
             )
     if commit:
