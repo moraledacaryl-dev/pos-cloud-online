@@ -246,6 +246,19 @@ def publish_order_kds_refresh(order: dict):
     )
 
 
+def publish_void_kds_refresh(order: dict):
+    """Notify kitchen clients after the void and its cash reversals commit."""
+    stations = list(dict.fromkeys(
+        normalize_kds_station(line.get('prep_station'))
+        for line in (order.get('lines') or [])
+    ))
+    _publish_kds_refresh(
+        stations,
+        reason='ticket_cancelled',
+        payload={'order_id': order['id'], 'order_no': order.get('order_no'), 'status': order.get('status')},
+    )
+
+
 def publish_refund_kds_refresh(db: Session, order_id: int, refund_id: int | str):
     """Notify kitchen clients after the calling refund transaction commits."""
     order = db.get(PosOrder, int(order_id))
@@ -2343,7 +2356,7 @@ def create_refund(db: Session, order_id: int, payload: RefundCreate, cashier_use
     return _serialize_refund(refund_row, include_details=True)
 
 
-def void_order(db: Session, order_id: int, reason: str, user_id: int | None = None, approved_by_user_id: int | None = None):
+def void_order(db: Session, order_id: int, reason: str, user_id: int | None = None, approved_by_user_id: int | None = None, *, commit: bool = True):
     row = db.query(PosOrder).options(selectinload(PosOrder.payments), selectinload(PosOrder.register), selectinload(PosOrder.lines), selectinload(PosOrder.cashier)).filter(PosOrder.id == int(order_id)).with_for_update().first()
     if not row:
         raise ValueError('Order not found.')
@@ -2365,8 +2378,7 @@ def void_order(db: Session, order_id: int, reason: str, user_id: int | None = No
         },
     )
     _audit_event(db, action='order.voided', entity_type='order', entity_id=row.id, user_id=user_id, details={'order_id': row.id, 'order_no': row.order_no, 'reason': reason, 'approval_id': approval.get('id') if approval else None}, commit=False)
-    db.commit()
-    db.refresh(row)
+    db.flush()
     for payment in row.payments:
         if payment.is_cash and payment.amount_applied > 0:
             create_cash_movement(
@@ -2384,9 +2396,16 @@ def void_order(db: Session, order_id: int, reason: str, user_id: int | None = No
                 approved_by_user_id=user_id,
                 source_order_id=row.id,
                 create_outbox=True,
+                commit=False,
             )
-    row = db.query(PosOrder).options(selectinload(PosOrder.lines), selectinload(PosOrder.payments), selectinload(PosOrder.register), selectinload(PosOrder.cashier)).filter(PosOrder.id == row.id).first()
-    return _serialize_order(row, include_lines=True, db=db)
+    if commit:
+        db.commit()
+    else:
+        db.flush()
+    result = _serialize_order(row, include_lines=True, db=db)
+    if commit:
+        publish_void_kds_refresh(result)
+    return result
 
 
 def create_cash_movement(
