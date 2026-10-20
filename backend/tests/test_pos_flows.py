@@ -809,6 +809,7 @@ def test_atomic_checkout_commits_once_then_notifies_kitchen_and_blocks_replay(mo
     from types import SimpleNamespace
 
     from fastapi import HTTPException
+
     import app.api.orders as orders_api
 
     db = make_session()
