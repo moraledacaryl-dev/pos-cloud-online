@@ -35,7 +35,9 @@ const LEGACY_LAST_RECEIPT_KEY = 'pos_last_receipt';
 const LAST_RECEIPT_TTL_MS = 12 * 60 * 60 * 1000;
 
 export function saveLastReceipt(receipt, { ownerId = null, registerId = null } = {}) {
-  if (typeof window === 'undefined' || !receipt) return;
+  if (typeof window === 'undefined' || !receipt) return false;
+  // Shared cash registers must not persist unscoped customer receipts.
+  if (ownerId == null || registerId == null) return false;
   const stored = {
     schema_version: 2,
     saved_at: new Date().toISOString(),
@@ -44,20 +46,29 @@ export function saveLastReceipt(receipt, { ownerId = null, registerId = null } =
     register_id: registerId,
     receipt,
   };
-  localStorage.setItem(LAST_RECEIPT_KEY, JSON.stringify(stored));
-  localStorage.removeItem(LEGACY_LAST_RECEIPT_KEY);
+  try {
+    window.localStorage.setItem(LAST_RECEIPT_KEY, JSON.stringify(stored));
+    window.localStorage.removeItem(LEGACY_LAST_RECEIPT_KEY);
+    return true;
+  } catch {
+    // Payment is already committed at this point. Quota/private-mode storage
+    // failures must not turn a SUCCESSFUL checkout into a misleading error.
+    return false;
+  }
 }
 
 export function loadLastReceipt({ ownerId = null, registerId = null } = {}) {
-  if (typeof window === 'undefined') return null;
+  if (typeof window === 'undefined' || ownerId == null || registerId == null) return null;
   try {
-    const stored = JSON.parse(localStorage.getItem(LAST_RECEIPT_KEY) || 'null');
-    if (!stored?.receipt || Date.parse(stored.expires_at || '') <= Date.now()) {
+    const stored = JSON.parse(window.localStorage.getItem(LAST_RECEIPT_KEY) || 'null');
+    const expiry = Date.parse(stored?.expires_at || '');
+    if (!stored?.receipt || !Number.isFinite(expiry) || expiry <= Date.now()) {
       clearLastReceipt();
       return null;
     }
-    if (ownerId != null && stored.owner_id != null && String(ownerId) !== String(stored.owner_id)) return null;
-    if (registerId != null && stored.register_id != null && String(registerId) !== String(stored.register_id)) return null;
+    // Old/unscoped receipts are never reprinted by another operator or drawer.
+    if (String(ownerId) !== String(stored.owner_id)) return null;
+    if (String(registerId) !== String(stored.register_id)) return null;
     return stored.receipt;
   } catch {
     clearLastReceipt();
@@ -67,8 +78,10 @@ export function loadLastReceipt({ ownerId = null, registerId = null } = {}) {
 
 export function clearLastReceipt() {
   if (typeof window === 'undefined') return;
-  localStorage.removeItem(LAST_RECEIPT_KEY);
-  localStorage.removeItem(LEGACY_LAST_RECEIPT_KEY);
+  try {
+    window.localStorage.removeItem(LAST_RECEIPT_KEY);
+    window.localStorage.removeItem(LEGACY_LAST_RECEIPT_KEY);
+  } catch { /* private browsing or blocked storage */ }
 }
 
 

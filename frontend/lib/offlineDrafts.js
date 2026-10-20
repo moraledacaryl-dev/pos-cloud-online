@@ -5,15 +5,20 @@ const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
 
 function readRawDrafts() {
   if (typeof window === 'undefined') return [];
-  try {
-    const current = JSON.parse(window.localStorage.getItem(OFFLINE_DRAFTS_KEY) || '[]');
-    const legacy = JSON.parse(window.localStorage.getItem(LEGACY_OFFLINE_DRAFTS_KEY) || '[]');
-    const rows = [...(Array.isArray(current) ? current : []), ...(Array.isArray(legacy) ? legacy : [])];
-    window.localStorage.removeItem(LEGACY_OFFLINE_DRAFTS_KEY);
-    return rows;
-  } catch {
-    return [];
-  }
+  const readList = (key) => {
+    try {
+      const parsed = JSON.parse(window.localStorage.getItem(key) || '[]');
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      // A damaged legacy key must not hide a valid current recovery draft.
+      try { window.localStorage.removeItem(key); } catch { /* unavailable storage */ }
+      return [];
+    }
+  };
+  const current = readList(OFFLINE_DRAFTS_KEY);
+  const legacy = readList(LEGACY_OFFLINE_DRAFTS_KEY);
+  try { window.localStorage.removeItem(LEGACY_OFFLINE_DRAFTS_KEY); } catch { /* unavailable storage */ }
+  return [...current, ...legacy];
 }
 
 function writeRawDrafts(rows) {
@@ -23,9 +28,17 @@ function writeRawDrafts(rows) {
 
 function activeRows(rows) {
   const now = Date.now();
-  return rows.filter((row) => {
-    const expiry = Date.parse(row.expires_at || '');
-    return !Number.isFinite(expiry) || expiry > now;
+  return rows.flatMap((row) => {
+    if (!row || typeof row !== 'object' || Array.isArray(row) || !row.id) return [];
+    const savedAt = Date.parse(row.saved_at || '');
+    const explicitExpiry = Date.parse(row.expires_at || '');
+    // Legacy records without expires_at get 24h from their saved_at. Records
+    // with neither timestamp are discarded rather than retained forever.
+    const expiry = Number.isFinite(explicitExpiry)
+      ? explicitExpiry
+      : Number.isFinite(savedAt) ? savedAt + DEFAULT_TTL_MS : NaN;
+    if (!Number.isFinite(expiry) || expiry <= now) return [];
+    return [{ ...row, expires_at: new Date(expiry).toISOString() }];
   });
 }
 
