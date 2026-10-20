@@ -32,6 +32,7 @@ from app.services.pos_service import (
     pay_order,
     publish_order_kds_refresh,
     publish_refund_kds_refresh,
+    publish_void_kds_refresh,
     set_order_status,
     transfer_order_table,
     update_order,
@@ -200,9 +201,9 @@ def cancel_order(order_id: int, payload: OrderVoidPayload, db: Session = Depends
             entity_id=order_id,
             requested_reason=payload.reason,
         ) as grant:
-            result = void_order(db, order_id, payload.reason, user_id=getattr(current_user, 'id', None), approved_by_user_id=grant['approved_by_user_id'])
+            result = void_order(db, order_id, payload.reason, user_id=getattr(current_user, 'id', None), approved_by_user_id=grant['approved_by_user_id'], commit=False)
         if should_reverse_inventory_for_void(pre_void):
-            enqueue_inventory_event(db, result, 'sale_voided')
+            enqueue_inventory_event(db, result, 'sale_voided', commit=False)
         enqueue_operations_event(
             db,
             'void.review_needed',
@@ -214,11 +215,17 @@ def cancel_order(order_id: int, payload: OrderVoidPayload, db: Session = Depends
             subject_type='order',
             subject_id=order_id,
             external_user_id=getattr(current_user, 'id', None),
+            commit=False,
         )
+        db.commit()
+        publish_void_kds_refresh(result)
         return result
     except ValueError as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        db.rollback()
+        raise
 
 
 @router.get('/{order_id}/refunds')
