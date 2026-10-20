@@ -229,6 +229,23 @@ def _publish_kds_refresh(stations: list[str] | None = None, reason: str = 'refre
         pass
 
 
+def publish_order_kds_refresh(order: dict):
+    """Notify kitchen clients only after the caller commits payment settlement.
+
+    Use the already-serialized order to avoid a post-commit database read
+    that could make a successfully-paid checkout appear unsuccessful.
+    """
+    stations = list(dict.fromkeys(
+        normalize_kds_station(line.get('prep_station'))
+        for line in (order.get('lines') or [])
+    ))
+    _publish_kds_refresh(
+        stations,
+        reason='ticket_finalized',
+        payload={'order_id': order['id'], 'order_no': order.get('order_no'), 'status': order.get('status')},
+    )
+
+
 def publish_refund_kds_refresh(db: Session, order_id: int, refund_id: int | str):
     """Notify kitchen clients after the calling refund transaction commits."""
     order = db.get(PosOrder, int(order_id))
@@ -1938,10 +1955,10 @@ def pay_order(db: Session, order_id: int, payload: OrderPayPayload, user_id: int
         db.commit()
     else:
         db.flush()
-    immediate_paid, folio_pending = _order_settlement_totals(row)
+    result = _serialize_order(row, include_lines=True, db=db)
     if commit:
-        _publish_kds_refresh(_order_stations(row), reason='ticket_finalized', payload={'order_id': row.id, 'order_no': row.order_no, 'status': row.status})
-    return _serialize_order(row, include_lines=True, db=db)
+        publish_order_kds_refresh(result)
+    return result
 
 
 def _refund_no_from_id(refund_id: int, business_date: str):
