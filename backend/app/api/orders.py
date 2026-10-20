@@ -30,6 +30,7 @@ from app.services.pos_service import (
     list_refunds,
     merge_order_table,
     pay_order,
+    publish_order_kds_refresh,
     publish_refund_kds_refresh,
     set_order_status,
     transfer_order_table,
@@ -154,10 +155,15 @@ def settle_order(order_id: int, payload: OrderPayPayload, db: Session = Depends(
             commit=False,
         )
         db.commit()
+        # The kitchen signal must not precede a successful financial commit.
+        publish_order_kds_refresh(result)
         return result
     except ValueError as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        db.rollback()
+        raise
 
 
 @router.post('/{order_id}/transfer-table')
