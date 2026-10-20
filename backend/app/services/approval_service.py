@@ -222,7 +222,7 @@ def approve_grant(db: Session, approval_id: int, approver: User, decision_note: 
         raise ValueError('Approval not found.')
     if row.status != 'pending':
         raise ValueError('Approval is not pending.')
-    if not user_can_manage_approvals(db, approver, commit=False):
+    if not user_can_manage_approvals(db, approver, commit=commit):
         raise ValueError('Approver does not have approvals.manage authority.')
     expires_at = _parse_time(_serialize(row, db).get('expires_at'))
     if expires_at and expires_at <= _utc_now():
@@ -335,7 +335,7 @@ def consume_approval_grant(
         db.flush()
         raise ValueError('Manager approval grant has expired.')
     approver = db.get(User, int(row.approved_by_user_id or 0))
-    if not user_can_manage_approvals(db, approver, commit=commit):
+    if not user_can_manage_approvals(db, approver, commit=False):
         raise ValueError('Approving manager is inactive or no longer has approvals.manage authority.')
 
     consumed_at = _now_text()
@@ -359,6 +359,9 @@ def consume_approval_grant(
         consumed_at_text=consumed_at,
     )
     db.flush()
+    if commit:
+        db.commit()
+        row = _load_row(db, approval_id=row.id)
     return _serialize(row, db)
 
 
