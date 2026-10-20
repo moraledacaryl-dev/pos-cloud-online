@@ -302,7 +302,7 @@ jobs:
           alembic upgrade head
           ADMIN_USERNAME=ci-owner ADMIN_FULL_NAME='CI Owner' ADMIN_ROLE=owner ADMIN_PASSWORD='CiOwnerPassword-2026!' python scripts/create_admin.py
           ADMIN_USERNAME=ci-cashier ADMIN_FULL_NAME='CI Cashier' ADMIN_ROLE=cashier ADMIN_PASSWORD='CiCashierPassword-2026!' python scripts/create_admin.py
-          python scripts/seed_financial_browser_e2e.py
+          PYTHONPATH=. python scripts/seed_financial_browser_e2e.py
       - name: Build frontend
         working-directory: frontend
         run: npm run build
