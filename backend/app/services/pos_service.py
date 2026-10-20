@@ -2624,7 +2624,11 @@ def create_cash_movement(
                 selectinload(CashMovement.source_order),
                 selectinload(CashMovement.approved_by),
             ).filter(CashMovement.id == existing.id).first()
-            return _serialize_cash_movement(existing)
+            result = _serialize_cash_movement(existing)
+            result['_was_replay'] = True
+            if commit:
+                db.commit()
+            return result
 
     # Permit exact replay of an accepted movement even after a shift closes,
     # but never allow a NEW manual entry or sale to hit a closed drawer.
