@@ -1367,6 +1367,50 @@ def create_order(db: Session, payload: OrderCreate, user_id: int | None = None):
 
 
 def _rebuild_order_lines(db: Session, row: PosOrder, line_payloads):
+    """Validate catalog availability under row locks before replacing order lines.
+
+    An item already accepted on this order can be retained or reduced after it
+    sells out, but cannot be added or increased while unavailable. New orders
+    have no accepted quantities, so every unavailable item is rejected.
+    """
+    requested_lines = list(line_payloads or [])
+    accepted_quantities = {}
+    for line in row.lines:
+        item_id = int(line.catalog_item_id)
+        accepted_quantities[item_id] = accepted_quantities.get(item_id, Decimal('0')) + _quantity(line.quantity)
+
+    requested_quantities = {}
+    for item in requested_lines:
+        item_id = getattr(item, 'catalog_item_id', None)
+        if item_id is None and isinstance(item, dict):
+            item_id = item.get('catalog_item_id')
+        item_id = int(item_id or 0)
+        qty_value = getattr(item, 'quantity', None)
+        if qty_value is None and isinstance(item, dict):
+            qty_value = item.get('quantity')
+        qty = _quantity(qty_value)
+        if qty <= 0:
+            raise ValueError('Line quantity must be greater than zero.')
+        requested_quantities[item_id] = requested_quantities.get(item_id, Decimal('0')) + qty
+
+    # Lock in a deterministic order. PostgreSQL catalog updates wait for the
+    # checkout transaction so the stock status cannot change between this
+    # check and the order commit; refresh any catalog data cached in the session.
+    catalogs = db.query(CatalogItem).filter(
+        CatalogItem.id.in_(requested_quantities)
+    ).order_by(CatalogItem.id).with_for_update().populate_existing().all()
+    catalog_by_id = {catalog.id: catalog for catalog in catalogs}
+    for item_id, requested_qty in requested_quantities.items():
+        catalog = catalog_by_id.get(item_id)
+        if not catalog:
+            raise ValueError(f'Catalog item {item_id} not found.')
+        if requested_qty > accepted_quantities.get(item_id, Decimal('0')):
+            label = catalog.display_name or catalog.menu_item_name
+            if not catalog.is_active:
+                raise ValueError(f'{label} is inactive. Refresh the catalog and remove this item.')
+            if not catalog.is_available or catalog.availability_override is False:
+                raise ValueError(f'{label} is sold out. Refresh the catalog and remove this item.')
+
     row.lines.clear()
     db.flush()
     subtotal = Decimal('0')
@@ -1374,29 +1418,22 @@ def _rebuild_order_lines(db: Session, row: PosOrder, line_payloads):
     tax_amount = Decimal('0')
     service_charge = Decimal('0')
     stations = []
-    payload_catalog = []
-    for source_line in line_payloads or []:
-        source_id = getattr(source_line, 'catalog_item_id', None)
-        if source_id is None and isinstance(source_line, dict): source_id = source_line.get('catalog_item_id')
-        source_catalog = db.get(CatalogItem, int(source_id or 0))
-        if source_catalog and source_catalog.is_active and source_catalog.is_available:
-            payload_catalog.append(source_catalog)
+    payload_catalog = [
+        catalog for catalog in catalogs
+        if catalog.is_active and catalog.is_available and catalog.availability_override is not False
+    ]
     from app.services.selling_rules import resolve_unit_price
 
-    has_qualifying_drink = any(c.pricing_role == 'drink' and c.is_active and c.is_available for c in payload_catalog)
-    for item in line_payloads or []:
+    has_qualifying_drink = any(c.pricing_role == 'drink' for c in payload_catalog)
+    for item in requested_lines:
         catalog_item_id = getattr(item, 'catalog_item_id', None)
         if catalog_item_id is None and isinstance(item, dict):
             catalog_item_id = item.get('catalog_item_id')
-        catalog = db.get(CatalogItem, int(catalog_item_id or 0))
-        if not catalog:
-            raise ValueError(f'Catalog item {catalog_item_id} not found.')
+        catalog = catalog_by_id[int(catalog_item_id or 0)]
         qty_value = getattr(item, 'quantity', None)
         if qty_value is None and isinstance(item, dict):
             qty_value = item.get('quantity')
         qty = _quantity(qty_value)
-        if qty <= 0:
-            raise ValueError('Line quantity must be greater than zero.')
         unit_price_value = getattr(item, 'unit_price', None)
         if unit_price_value is None and isinstance(item, dict):
             unit_price_value = item.get('unit_price')

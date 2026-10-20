@@ -13,6 +13,7 @@ from app.models.entities import (
     ManagerApproval,
     Outlet,
     PosOrder,
+    PosOrderLine,
     Register,
     RoomChargePosting,
     SyncOutboxEvent,
@@ -700,7 +701,7 @@ def test_checkout_enforces_generic_conditional_price_and_legacy_fallback():
     db.close()
 
 
-def test_unavailable_qualifier_cannot_trigger_generic_checkout_discount():
+def test_sold_out_qualifier_is_rejected_before_pricing():
     from app.models.entities import SystemSetting
     db = make_session()
     register = seed_register(db)
@@ -710,8 +711,147 @@ def test_unavailable_qualifier_cannot_trigger_generic_checkout_discount():
     db.add_all([qualifier, target, SystemSetting(key='catalog_sync', value_json=json.dumps({'pricing_rules':[{'id':'combo','qualifier_tag':'qualifier','target_tag':'target'}]}))])
     db.commit()
     lines = [{'catalog_item_id': qualifier.id, 'quantity': 1, 'unit_price': 50}, {'catalog_item_id': target.id, 'quantity': 1, 'unit_price': 80}]
-    with pytest.raises(ValueError, match='price does not match'):
+    with pytest.raises(ValueError, match='Unavailable drink is sold out'):
         create_order(db, OrderCreate(register_session_id=session['id'], lines=lines))
+    db.rollback()
+    assert db.query(PosOrder).count() == 0
+    db.close()
+
+
+def _seed_catalog_availability_session(db):
+    register = seed_register(db)
+    active = seed_catalog(db)
+    register_session = open_register_session(
+        db, RegisterSessionOpen(register_id=register.id, business_date='2026-04-19',
+                                shift_name='AM', opening_float=0),
+    )
+    return active, register_session['id']
+
+
+@pytest.mark.parametrize(('active', 'available', 'override', 'expected'), [
+    (True, False, None, 'sold out'),
+    (False, True, None, 'inactive'),
+    (True, True, False, 'sold out'),
+])
+def test_checkout_rejects_unavailable_catalog_item_without_persisting_order(
+    active, available, override, expected,
+):
+    db = make_session()
+    item, session_id = _seed_catalog_availability_session(db)
+    item.is_active = active
+    item.is_available = available
+    item.availability_override = override
+    db.commit()
+
+    with pytest.raises(ValueError, match=expected):
+        create_order(db, OrderCreate(register_session_id=session_id, lines=[
+            {'catalog_item_id': item.id, 'quantity': 1, 'unit_price': 100},
+        ]))
+    db.rollback()
+    assert db.query(PosOrder).count() == 0
+    assert db.query(PosOrderLine).count() == 0
+    db.close()
+
+
+def test_checkout_rejects_stale_cart_after_item_sells_out():
+    db = make_session()
+    item, session_id = _seed_catalog_availability_session(db)
+    stale_cart = OrderCreate(register_session_id=session_id, lines=[
+        {'catalog_item_id': item.id, 'quantity': 2, 'unit_price': 100},
+    ])
+    # The item was available when the cashier built the cart.
+    assert db.get(CatalogItem, item.id).is_available is True
+    item.is_available = False
+    db.commit()
+
+    with pytest.raises(ValueError, match='Burger is sold out'):
+        create_order(db, stale_cart)
+    db.rollback()
+    assert db.query(PosOrder).count() == 0
+    db.close()
+
+
+def test_order_edit_rejects_newly_unavailable_item_and_preserves_existing_lines():
+    db = make_session()
+    item, session_id = _seed_catalog_availability_session(db)
+    sold_out = CatalogItem(menu_item_name='Sold out side', display_name='Sold out side',
+                           category_name='Meals', module_slug='restaurant', price=20,
+                           is_active=True, is_available=False)
+    db.add(sold_out)
+    db.commit()
+    order = create_order(db, OrderCreate(register_session_id=session_id, lines=[
+        {'catalog_item_id': item.id, 'quantity': 1, 'unit_price': 100},
+    ]))
+    with pytest.raises(ValueError, match='Sold out side is sold out'):
+        update_order(db, order['id'], OrderUpdate(lines=[
+            {'catalog_item_id': item.id, 'quantity': 1, 'unit_price': 100},
+            {'catalog_item_id': sold_out.id, 'quantity': 1, 'unit_price': 20},
+        ]))
+    db.rollback()
+    db.expire_all()
+    saved = db.get(PosOrder, order['id'])
+    assert saved.status == 'draft'
+    assert len(saved.lines) == 1
+    assert saved.lines[0].catalog_item_id == item.id
+    assert saved.total_amount == 100
+    db.close()
+
+
+def test_existing_order_allows_reduction_or_note_edit_but_not_increased_sold_out_qty():
+    db = make_session()
+    item, session_id = _seed_catalog_availability_session(db)
+    order = create_order(db, OrderCreate(register_session_id=session_id, lines=[
+        {'catalog_item_id': item.id, 'quantity': 2, 'unit_price': 100},
+    ]))
+    item.is_available = False
+    db.commit()
+    # Operationally, the previously accepted order can still be documented.
+    updated = update_order(db, order['id'], OrderUpdate(note='Guest asked for takeaway'))
+    assert updated['note'] == 'Guest asked for takeaway'
+    assert updated['total_amount'] == 200
+    # Existing accepted quantities may be retained/reduced, never increased.
+    reduced = update_order(db, order['id'], OrderUpdate(lines=[
+        {'catalog_item_id': item.id, 'quantity': 1, 'unit_price': 100},
+    ]))
+    assert reduced['total_amount'] == 100
+    with pytest.raises(ValueError, match='Burger is sold out'):
+        update_order(db, order['id'], OrderUpdate(lines=[
+            {'catalog_item_id': item.id, 'quantity': 1, 'unit_price': 100},
+            {'catalog_item_id': item.id, 'quantity': 1, 'unit_price': 100},
+        ]))
+    db.rollback()
+    db.expire_all()
+    assert db.get(PosOrder, order['id']).total_amount == 100
+    db.close()
+
+
+def test_order_edit_enforces_availability_when_catalog_changed_after_cart_prepared():
+    from fastapi import HTTPException
+
+    import app.api.orders as orders_api
+
+    db = make_session()
+    item, session_id = _seed_catalog_availability_session(db)
+    order = create_order(db, OrderCreate(register_session_id=session_id, lines=[
+        {'catalog_item_id': item.id, 'quantity': 1, 'unit_price': 100},
+    ]))
+    new_item = CatalogItem(menu_item_name='Soup', display_name='Soup', category_name='Meals',
+                           module_slug='restaurant', price=60, is_active=True, is_available=True)
+    db.add(new_item)
+    db.commit()
+    update_payload = OrderUpdate(lines=[
+        {'catalog_item_id': item.id, 'quantity': 1, 'unit_price': 100},
+        {'catalog_item_id': new_item.id, 'quantity': 1, 'unit_price': 60},
+    ])
+    new_item.is_available = False
+    db.commit()
+
+    with pytest.raises(HTTPException) as error:
+        orders_api.edit_order(order['id'], update_payload, db=db, user=None)
+    assert error.value.status_code == 400
+    assert 'sold out' in error.value.detail
+    db.expire_all()
+    assert len(db.get(PosOrder, order['id']).lines) == 1
     db.close()
 
 
