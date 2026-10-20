@@ -33,7 +33,9 @@ async function api(page, method, path, body) {
     });
     let data = null;
     try { data = await res.json(); } catch {}
-    expect(res.status, method + ' ' + path + ' ' + JSON.stringify(data)).toBe(200);
+    if (res.status !== 200) {
+      throw new Error(method + ' ' + path + ' failed: ' + res.status + ' ' + JSON.stringify(data));
+    }
     return data;
   }, { method, path, body });
 }
@@ -194,7 +196,7 @@ for (const scenario of [
         await page.locator('details.admin-create-disclosure summary').click();
         await expect(page.getByRole('button', { name: /paid out/i }).first()).toBeVisible();
         await page.getByRole('button', { name: /paid out/i }).first().click();
-        await expect(page.getByText('Estimated drawer balance:')).toBeVisible();
+        await expect(page.getByText(/Estimated drawer balance:/)).toBeVisible();
         await record(page, testInfo, captures, prefix + 'cash-paid-out-form');
       }
 
