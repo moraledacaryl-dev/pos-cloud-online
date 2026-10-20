@@ -1471,6 +1471,7 @@ def test_cash_api_rolls_back_cash_and_audit_if_operations_enqueue_fails(monkeypa
 
 def test_manual_cash_api_forbids_forged_system_sale_and_validates_transfer_direction():
     from fastapi import HTTPException
+
     import app.api.cash as cash_api
 
     db = make_session()
