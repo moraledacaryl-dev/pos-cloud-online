@@ -5190,3 +5190,212 @@ button.danger {
     flex-direction: column;
   }
 }
+
+
+/* Pass 9 screenshot-driven cashier density and mobile field alignment. */
+.field-inline:has(> input[type='checkbox']) {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 9px;
+  min-height: 40px;
+}
+.field-inline > input[type='checkbox'] {
+  flex: 0 0 18px;
+  width: 18px;
+  min-width: 18px;
+  max-width: 18px;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--brand);
+}
+
+.orders-review-page {
+  gap: 9px;
+}
+.orders-review-page > .section,
+.orders-review-layout > .section {
+  margin-bottom: 0;
+}
+.orders-review-intro {
+  padding: 12px 17px;
+}
+.orders-review-intro h1 {
+  font-size: 22px;
+  line-height: 1.15;
+}
+.orders-review-intro .muted {
+  max-width: 880px;
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+.orders-review-stats {
+  padding: 10px 12px;
+}
+.orders-review-metrics {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+}
+.orders-review-metrics .metric-card {
+  min-width: 0;
+  border-radius: 10px;
+  padding: 10px 11px;
+}
+.orders-review-metrics .metric-card .muted {
+  font-size: 11px;
+  line-height: 1.2;
+}
+.orders-review-metrics .metric-value {
+  margin-top: 4px;
+  font-size: 23px;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+.orders-review-filters {
+  padding: 11px 16px;
+}
+.orders-review-filters .toolbar {
+  gap: 9px;
+}
+.orders-review-filters .toolbar > .row {
+  flex: 1 1 680px;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.orders-review-layout {
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+}
+.orders-review-layout > .section {
+  min-width: 0;
+  padding: 14px;
+}
+.orders-review-list {
+  overflow-x: auto;
+}
+.orders-review-list .table {
+  min-width: 660px;
+}
+.orders-review-detail .orders-review-facts {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+.orders-review-facts > .card {
+  min-width: 0;
+  padding: 9px 10px;
+  box-shadow: none;
+}
+.orders-review-facts > .card .muted {
+  font-size: 11px;
+}
+.orders-review-facts > .card strong {
+  display: block;
+  font-size: 12px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.orders-review-detail .stack-tight {
+  gap: 8px;
+}
+.orders-review-detail .stack-tight > .card {
+  padding: 11px;
+  box-shadow: none;
+}
+.orders-review-detail .list-row {
+  padding: 8px 0;
+}
+.orders-review-detail textarea {
+  min-height: 62px;
+}
+@media (max-width: 1200px) {
+  .orders-review-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .orders-review-list .table {
+    min-width: 0;
+  }
+}
+@media (max-width: 760px) {
+  .orders-review-page {
+    gap: 7px;
+  }
+  .orders-review-intro {
+    padding: 10px 12px;
+  }
+  .orders-review-intro h1 {
+    font-size: 19px;
+  }
+  .orders-review-page > .section:not(.orders-review-stats),
+  .orders-review-layout > .section {
+    padding: 11px;
+  }
+  .orders-review-stats {
+    padding: 8px;
+  }
+  .orders-review-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+  }
+  .orders-review-metrics .metric-card {
+    padding: 8px;
+  }
+  .orders-review-metrics .metric-card .muted {
+    font-size: 10px;
+  }
+  .orders-review-metrics .metric-value {
+    font-size: 18px;
+    margin-top: 4px;
+  }
+  .orders-review-filters .toolbar {
+    align-items: stretch;
+  }
+  .orders-review-filters .toolbar > .row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+    width: 100%;
+    flex-basis: 100%;
+  }
+  .orders-review-filters .toolbar > .row > input {
+    grid-column: 1 / -1;
+    width: 100% !important;
+    min-width: 0;
+  }
+  .orders-review-filters .toolbar > .row > label:last-child {
+    grid-column: 1 / -1;
+  }
+  .orders-review-filters .field-inline input,
+  .orders-review-filters .field-inline select {
+    width: 100%;
+    min-width: 0;
+  }
+  /* The complete payment breakdown stays visible in Order Detail.
+     The narrow list prioritizes identity, status, customer and amount. */
+  .orders-review-list .table th:nth-child(2),
+  .orders-review-list .table td:nth-child(2),
+  .orders-review-list .table th:nth-child(6),
+  .orders-review-list .table td:nth-child(6),
+  .orders-review-list .table th:nth-child(7),
+  .orders-review-list .table td:nth-child(7),
+  .orders-review-list .table th:nth-child(8),
+  .orders-review-list .table td:nth-child(8) {
+    display: none;
+  }
+  .orders-review-list .table {
+    min-width: 0;
+  }
+  .orders-review-list .table th,
+  .orders-review-list .table td {
+    padding: 8px 5px;
+    font-size: 12px;
+  }
+  .orders-review-detail .orders-review-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .orders-review-detail .stack-tight > .card {
+    padding: 10px;
+  }
+}
