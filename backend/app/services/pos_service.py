@@ -6,7 +6,7 @@ import logging
 import re
 import uuid
 from datetime import UTC, datetime
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import func, or_
@@ -76,6 +76,52 @@ def _money(value) -> Decimal:
 
 def _quantity(value) -> Decimal:
     return _decimal(value).quantize(QUANTITY_QUANTUM, rounding=ROUND_HALF_UP)
+
+
+def _validated_money(value, label: str, *, allow_negative: bool = False) -> Decimal:
+    """Reject non-finite and negative money before quantization can conceal them."""
+    try:
+        amount = _decimal(value)
+        if not amount.is_finite():
+            raise ValueError(f'{label} must be a finite amount.')
+        if amount < 0 and not allow_negative:
+            raise ValueError(f'{label} cannot be negative.')
+        return amount.quantize(MONEY_QUANTUM, rounding=ROUND_HALF_UP)
+    except (InvalidOperation, TypeError, OverflowError) as exc:
+        raise ValueError(f'{label} must be a valid finite amount.') from exc
+
+
+def _validated_rate(value, label: str) -> Decimal:
+    """Catalog tax/service rates are stored as fractions (0.12 means 12%)."""
+    try:
+        rate = _decimal(value)
+        if not rate.is_finite() or not Decimal('0') <= rate <= Decimal('1'):
+            raise ValueError(f'{label} must be a finite fraction between 0 and 1.')
+        return rate.quantize(Decimal('0.000001'), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, TypeError, OverflowError) as exc:
+        raise ValueError(f'{label} must be a finite fraction between 0 and 1.') from exc
+
+
+def _validated_quantity(value) -> Decimal:
+    try:
+        quantity = _decimal(value)
+        if not quantity.is_finite() or quantity <= 0:
+            raise ValueError('Line quantity must be greater than zero and finite.')
+        rounded = quantity.quantize(QUANTITY_QUANTUM, rounding=ROUND_HALF_UP)
+        if rounded <= 0:
+            raise ValueError('Line quantity must be greater than zero after rounding.')
+        return rounded
+    except (InvalidOperation, TypeError, OverflowError) as exc:
+        raise ValueError('Line quantity must be greater than zero and finite.') from exc
+
+
+def _validated_catalog_financials(catalog: CatalogItem) -> tuple[Decimal, Decimal, Decimal]:
+    label = catalog.display_name or catalog.menu_item_name or 'Catalog item'
+    price = _validated_money(catalog.price, f'{label} price')
+    tax_rate = _validated_rate(catalog.tax_rate, f'{label} tax rate')
+    service_rate = _validated_rate(catalog.service_charge_rate, f'{label} service charge rate')
+    return price, tax_rate, service_rate
+
 
 LEGACY_ACCOUNTING_ROOT_API = 'https://hiddenoasis.app/api'
 ACCOUNTING_SUBDOMAIN_API = 'https://accounting.hiddenoasis.app/api'
@@ -1076,6 +1122,7 @@ def create_catalog_item(db: Session, payload: CatalogItemCreate):
     if payload.external_sku_id and db.query(CatalogItem).filter(CatalogItem.external_sku_id == payload.external_sku_id).first():
         raise ValueError('Catalog item external_sku_id already exists.')
     row = CatalogItem(**payload.model_dump())
+    _validated_catalog_financials(row)
     db.add(row)
     db.commit()
     db.refresh(row)
@@ -1102,6 +1149,7 @@ def update_catalog_item(db: Session, item_id: int, payload: CatalogItemUpdate):
         return _serialize_catalog_item(row)
     for key, value in data.items():
         setattr(row, key, value)
+    _validated_catalog_financials(row)
     db.add(row)
     db.commit()
     db.refresh(row)
@@ -1388,9 +1436,7 @@ def _rebuild_order_lines(db: Session, row: PosOrder, line_payloads):
         qty_value = getattr(item, 'quantity', None)
         if qty_value is None and isinstance(item, dict):
             qty_value = item.get('quantity')
-        qty = _quantity(qty_value)
-        if qty <= 0:
-            raise ValueError('Line quantity must be greater than zero.')
+        qty = _validated_quantity(qty_value)
         requested_quantities[item_id] = requested_quantities.get(item_id, Decimal('0')) + qty
 
     # Lock in a deterministic order. PostgreSQL catalog updates wait for the
@@ -1437,7 +1483,7 @@ def _rebuild_order_lines(db: Session, row: PosOrder, line_payloads):
         unit_price_value = getattr(item, 'unit_price', None)
         if unit_price_value is None and isinstance(item, dict):
             unit_price_value = item.get('unit_price')
-        catalog_price = _money(catalog.price)
+        catalog_price, tax_rate, service_rate = _validated_catalog_financials(catalog)
         if json.loads(catalog.conditional_prices_json or '[]') and json.loads(catalog.pricing_tags_json or '[]'):
             qualified_pastry_price = _money(resolve_unit_price(db, catalog, payload_catalog))
         else:
@@ -1456,9 +1502,19 @@ def _rebuild_order_lines(db: Session, row: PosOrder, line_payloads):
             for label in labels:
                 option = allowed.get(str(label))
                 if not option: raise ValueError(f'{catalog.display_name} contains an invalid modifier option.')
-                modifier_total += _money(option.get('price_delta') or 0)
-        expected_unit_price = _money(qualified_pastry_price + modifier_total)
-        unit_price = _money(unit_price_value if unit_price_value is not None else expected_unit_price)
+                modifier_total += _validated_money(
+                    option.get('price_delta') or 0,
+                    f'{catalog.display_name} modifier adjustment',
+                    allow_negative=True,
+                )
+        expected_unit_price = _validated_money(
+            qualified_pastry_price + modifier_total,
+            f'{catalog.display_name} unit price',
+        )
+        unit_price = _validated_money(
+            unit_price_value if unit_price_value is not None else expected_unit_price,
+            f'{catalog.display_name} unit price',
+        )
         if unit_price != expected_unit_price:
             raise ValueError(
                 f'{catalog.display_name or catalog.menu_item_name} price does not match the current catalog price. '
@@ -1467,11 +1523,13 @@ def _rebuild_order_lines(db: Session, row: PosOrder, line_payloads):
         discount_value = getattr(item, 'discount_amount', None)
         if discount_value is None and isinstance(item, dict):
             discount_value = item.get('discount_amount')
-        line_discount = _money(discount_value)
-        gross = qty * unit_price
-        line_total = max(gross - line_discount, Decimal('0'))
-        tax_amount += line_total * _decimal(catalog.tax_rate)
-        service_charge += line_total * _decimal(catalog.service_charge_rate)
+        line_discount = _validated_money(discount_value, f'{catalog.display_name} discount')
+        gross = _validated_money(qty * unit_price, f'{catalog.display_name} line gross')
+        if line_discount > gross:
+            raise ValueError(f'{catalog.display_name} discount cannot exceed the line gross amount.')
+        line_total = _validated_money(gross - line_discount, f'{catalog.display_name} line total')
+        tax_amount += line_total * tax_rate
+        service_charge += line_total * service_rate
         subtotal += gross
         discount += line_discount
         prep_station = normalize_kds_station(catalog.prep_station or catalog.module_slug)
@@ -1829,11 +1887,18 @@ def merge_order_table(db: Session, order_id: int, target_table_label: str, targe
     service_charge = Decimal('0')
     for line in target.lines or []:
         catalog = db.get(CatalogItem, int(line.catalog_item_id))
-        gross = _quantity(line.quantity) * _money(line.unit_price)
+        if not catalog:
+            raise ValueError(f'Catalog item {line.catalog_item_id} not found.')
+        _price, tax_rate, service_rate = _validated_catalog_financials(catalog)
+        gross = _validated_money(_validated_quantity(line.quantity) * _validated_money(line.unit_price, 'Line price'), 'Line gross')
+        line_discount = _validated_money(line.discount_amount, 'Line discount')
+        if line_discount > gross:
+            raise ValueError('Line discount cannot exceed the line gross amount.')
+        net = _validated_money(gross - line_discount, 'Line net')
         subtotal += gross
-        discount += _money(line.discount_amount)
-        tax_amount += _money(line.line_total) * _decimal(catalog.tax_rate)
-        service_charge += _money(line.line_total) * _decimal(catalog.service_charge_rate)
+        discount += line_discount
+        tax_amount += net * tax_rate
+        service_charge += net * service_rate
     target.subtotal_amount = _money(subtotal)
     target.discount_amount = _money(discount)
     target.tax_amount = _money(tax_amount)
