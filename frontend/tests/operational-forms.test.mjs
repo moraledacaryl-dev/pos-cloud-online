@@ -16,9 +16,12 @@ test('session close stays blocked until sign-off and variance requirements are c
 });
 
 test('cash movement form exposes native requirements and blocks incomplete records', () => {
-  assert.match(cashMovements, /const approvalRequired = isTransfer \|\| form\.movement_type === 'owner_withdrawal'/);
+  assert.match(cashMovements, /const approvalRequired = SENSITIVE_CASH_MOVEMENTS\.has\(form\.movement_type\)/);
+  assert.match(cashMovements, /selectedSession\?\.closing_expected_cash/);
   assert.match(cashMovements, /disabled=\{approvalRequired\}/);
-  assert.match(cashMovements, /disabled=\{!canSubmit\}/);
+  assert.match(cashMovements, /disabled=\{!canSubmit \|\| submitting\}/);
+  assert.match(cashMovements, /client_request_id: pendingRequestRef\.current\.id/);
+  assert.match(cashMovements, /crypto\.randomUUID\(\)/);
   assert.match(cashMovements, /required=\{form\.direction === 'out'\}/);
 });
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createCashMovement, fetchAccountingAccounts, fetchCashMovements, fetchRegisterSessions, fetchRegisters } from '../../lib/api';
 import { cashMovementLabel, humanizeCode } from '../../lib/displayLabels.mjs';
 
@@ -18,6 +18,7 @@ const MOVEMENT_PRESETS = [
 ];
 
 const TRANSFER_TYPES = new Set(['safe_drop', 'bank_deposit', 'drawer_transfer']);
+const SENSITIVE_CASH_MOVEMENTS = new Set(['paid_out', 'safe_drop', 'bank_deposit', 'drawer_transfer', 'owner_withdrawal', 'adjustment_in', 'adjustment_out', 'cash_adjustment']);
 
 export default function CashMovementsPage() {
   const [sessions, setSessions] = useState([]);
@@ -27,6 +28,9 @@ export default function CashMovementsPage() {
   const [form, setForm] = useState({ register_session_id: '', direction: 'out', movement_type: 'paid_out', category: '', amount: '', note: '', reference_no: '', accounting_financial_account_id: '', to_accounting_financial_account_id: '', destination_register_id: '', requires_approval: false });
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+  const pendingRequestRef = useRef(null);
 
   async function loadAll() {
     try {
@@ -51,9 +55,9 @@ export default function CashMovementsPage() {
   const isTransfer = TRANSFER_TYPES.has(String(form.movement_type || '').toLowerCase());
   const needsAccountDestination = ['safe_drop', 'bank_deposit'].includes(String(form.movement_type || '').toLowerCase());
   const needsRegisterDestination = form.movement_type === 'drawer_transfer';
-  const approvalRequired = isTransfer || form.movement_type === 'owner_withdrawal';
+  const approvalRequired = SENSITIVE_CASH_MOVEMENTS.has(form.movement_type);
   const amount = Number(form.amount || 0);
-  const drawerBefore = Number(selectedSession?.expected_cash || 0);
+  const drawerBefore = Number(selectedSession?.closing_expected_cash || 0);
   const drawerAfter = drawerBefore + (form.direction === 'in' ? amount : -amount);
   const transferRows = useMemo(() => rows.filter((row) => row.is_transfer), [rows]);
   const canSubmit = !!form.register_session_id
@@ -64,18 +68,18 @@ export default function CashMovementsPage() {
     && (!needsRegisterDestination || !!form.destination_register_id);
 
   function applyPreset(preset) {
-    const transfer = TRANSFER_TYPES.has(preset.movement_type);
     setForm((prev) => ({
       ...prev,
       ...preset,
       to_accounting_financial_account_id: '',
       destination_register_id: '',
-      requires_approval: transfer || preset.movement_type === 'owner_withdrawal',
+      requires_approval: SENSITIVE_CASH_MOVEMENTS.has(preset.movement_type),
     }));
   }
 
   async function handleSubmit(event) {
     event.preventDefault();
+    if (submittingRef.current) return;
     setError(''); setNotice('');
     if (!form.register_session_id) return setError('Select an open register session.');
     if (!form.category.trim()) return setError('Choose or enter a clear category.');
@@ -83,8 +87,7 @@ export default function CashMovementsPage() {
     if (form.direction === 'out' && !form.reference_no.trim()) return setError('A receipt or reference number is required for cash leaving the drawer.');
     if (needsAccountDestination && !form.to_accounting_financial_account_id) return setError('Choose the destination financial account.');
     if (needsRegisterDestination && !form.destination_register_id) return setError('Choose the destination register.');
-    try {
-      await createCashMovement({
+    const payload = {
         ...form,
         register_session_id: Number(form.register_session_id),
         amount: Number(form.amount || 0),
@@ -92,11 +95,26 @@ export default function CashMovementsPage() {
         to_accounting_financial_account_id: form.to_accounting_financial_account_id ? Number(form.to_accounting_financial_account_id) : null,
         destination_register_id: form.destination_register_id ? Number(form.destination_register_id) : null,
         requires_approval: !!form.requires_approval || approvalRequired,
-      });
+      };
+    // Retain the idempotency key across network failures and retries of the
+    // same entry; a changed form is a distinct financial operation.
+    const signature = JSON.stringify(payload);
+    if (pendingRequestRef.current?.signature !== signature) {
+      pendingRequestRef.current = { signature, id: crypto.randomUUID() };
+    }
+    submittingRef.current = true;
+    setSubmitting(true);
+    try {
+      await createCashMovement({ ...payload, client_request_id: pendingRequestRef.current.id });
+      pendingRequestRef.current = null;
       setForm((prev) => ({ ...prev, amount: '', note: '', reference_no: '', to_accounting_financial_account_id: '', destination_register_id: '', requires_approval: approvalRequired }));
       setNotice('Cash movement recorded.');
       await loadAll();
     } catch (e) { setError(e.message || 'Failed to create cash movement.'); }
+    finally {
+      submittingRef.current = false;
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -124,7 +142,7 @@ export default function CashMovementsPage() {
           <label className="field">Receipt / Reference {form.direction === 'out' ? '(required)' : ''}<input required={form.direction === 'out'} value={form.reference_no} onChange={(e) => setForm((prev) => ({ ...prev, reference_no: e.target.value }))} /></label>
           {needsAccountDestination && <label className="field">Destination Account<select required value={form.to_accounting_financial_account_id} onChange={(e) => setForm((prev) => ({ ...prev, to_accounting_financial_account_id: e.target.value }))}><option value="">Select destination</option>{accounts.map((row) => <option key={row.id} value={row.id}>{row.name}{row.account_type ? ` · ${humanizeCode(row.account_type)}` : ''}</option>)}</select></label>}
           {needsRegisterDestination && <label className="field">Destination Register<select required value={form.destination_register_id} onChange={(e) => setForm((prev) => ({ ...prev, destination_register_id: e.target.value }))}><option value="">Select destination</option>{registers.filter((row) => String(row.id) !== String(selectedSession?.register_id)).map((row) => <option key={row.id} value={row.id}>{row.name}{row.accounting_financial_account_id ? ' · linked' : ' · not linked'}</option>)}</select></label>}
-          <label className="field-inline"><input type="checkbox" checked={!!form.requires_approval || approvalRequired} onChange={(e) => setForm((prev) => ({ ...prev, requires_approval: e.target.checked }))} disabled={approvalRequired} /> {isTransfer ? 'Approval required for transfers' : form.movement_type === 'owner_withdrawal' ? 'Approval required for owner withdrawals' : 'Require manager approval'}</label>
+          <label className="field-inline"><input type="checkbox" checked={!!form.requires_approval || approvalRequired} onChange={(e) => setForm((prev) => ({ ...prev, requires_approval: e.target.checked }))} disabled={approvalRequired} /> {approvalRequired ? 'Manager approval required for this movement' : 'Require manager approval'}</label>
           {isTransfer && <div className={`card ${selectedSession?.register_accounting_financial_account_id ? 'success' : 'warn'}`} style={{ gridColumn: '1 / -1' }}><strong>Accounting drawer link</strong><div className="small" style={{ marginTop: 4 }}>From: {selectedSession?.register_name || 'selected register'} → {selectedSession?.register_accounting_financial_account_id ? `account ${selectedSession.register_accounting_financial_account_id}` : 'not linked'}. To: {destinationRegister?.name || 'manual destination'} → {destinationRegister?.accounting_financial_account_id || form.to_accounting_financial_account_id || 'not linked'}.</div></div>}
           <label className="field" style={{ gridColumn: '1 / -1' }}>Note<textarea value={form.note} onChange={(e) => setForm((prev) => ({ ...prev, note: e.target.value }))} /></label>
           <div className="action-review" style={{ gridColumn: '1 / -1' }}>
@@ -132,7 +150,7 @@ export default function CashMovementsPage() {
             <span>Estimated drawer balance: {money(drawerBefore)} → {money(drawerAfter)}</span>
             <small>{form.requires_approval || approvalRequired ? 'Manager approval will be required.' : 'This event will be recorded in the audit trail.'}</small>
           </div>
-          <div className="row"><button className="primary" type="submit" disabled={!canSubmit}>Review and record</button></div>
+          <div className="row"><button className="primary" type="submit" disabled={!canSubmit || submitting}>{submitting ? 'Recording…' : 'Review and record'}</button></div>
         </form>
       </details>
 
