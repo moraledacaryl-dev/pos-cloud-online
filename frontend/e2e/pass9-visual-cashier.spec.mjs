@@ -204,8 +204,17 @@ for (const scenario of [
 
       if (route === '/orders') {
         // Verify that an actual paid record is visible and its action panel fits.
-        await page.getByRole('row').filter({ hasText: guest }).first().click();
+        const guestRow = page.getByRole('row').filter({ hasText: guest }).first();
+        await guestRow.getByRole('button', { name: /View details for order/ }).click();
         await expect(page.getByRole('button', { name: 'Process Refund' })).toBeVisible();
+        if (scenario.label === 'mobile') {
+          // Selecting an order must reveal the actual detail on a phone,
+          // not leave the user at the list with no visible change.
+          await expect.poll(async () => page.locator('.orders-review-detail').evaluate(
+            (node) => Math.round(node.getBoundingClientRect().top),
+          )).toBeLessThan(scenario.height);
+          await expect(page.locator('.orders-review-detail')).toBeFocused();
+        }
         await record(page, testInfo, captures, prefix + 'orders-paid-details');
         if (scenario.label === 'mobile') {
           const summaryColumns = await page.locator('.orders-review-metrics').evaluate(
@@ -257,11 +266,32 @@ for (const scenario of [
       }
 
       if (route === '/pos') {
+        // A heading alone does not prove POS rendered. Earlier screenshots
+        // accidentally documented a mostly empty loading interstitial.
+        await expect(page.locator('.pos-spaces-screen')).toBeVisible({ timeout: 20_000 });
+        await record(page, testInfo, captures, prefix + 'pos-spaces-ready');
         await page.locator('.pos-tools-menu summary').click();
         await page.getByRole('button', { name: 'Menu Availability' }).click();
         await expect(page.getByRole('dialog', { name: 'Menu availability' })).toBeVisible();
         await record(page, testInfo, captures, prefix + 'pos-availability-dialog');
         await page.getByRole('dialog', { name: 'Menu availability' }).getByRole('button', { name: 'Close' }).click();
+
+        await page.getByRole('button', { name: 'Start Order First' }).click();
+        await expect(page.locator('.order-terminal-screen')).toBeVisible();
+        await record(page, testInfo, captures, prefix + 'pos-order-workspace');
+        await page.getByPlaceholder('Search menu').fill('CI Financial Test Item');
+        const targetItem = page.locator('.order-item-card').filter({ hasText: 'CI Financial Test Item' });
+        await expect(targetItem).toBeVisible();
+        await targetItem.click();
+        const config = page.getByRole('dialog', { name: 'Configure menu item' });
+        await expect(config).toBeVisible();
+        await record(page, testInfo, captures, prefix + 'pos-configurator');
+        await config.getByRole('button', { name: 'Add to Order' }).click();
+        await expect(page.locator('.order-cart-panel')).toContainText('CI Financial Test Item');
+        await record(page, testInfo, captures, prefix + 'pos-filled-cart');
+        await page.locator('.order-primary-actions').getByRole('button', { name: 'Pay', exact: true }).click();
+        await expect(page.locator('.payment-terminal-modal')).toBeVisible();
+        await record(page, testInfo, captures, prefix + 'pos-payment-dialog');
       }
     }
 

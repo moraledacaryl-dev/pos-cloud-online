@@ -3,11 +3,16 @@ function num(value, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-export function todayISO() {
-  const now = new Date();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  return `${now.getFullYear()}-${month}-${day}`;
+export function todayISO(date = new Date()) {
+  // Hidden Oasis operates on Philippine business dates, independent of the
+  // cashier device's time zone (or the GitHub runner's UTC time zone).
+  // Never infer the business date from local getDate()/getMonth().
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(date);
+  const value = (part) => parts.find((item) => item.type === part)?.value;
+  return `${value('year')}-${value('month')}-${value('day')}`;
 }
 
 export function money(value) {

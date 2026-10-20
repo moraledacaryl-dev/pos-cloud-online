@@ -8,6 +8,7 @@ import {
   parseTableValue,
   serviceLabel,
   tableKey,
+  todayISO,
 } from '../lib/posWorkspace.mjs';
 
 test('POS workspace helpers preserve cashier-facing labels and table identity', () => {
@@ -38,4 +39,13 @@ test('cart totals match backend tax and service-charge calculation', () => {
     tax_rate: 0.12,
     service_charge_rate: 0.05,
   }]), { subtotal: 130, discount: 0, tax: 15.6, serviceCharge: 6.5, total: 152.1 });
+});
+
+test('POS business date always follows Manila even when device/runner is on UTC', () => {
+  // 23:30 in Manila, still October 20.
+  assert.equal(todayISO(new Date('2026-10-20T15:30:00Z')), '2026-10-20');
+  // 00:30 in Manila, already October 21 though UTC remains October 20.
+  assert.equal(todayISO(new Date('2026-10-20T16:30:00Z')), '2026-10-21');
+  // Device elsewhere in the world must not change the business day.
+  assert.equal(todayISO(new Date('2026-12-31T17:00:00Z')), '2027-01-01');
 });
