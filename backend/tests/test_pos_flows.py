@@ -1,4 +1,5 @@
 import json
+from decimal import Decimal
 
 import pytest
 from sqlalchemy import create_engine
@@ -20,6 +21,7 @@ from app.models.entities import (
 )
 from app.schemas.common import (
     CashMovementCreate,
+    CatalogItemCreate,
     CatalogItemUpdate,
     InHouseBookingSnapshotCreate,
     OrderCreate,
@@ -33,6 +35,7 @@ from app.schemas.common import (
 )
 from app.services.pos_service import (
     create_cash_movement,
+    create_catalog_item,
     create_in_house_booking_snapshot,
     create_order,
     create_outbox_event,
@@ -1130,4 +1133,141 @@ def test_atomic_void_commits_once_and_notifies_kitchen_after_commit(monkeypatch)
     assert db.query(CashMovement).filter(CashMovement.source_order_id == order['id'],
                                           CashMovement.movement_type == 'refund').count() == 1
     assert len(notices) == 1
+    db.close()
+
+
+@pytest.mark.parametrize(('discount', 'error'), [
+    (Decimal('-0.01'), 'cannot be negative'),
+    (Decimal('-0.001'), 'cannot be negative'),
+    (Decimal('100.01'), 'cannot exceed the line gross'),
+    (Decimal('150'), 'cannot exceed the line gross'),
+])
+def test_order_fails_on_negative_discount_or_discount_larger_than_gross(discount, error):
+    db = make_session()
+    item, session_id = _seed_catalog_availability_session(db)
+    with pytest.raises(ValueError, match=error):
+        create_order(db, OrderCreate(register_session_id=session_id, lines=[
+            {'catalog_item_id': item.id, 'quantity': 1, 'unit_price': 100, 'discount_amount': discount},
+        ]))
+    db.rollback()
+    assert db.query(PosOrder).count() == 0
+    assert db.query(PosOrderLine).count() == 0
+    db.close()
+
+
+def test_order_edit_rejects_excessive_discount_and_rolls_back_original_amount():
+    db = make_session()
+    item, session_id = _seed_catalog_availability_session(db)
+    order = create_order(db, OrderCreate(register_session_id=session_id, lines=[
+        {'catalog_item_id': item.id, 'quantity': 2, 'unit_price': 100},
+    ]))
+    with pytest.raises(ValueError, match='discount cannot exceed'):
+        update_order(db, order['id'], OrderUpdate(lines=[
+            {'catalog_item_id': item.id, 'quantity': 1, 'unit_price': 100,
+             'discount_amount': 150},
+        ]))
+    db.rollback()
+    db.expire_all()
+    saved = db.get(PosOrder, order['id'])
+    assert saved.total_amount == Decimal('200.00')
+    assert saved.discount_amount == Decimal('0.00')
+    assert len(saved.lines) == 1
+    db.close()
+
+
+@pytest.mark.parametrize(('field', 'invalid'), [
+    ('price', Decimal('-0.01')),
+    ('tax_rate', Decimal('-0.01')),
+    ('tax_rate', Decimal('1.01')),
+    ('service_charge_rate', Decimal('-0.01')),
+    ('service_charge_rate', Decimal('1.01')),
+])
+def test_catalog_write_rejects_negative_price_or_invalid_percentage(field, invalid):
+    db = make_session()
+    payload = dict(menu_item_name='Invalid', display_name='Invalid', price=100,
+                   tax_rate=Decimal('0.12'), service_charge_rate=Decimal('0.10'))
+    payload[field] = invalid
+    with pytest.raises(ValueError, match='price|rate'):
+        create_catalog_item(db, CatalogItemCreate(**payload))
+    db.rollback()
+    assert db.query(CatalogItem).count() == 0
+
+    item = seed_catalog(db)
+    with pytest.raises(ValueError, match='price|rate'):
+        update_catalog_item(db, item.id, CatalogItemUpdate(**{field: invalid}))
+    db.rollback()
+    db.expire_all()
+    assert db.get(CatalogItem, item.id).price == Decimal('100')
+    assert db.get(CatalogItem, item.id).tax_rate == 0
+    assert db.get(CatalogItem, item.id).service_charge_rate == 0
+    db.close()
+
+
+@pytest.mark.parametrize(('value', 'label'), [
+    (Decimal('NaN'), 'finite'),
+    (Decimal('Infinity'), 'finite'),
+    (Decimal('-Infinity'), 'finite'),
+    ('not-a-number', 'valid finite'),
+])
+def test_non_finite_or_malformed_amounts_are_rejected_cleanly(value, label):
+    with pytest.raises(ValueError, match=label):
+        pos_service._validated_money(value, 'Discount')
+    with pytest.raises(ValueError, match='fraction'):
+        pos_service._validated_rate(value, 'Tax rate')
+    with pytest.raises(ValueError, match='finite'):
+        pos_service._validated_quantity(value)
+
+
+def test_discounted_order_tax_and_service_are_based_on_net_amount():
+    db = make_session()
+    item, session_id = _seed_catalog_availability_session(db)
+    manager = seed_manager(db)
+    item.tax_rate = Decimal('0.12')
+    item.service_charge_rate = Decimal('0.10')
+    db.commit()
+    order = create_order(db, OrderCreate(
+        register_session_id=session_id, approved_by_user_id=manager.id,
+        lines=[{'catalog_item_id': item.id, 'quantity': 2, 'unit_price': 100,
+                'discount_amount': 20}],
+    ), user_id=manager.id)
+    assert order['subtotal_amount'] == Decimal('200.00')
+    assert order['discount_amount'] == Decimal('20.00')
+    assert order['lines'][0]['line_total'] == Decimal('180.00')
+    assert order['tax_amount'] == Decimal('21.60')
+    assert order['service_charge_amount'] == Decimal('18.00')
+    assert order['total_amount'] == Decimal('219.60')
+    assert order['balance_due'] == Decimal('219.60')
+    db.close()
+
+
+def test_modifier_cannot_create_negative_unit_price():
+    db = make_session()
+    item, session_id = _seed_catalog_availability_session(db)
+    item.modifier_groups_json = json.dumps([{
+        'id': 'extra', 'mode': 'single',
+        'options': [{'label': 'Reduction', 'price_delta': -150}],
+    }])
+    db.commit()
+    with pytest.raises(ValueError, match='unit price cannot be negative'):
+        create_order(db, OrderCreate(register_session_id=session_id, lines=[
+            {'catalog_item_id': item.id, 'quantity': 1, 'unit_price': -50,
+             'modifiers': [{'id': 'extra', 'labels': ['Reduction']}]},
+        ]))
+    db.rollback()
+    assert db.query(PosOrder).count() == 0
+    db.close()
+
+
+def test_historical_invalid_catalog_rate_cannot_enter_new_order():
+    db = make_session()
+    item, session_id = _seed_catalog_availability_session(db)
+    # Direct DB mutation simulates an older malformed catalog record.
+    item.tax_rate = Decimal('12')
+    db.commit()
+    with pytest.raises(ValueError, match='tax rate must be a finite fraction'):
+        create_order(db, OrderCreate(register_session_id=session_id, lines=[
+            {'catalog_item_id': item.id, 'quantity': 1, 'unit_price': 100},
+        ]))
+    db.rollback()
+    assert db.query(PosOrder).count() == 0
     db.close()
