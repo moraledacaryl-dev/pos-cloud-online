@@ -244,6 +244,8 @@ class RefundCreate(BaseModel):
 
 class CashMovementCreate(BaseModel):
     register_session_id: int
+    # Stable UUIDv4 supplied by the client for safe retries of manual entries.
+    client_request_id: str | None = None
     approved_by_user_id: int | None = None
     approval_grant_uuid: str | None = None
     direction: str
