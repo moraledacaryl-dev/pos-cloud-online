@@ -10,6 +10,7 @@ from app.models.entities import (
     AuditLog,
     CashMovement,
     CatalogItem,
+    ManagerApproval,
     Outlet,
     PosOrder,
     Register,
@@ -24,6 +25,7 @@ from app.schemas.common import (
     OrderPaymentCreate,
     OrderPayPayload,
     OrderUpdate,
+    OrderVoidPayload,
     RefundCreate,
     RegisterSessionOpen,
     RoomChargePostingStatusUpdate,
@@ -849,4 +851,143 @@ def test_atomic_checkout_commits_once_then_notifies_kitchen_and_blocks_replay(mo
     assert blocked.value.status_code == 400
     assert db.query(CashMovement).filter(CashMovement.source_order_id == order['id']).count() == 1
     assert len(notifications) == 1
+    db.close()
+
+
+def _seed_atomic_void_order(db):
+    register = seed_register(db)
+    item = seed_catalog(db)
+    manager = seed_manager(db)
+    session = open_register_session(db, RegisterSessionOpen(
+        register_id=register.id, business_date='2026-04-19', shift_name='AM',
+        opening_float=0, opening_note='open',
+    ))
+    order = create_order(db, OrderCreate(
+        register_session_id=session['id'], guest_name='Void atomicity test',
+        lines=[{'catalog_item_id': item.id, 'quantity': 1, 'unit_price': 100, 'discount_amount': 0}],
+    ))
+    pay_order(db, order['id'], OrderPayPayload(payments=[
+        OrderPaymentCreate(tender_type='cash', amount_applied=100, amount_received=100),
+    ]))
+    return order, manager
+
+
+def _assert_atomic_void_not_applied(db, order_id):
+    db.expire_all()
+    order = db.get(PosOrder, order_id)
+    assert order.status == 'paid'
+    assert order.void_reason is None
+    assert db.query(CashMovement).filter(
+        CashMovement.source_order_id == order_id, CashMovement.movement_type == 'cash_sale',
+    ).count() == 1
+    assert db.query(CashMovement).filter(
+        CashMovement.source_order_id == order_id, CashMovement.movement_type == 'refund',
+    ).count() == 0
+    assert db.query(SyncOutboxEvent).filter(
+        SyncOutboxEvent.event_type == 'order.voided', SyncOutboxEvent.aggregate_id == order_id,
+    ).count() == 0
+    assert db.query(SyncOutboxEvent).filter(
+        SyncOutboxEvent.event_type == 'inventory.sale_voided', SyncOutboxEvent.aggregate_id == order_id,
+    ).count() == 0
+    assert db.query(ManagerApproval).filter(ManagerApproval.approval_type == 'void').count() == 0
+
+
+def test_atomic_void_rolls_back_all_cash_refund_movements(monkeypatch):
+    db = make_session()
+    order, manager = _seed_atomic_void_order(db)
+    notifications = []
+    monkeypatch.setattr(pos_service, '_publish_kds_refresh', lambda *args, **kwargs: notifications.append(True))
+
+    result = void_order(db, order['id'], 'Wrong order', user_id=manager.id,
+                        approved_by_user_id=manager.id, commit=False)
+    assert result['status'] == 'voided'
+    assert db.query(CashMovement).filter(
+        CashMovement.source_order_id == order['id'], CashMovement.movement_type == 'refund',
+    ).count() == 1
+    assert notifications == []
+    db.rollback()
+    _assert_atomic_void_not_applied(db, order['id'])
+    db.close()
+
+
+def test_atomic_void_rolls_back_when_inventory_enqueue_fails(monkeypatch):
+    import app.api.orders as orders_api
+
+    db = make_session()
+    order, manager = _seed_atomic_void_order(db)
+    notifications = []
+    monkeypatch.setattr(pos_service, '_publish_kds_refresh', lambda *args, **kwargs: notifications.append(True))
+
+    def fail_inventory(*args, **kwargs):
+        raise RuntimeError('Injected void Inventory failure')
+
+    monkeypatch.setattr(orders_api, 'enqueue_inventory_event', fail_inventory)
+    with pytest.raises(RuntimeError, match='Injected void Inventory failure'):
+        orders_api.cancel_order(order['id'], OrderVoidPayload(reason='Wrong order'),
+                                db=db, current_user=manager)
+    _assert_atomic_void_not_applied(db, order['id'])
+    assert notifications == []
+    db.close()
+
+
+def test_atomic_void_rolls_back_when_operations_enqueue_fails(monkeypatch):
+    import app.api.orders as orders_api
+
+    db = make_session()
+    order, manager = _seed_atomic_void_order(db)
+
+    def fail_operations(*args, **kwargs):
+        raise RuntimeError('Injected void Operations failure')
+
+    monkeypatch.setattr(orders_api, 'enqueue_operations_event', fail_operations)
+    with pytest.raises(RuntimeError, match='Injected void Operations failure'):
+        orders_api.cancel_order(order['id'], OrderVoidPayload(reason='Wrong order'),
+                                db=db, current_user=manager)
+    _assert_atomic_void_not_applied(db, order['id'])
+    db.close()
+
+
+def test_atomic_void_commits_once_and_notifies_kitchen_after_commit(monkeypatch):
+    from fastapi import HTTPException
+
+    import app.api.orders as orders_api
+
+    db = make_session()
+    order, manager = _seed_atomic_void_order(db)
+    notices = []
+    commits = []
+    original_commit = db.commit
+
+    def counted_commit():
+        commits.append(True)
+        original_commit()
+
+    def notify(stations, reason, payload):
+        notices.append((reason, payload, db.get(PosOrder, order['id']).status,
+                        db.query(CashMovement).filter(
+                            CashMovement.source_order_id == order['id'], CashMovement.movement_type == 'refund',
+                        ).count()))
+
+    monkeypatch.setattr(db, 'commit', counted_commit)
+    monkeypatch.setattr(pos_service, '_publish_kds_refresh', notify)
+    monkeypatch.setattr(orders_api.enqueue_operations_event.__globals__['settings'],
+                        'operations_integration_enabled', True)
+    result = orders_api.cancel_order(order['id'], OrderVoidPayload(reason='Wrong order'),
+                                     db=db, current_user=manager)
+    assert result['status'] == 'voided'
+    assert len(commits) == 1
+    assert notices == [('ticket_cancelled', {'order_id': order['id'],
+                                               'order_no': result['order_no'], 'status': 'voided'},
+                        'voided', 1)]
+    assert db.query(SyncOutboxEvent).filter(SyncOutboxEvent.event_type == 'inventory.sale_voided').count() == 1
+    assert db.query(SyncOutboxEvent).filter(SyncOutboxEvent.event_type == 'operations.v2.void.review_needed').count() == 1
+    assert db.query(ManagerApproval).filter(ManagerApproval.approval_type == 'void',
+                                             ManagerApproval.status == 'consumed').count() == 1
+    with pytest.raises(HTTPException) as blocked:
+        orders_api.cancel_order(order['id'], OrderVoidPayload(reason='Wrong order'),
+                                db=db, current_user=manager)
+    assert blocked.value.status_code == 400
+    assert db.query(CashMovement).filter(CashMovement.source_order_id == order['id'],
+                                          CashMovement.movement_type == 'refund').count() == 1
+    assert len(notices) == 1
     db.close()
