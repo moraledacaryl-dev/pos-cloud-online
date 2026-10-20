@@ -153,8 +153,8 @@ export default function OrdersPage() {
   }
 
   return (
-    <div className="stack">
-      <section className="section">
+    <div className="stack orders-review-page">
+      <section className="section orders-review-intro">
         <div className="toolbar">
           <div>
             <h1>Orders</h1>
@@ -166,8 +166,8 @@ export default function OrdersPage() {
         {!!error && <p className="error-text" style={{ marginTop: 8 }}>{error}</p>}
       </section>
 
-      <section className="section">
-        <div className="metric-rail" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(140px, 100%), 1fr))' }}>
+      <section className="section orders-review-stats">
+        <div className="metric-rail orders-review-metrics">
           <div className="metric-card"><div className="muted">Paid Orders</div><div className="metric-value">{summary.paidCount}</div></div>
           <div className="metric-card"><div className="muted">Net Paid Sales</div><div className="metric-value">{money(summary.paidSales)}</div></div>
           <div className="metric-card"><div className="muted">Folio Pending</div><div className="metric-value">{summary.folioPendingCount}</div></div>
@@ -177,7 +177,7 @@ export default function OrdersPage() {
         </div>
       </section>
 
-      <section className="section">
+      <section className="section orders-review-filters">
         <div className="toolbar">
           <h2>Filter Orders</h2>
           <div className="row wrap">
@@ -198,8 +198,8 @@ export default function OrdersPage() {
         </div>
       </section>
 
-      <div className="card-grid card-grid-double">
-        <section className="section">
+      <div className="card-grid card-grid-double orders-review-layout">
+        <section className="section orders-review-list">
           <h2>Order List</h2>
           <table className="table" tabIndex={0} aria-label="Scrollable data table" style={{ marginTop: 12 }}>
             <thead>
@@ -225,7 +225,7 @@ export default function OrdersPage() {
           </table>
         </section>
 
-        <section className="section">
+        <section className="section orders-review-detail">
           <div className="toolbar">
             <h2>Order Detail</h2>
             {selectedOrder && selectedOrder.status !== 'paid' && selectedOrder.status !== 'voided' && <Link href={`/pos?order_id=${selectedOrder.id}`} className="secondary">Open in POS</Link>}
@@ -233,7 +233,7 @@ export default function OrdersPage() {
           {!selectedOrder && <p className="muted" style={{ marginTop: 10 }}>Select an order to inspect its lines, split payments, and cashier notes.</p>}
           {!!selectedOrder && (
             <div className="stack-tight" style={{ marginTop: 10 }}>
-              <div className="card-grid">
+              <div className="card-grid orders-review-facts">
                 <div className="card"><div className="muted">Order</div><strong>{selectedOrder.order_no}</strong></div>
                 <div className="card"><div className="muted">Cashier</div><strong>{selectedOrder.cashier_name || '-'}</strong></div>
                 <div className="card"><div className="muted">Status</div><strong>{orderDisplayState(selectedOrder).label}</strong></div>
