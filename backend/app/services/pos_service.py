@@ -2581,10 +2581,6 @@ def create_cash_movement(
         raise ValueError('direction must be in or out.')
 
     movement_type = str(payload.movement_type or '').strip().lower()
-    # Refund/void reversals may be recorded after a shift closes; a new cash
-    # sale or manual drawer movement may not be posted to a closed shift.
-    if session.status != 'open' and (not source_order_id or movement_type == 'cash_sale'):
-        raise ValueError('Cash movements require an open register session.')
     transfer_types = {'safe_drop', 'bank_deposit', 'drawer_transfer'}
     transfer_requires_approval = movement_type in transfer_types
     requires_approval = bool(payload.requires_approval or transfer_requires_approval)
@@ -2629,6 +2625,11 @@ def create_cash_movement(
                 selectinload(CashMovement.approved_by),
             ).filter(CashMovement.id == existing.id).first()
             return _serialize_cash_movement(existing)
+
+    # Permit exact replay of an accepted movement even after a shift closes,
+    # but never allow a NEW manual entry or sale to hit a closed drawer.
+    if session.status != 'open' and (not source_order_id or movement_type == 'cash_sale'):
+        raise ValueError('Cash movements require an open register session.')
 
     row = CashMovement(
         cash_event_uuid=cash_event_uuid,
