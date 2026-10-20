@@ -1,7 +1,14 @@
 import asyncio
 import json
+import uuid
 from types import SimpleNamespace
 
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from app.db.database import Base
+from app.models.entities import SyncOutboxEvent
 from app.services import inventory_integration as integration
 
 
@@ -222,3 +229,190 @@ def test_inventory_event_is_suppressed_not_lost_when_delivery_disabled(monkeypat
 def test_financial_refund_never_implies_physical_stock_return():
     assert integration.should_reverse_inventory_for_refund({'refund_status': 'partially_refunded'}) is False
     assert integration.should_reverse_inventory_for_refund({'refund_status': 'fully_refunded'}) is False
+
+
+
+@pytest.mark.parametrize('quantity', ['NaN', 'Infinity', '-1', 0, '0.00001', 'bad quantity'])
+def test_inventory_sale_rejects_invalid_or_rounded_away_quantity(quantity):
+    with pytest.raises(ValueError, match='positive and finite'):
+        integration.build_inventory_event(
+            order_payload(lines=[
+                {'sku_code': 'CAFE-001', 'item_name_snapshot': 'Coffee', 'quantity': quantity},
+            ]),
+            'sale_completed',
+        )
+
+
+def test_inventory_quantity_precision_is_normalized_to_pos_line_precision():
+    payload = integration.build_inventory_event(
+        order_payload(lines=[
+            {'sku_code': 'CAFE-001', 'item_name_snapshot': 'Coffee', 'quantity': '1.23456'},
+        ]),
+        'sale_completed',
+    )
+    assert payload['lines'][0]['quantity'] == 1.2346
+
+
+def test_empty_physical_return_is_rejected_before_transaction_commit():
+    with pytest.raises(ValueError, match='at least one mapped'):
+        integration.build_inventory_event(
+            order_payload(), 'sale_returned',
+            return_lines=[], return_id='refund-123',
+        )
+
+
+def _inventory_outbox_session():
+    engine = create_engine('sqlite:///:memory:', future=True)
+    Base.metadata.create_all(bind=engine)
+    return sessionmaker(bind=engine, future=True)()
+
+
+def test_void_uses_original_sale_sku_and_quantity_after_catalog_change():
+    db = _inventory_outbox_session()
+    sale_payload = integration.build_inventory_event(order_payload(), 'sale_completed')
+    original = SyncOutboxEvent(
+        event_uuid=str(uuid.uuid4()),
+        aggregate_type='order', aggregate_id=15,
+        event_type='inventory.sale_completed',
+        idempotency_key='inventory:pos:order-uuid-15:sale_completed',
+        payload_json=json.dumps(sale_payload),
+        status='synced',
+    )
+    db.add(original)
+    db.commit()
+
+    updated_order = order_payload(lines=[
+        {'sku_code': 'REPLACEMENT-999', 'external_sku_id': 999, 'quantity': 999},
+    ])
+    result = integration.enqueue_inventory_event(db, updated_order, 'sale_voided', commit=False)
+    reversed_payload = json.loads(result.payload_json)
+    assert reversed_payload['external_event_id'] == 'pos:order-uuid-15:sale_voided'
+    assert reversed_payload['lines'] == sale_payload['lines']
+    assert reversed_payload['lines'][0]['external_product_id'] == 'CAFE-001'
+    assert result.status == 'inventory_pending'
+    db.close()
+
+
+def test_void_with_corrupted_original_sale_mapping_fails_closed():
+    db = _inventory_outbox_session()
+    db.add(SyncOutboxEvent(
+        event_uuid=str(uuid.uuid4()), aggregate_type='order', aggregate_id=15,
+        event_type='inventory.sale_completed',
+        idempotency_key='inventory:pos:order-uuid-15:sale_completed',
+        payload_json='{"external_sale_id":"another-order","lines":[]}',
+        status='synced',
+    ))
+    db.commit()
+    with pytest.raises(ValueError, match='Original Inventory sale mapping is invalid'):
+        integration.enqueue_inventory_event(db, order_payload(), 'sale_voided', commit=False)
+    db.rollback()
+    assert db.query(SyncOutboxEvent).count() == 1
+    db.close()
+
+
+def _stub_inventory_worker(monkeypatch, response_status=202):
+    calls = {'posts': 0}
+
+    class Response:
+        status_code = response_status
+        text = 'Temporary upstream limit' if response_status != 202 else ''
+
+    class Client:
+        def __init__(self, **_kwargs):
+            pass
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *_args):
+            return None
+        async def post(self, *_args, **_kwargs):
+            calls['posts'] += 1
+            return Response()
+
+    monkeypatch.setattr(integration.settings, 'inventory_integration_enabled', True)
+    monkeypatch.setattr(integration.settings, 'inventory_api_base', 'https://inventory.hiddenoasis.app/api')
+    monkeypatch.setattr(integration.settings, 'inventory_integration_token', 'test-token')
+    monkeypatch.setattr(integration.httpx, 'AsyncClient', Client)
+    return calls
+
+
+def test_inventory_reversal_waits_for_original_sale_to_sync(monkeypatch):
+    sale = SimpleNamespace(status='inventory_retry')
+    row = SimpleNamespace(
+        id=25, aggregate_id=15, event_type='inventory.sale_voided',
+        status='inventory_pending', next_retry_at=None, retry_count=0,
+        last_attempt_at=None, synced_at=None, last_error=None,
+        payload_json=json.dumps(integration.build_inventory_event(order_payload(), 'sale_voided')),
+    )
+
+    class FakeQuery:
+        def filter(self, *_args):
+            return self
+        def order_by(self, *_args):
+            return self
+        def populate_existing(self):
+            return self
+        def limit(self, *_args):
+            return self
+        def first(self):
+            return sale
+        def all(self):
+            return [row]
+
+    class FakeDb:
+        def query(self, *_args):
+            return FakeQuery()
+        def add(self, _value):
+            pass
+        def commit(self):
+            pass
+
+    calls = _stub_inventory_worker(monkeypatch)
+    db = FakeDb()
+    waiting = asyncio.run(integration.run_inventory_outbox_sync(db))
+    assert waiting['skipped'] == 1
+    assert waiting['processed'] == 0
+    assert row.status == 'inventory_pending'
+    assert calls['posts'] == 0
+
+    sale.status = 'synced'
+    delivered = asyncio.run(integration.run_inventory_outbox_sync(db))
+    assert delivered['synced'] == 1
+    assert calls['posts'] == 1
+    assert row.status == 'synced'
+
+
+@pytest.mark.parametrize('status_code', [408, 425, 429, 503])
+def test_inventory_transient_http_failures_remain_eligible_for_retry(monkeypatch, status_code):
+    row = SimpleNamespace(
+        id=27, aggregate_id=15, event_type='inventory.sale_completed',
+        status='inventory_pending', next_retry_at=None, retry_count=0,
+        last_attempt_at=None, synced_at=None, last_error=None,
+        payload_json=json.dumps(integration.build_inventory_event(order_payload(), 'sale_completed')),
+    )
+
+    class FakeQuery:
+        def filter(self, *_args):
+            return self
+        def order_by(self, *_args):
+            return self
+        def limit(self, *_args):
+            return self
+        def all(self):
+            return [row]
+
+    class FakeDb:
+        def query(self, *_args):
+            return FakeQuery()
+        def add(self, _value):
+            pass
+        def commit(self):
+            pass
+
+    calls = _stub_inventory_worker(monkeypatch, response_status=status_code)
+    result = asyncio.run(integration.run_inventory_outbox_sync(FakeDb()))
+    assert result['retrying'] == 1
+    assert result['blocked'] == 0
+    assert row.status == 'inventory_retry'
+    assert row.retry_count == 1
+    assert row.next_retry_at is not None
+    assert calls['posts'] == 1
