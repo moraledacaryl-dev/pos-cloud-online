@@ -158,7 +158,7 @@ export default function OrdersPage() {
         <div className="toolbar">
           <div>
             <h1>Orders</h1>
-            <p className="muted">Inspect split tenders, reprint receipts, void paid orders with override, and process full or partial refunds without leaving the POS back office.</p>
+            <p className="muted">Review payments, reprint invoices, and manage refunds or voids.</p>
           </div>
           {loading && <span className="badge info">Loading...</span>}
         </div>
@@ -259,6 +259,7 @@ export default function OrdersPage() {
                 </div>
               </div>
 
+              {!!(selectedOrder.room_charge_postings || []).length && (
               <div className="card">
                 <div className="row" style={{ justifyContent: 'space-between' }}><strong>Room Charge Workflow</strong><span className="small muted">{(selectedOrder.room_charge_postings || []).length} record(s)</span></div>
                 <div className="stack-tight" style={{ marginTop: 10 }}>
@@ -266,7 +267,9 @@ export default function OrdersPage() {
                   {!(selectedOrder.room_charge_postings || []).length && <div className="muted">No room-charge posting records on this order.</div>}
                 </div>
               </div>
+              )}
 
+              {!!(selectedOrder.refunds || []).length && (
               <div className="card">
                 <div className="row" style={{ justifyContent: 'space-between' }}><strong>Refunds</strong><span className="small muted">{(selectedOrder.refunds || []).length} recorded</span></div>
                 <div className="stack-tight" style={{ marginTop: 10 }}>
@@ -286,6 +289,7 @@ export default function OrdersPage() {
                   {!(selectedOrder.refunds || []).length && <div className="muted">No refunds recorded.</div>}
                 </div>
               </div>
+              )}
 
               <div className="card">
                 <strong>Actions</strong>
