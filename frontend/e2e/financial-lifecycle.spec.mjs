@@ -59,7 +59,7 @@ test('authenticated POS sale, stale-cart block, cash replay, outbox and shift cl
   expect(Number(item.price)).toBe(100);
 
   const businessDate = new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
-  const session = succeeded(await api(page, 'POST', '/sessions/open', {
+  const session = succeeded(await api(page, 'POST', '/register-sessions/open', {
     register_id: register.id, business_date: businessDate,
     shift_name: 'CI Financial E2E', opening_float: '100.00',
   }), 'open session');
@@ -126,7 +126,7 @@ test('authenticated POS sale, stale-cart block, cash replay, outbox and shift cl
   expect(movements.filter((row) => row.movement_type === 'cash_sale' && Number(row.amount) === 125)).toHaveLength(1);
   expect(movements.filter((row) => row.client_request_id === requestId || row.id === firstCash.id)).toHaveLength(1);
 
-  const liveSession = succeeded(await api(page, 'GET', `/sessions/${session.id}`), 'session detail');
+  const liveSession = succeeded(await api(page, 'GET', `/register-sessions/${session.id}`), 'session detail');
   expect(Number(liveSession.closing_expected_cash)).toBe(250);
   const outbox = succeeded(await api(page, 'GET', '/sync/outbox?limit=500'), 'sync outbox');
   const forOrder = outbox.filter((row) => Number(row.aggregate_id) === order.id);
@@ -134,7 +134,7 @@ test('authenticated POS sale, stale-cart block, cash replay, outbox and shift cl
   expect(forOrder.filter((row) => row.event_type === 'inventory.sale_completed')).toHaveLength(1);
   expect(outbox.filter((row) => row.event_type === 'payment.collected' && JSON.stringify(row.payload_json).includes(reference))).toHaveLength(1);
 
-  const closed = succeeded(await api(page, 'POST', `/sessions/${session.id}/close`, {
+  const closed = succeeded(await api(page, 'POST', `/register-sessions/${session.id}/close`, {
     closing_actual_cash: 250,
     close_mode: 'verified', blind_close: false,
     sign_off_name: 'CI Financial E2E',
@@ -142,7 +142,7 @@ test('authenticated POS sale, stale-cart block, cash replay, outbox and shift cl
   }), 'close session');
   expect(closed.status).toBe('closed');
   expect(Number(closed.variance_amount)).toBe(0);
-  expect(succeeded(await api(page, 'GET', `/sessions/${session.id}`), 'closed session').status).toBe('closed');
+  expect(succeeded(await api(page, 'GET', `/register-sessions/${session.id}`), 'closed session').status).toBe('closed');
 
   // Replaying a successfully recorded cash movement is safe after close.
   const afterClose = succeeded(await api(page, 'POST', '/cash-movements', cashPayload), 'closed-session retry');
