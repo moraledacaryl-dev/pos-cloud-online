@@ -42,7 +42,7 @@ def _self_authorized_grant(
     requested_reason: str | None,
     protected: dict,
 ) -> dict:
-    if not user_can_manage_approvals(db, requester):
+    if not user_can_manage_approvals(db, requester, commit=False):
         raise ValueError('Manager approval is required before this action can be completed.')
     grant = request_approval(
         db,
@@ -80,6 +80,7 @@ def consume_protected_approval(
             entity_type=entity_type,
             entity_id=entity_id,
             protected_payload=protected,
+            commit=False,
         )
     else:
         approved = _self_authorized_grant(
@@ -99,6 +100,7 @@ def consume_protected_approval(
             entity_type=entity_type,
             entity_id=entity_id,
             protected_payload=protected,
+            commit=False,
         )
 
     # Internal compatibility only: existing POS service signatures still carry an

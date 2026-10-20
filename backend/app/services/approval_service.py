@@ -335,7 +335,7 @@ def consume_approval_grant(
         db.flush()
         raise ValueError('Manager approval grant has expired.')
     approver = db.get(User, int(row.approved_by_user_id or 0))
-    if not user_can_manage_approvals(db, approver, commit=commit):
+    if not user_can_manage_approvals(db, approver, commit=False):
         raise ValueError('Approving manager is inactive or no longer has approvals.manage authority.')
 
     consumed_at = _now_text()
@@ -359,6 +359,9 @@ def consume_approval_grant(
         consumed_at_text=consumed_at,
     )
     db.flush()
+    if commit:
+        db.commit()
+        row = _load_row(db, approval_id=row.id)
     return _serialize(row, db)
 
 
