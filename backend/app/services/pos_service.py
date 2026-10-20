@@ -229,6 +229,23 @@ def _publish_kds_refresh(stations: list[str] | None = None, reason: str = 'refre
         pass
 
 
+def publish_order_kds_refresh(order: dict):
+    """Notify kitchen clients only after the caller commits payment settlement.
+
+    Use the already-serialized order to avoid a post-commit database read
+    that could make a successfully-paid checkout appear unsuccessful.
+    """
+    stations = list(dict.fromkeys(
+        normalize_kds_station(line.get('prep_station'))
+        for line in (order.get('lines') or [])
+    ))
+    _publish_kds_refresh(
+        stations,
+        reason='ticket_finalized',
+        payload={'order_id': order['id'], 'order_no': order.get('order_no'), 'status': order.get('status')},
+    )
+
+
 def publish_refund_kds_refresh(db: Session, order_id: int, refund_id: int | str):
     """Notify kitchen clients after the calling refund transaction commits."""
     order = db.get(PosOrder, int(order_id))
@@ -1794,7 +1811,7 @@ def merge_order_table(db: Session, order_id: int, target_table_label: str, targe
     return get_order(db, target.id)
 
 
-def pay_order(db: Session, order_id: int, payload: OrderPayPayload, user_id: int | None = None):
+def pay_order(db: Session, order_id: int, payload: OrderPayPayload, user_id: int | None = None, *, commit: bool = True):
     row = db.query(PosOrder).options(selectinload(PosOrder.lines), selectinload(PosOrder.payments), selectinload(PosOrder.register), selectinload(PosOrder.session)).filter(PosOrder.id == int(order_id)).with_for_update().first()
     if not row:
         raise ValueError('Order not found.')
@@ -1870,8 +1887,7 @@ def pay_order(db: Session, order_id: int, payload: OrderPayPayload, user_id: int
     if payload.note:
         row.note = payload.note
     db.add(row)
-    db.commit()
-    db.refresh(row)
+    db.flush()
 
     row = db.query(PosOrder).options(selectinload(PosOrder.lines), selectinload(PosOrder.payments), selectinload(PosOrder.register), selectinload(PosOrder.cashier)).filter(PosOrder.id == row.id).first()
 
@@ -1904,6 +1920,7 @@ def pay_order(db: Session, order_id: int, payload: OrderPayPayload, user_id: int
                 approved_by_user_id=user_id,
                 source_order_id=row.id,
                 create_outbox=True,
+                commit=False,
             )
         elif _normalize_tender_type(payment.tender_type) in FOLIO_PENDING_TENDERS and payment.amount_applied > 0:
             posting = next((item for item in (payment_payload.get('room_charge_postings') or []) if int(item.get('order_payment_id') or 0) == int(payment.id)), None)
@@ -1933,11 +1950,15 @@ def pay_order(db: Session, order_id: int, payload: OrderPayPayload, user_id: int
         event_type='order.finalized',
         payload=_serialize_order(row, include_lines=True, db=db),
     )
-    db.commit()
-    immediate_paid, folio_pending = _order_settlement_totals(row)
-    _audit_event(db, action='order.finalized', entity_type='order', entity_id=row.id, user_id=user_id, details={'order_id': row.id, 'order_no': row.order_no, 'status': row.status, 'settlement_state': _order_settlement_state(row), 'paid_amount': immediate_paid, 'folio_pending_amount': folio_pending})
-    _publish_kds_refresh(_order_stations(row), reason='ticket_finalized', payload={'order_id': row.id, 'order_no': row.order_no, 'status': row.status})
-    return _serialize_order(row, include_lines=True, db=db)
+    _audit_event(db, action='order.finalized', entity_type='order', entity_id=row.id, user_id=user_id, details={'order_id': row.id, 'order_no': row.order_no, 'status': row.status, 'settlement_state': _order_settlement_state(row)}, commit=False)
+    if commit:
+        db.commit()
+    else:
+        db.flush()
+    result = _serialize_order(row, include_lines=True, db=db)
+    if commit:
+        publish_order_kds_refresh(result)
+    return result
 
 
 def _refund_no_from_id(refund_id: int, business_date: str):

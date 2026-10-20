@@ -30,6 +30,7 @@ from app.services.pos_service import (
     list_refunds,
     merge_order_table,
     pay_order,
+    publish_order_kds_refresh,
     publish_refund_kds_refresh,
     set_order_status,
     transfer_order_table,
@@ -139,8 +140,8 @@ def settle_order(order_id: int, payload: OrderPayPayload, db: Session = Depends(
         _assert_order_action(db, order_id, 'pay')
         order_snapshot = get_order(db, order_id)
         validate_payment_control(order_snapshot, payload.payments)
-        result = pay_order(db, order_id, payload, user_id=getattr(current_user, 'id', None))
-        enqueue_inventory_event(db, result, 'sale_completed')
+        result = pay_order(db, order_id, payload, user_id=getattr(current_user, 'id', None), commit=False)
+        enqueue_inventory_event(db, result, 'sale_completed', commit=False)
         enqueue_operations_event(
             db,
             'order.finalized',
@@ -151,11 +152,18 @@ def settle_order(order_id: int, payload: OrderPayPayload, db: Session = Depends(
             subject_type='order',
             subject_id=order_id,
             external_user_id=getattr(current_user, 'id', None),
+            commit=False,
         )
+        db.commit()
+        # The kitchen signal must not precede a successful financial commit.
+        publish_order_kds_refresh(result)
         return result
     except ValueError as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        db.rollback()
+        raise
 
 
 @router.post('/{order_id}/transfer-table')
