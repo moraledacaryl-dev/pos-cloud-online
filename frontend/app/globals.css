@@ -5336,20 +5336,33 @@ button.danger {
     padding: 8px;
   }
   .orders-review-metrics {
-    /* Keep the three-column financial summary even if a legacy
-       responsive grid utility supplies its own column template. */
-    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    /* A two-by-two hierarchy: two wide financial KPIs above four
+       compact counts. Peso amounts must remain legible without truncation. */
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
     gap: 6px;
   }
   .orders-review-metrics .metric-card {
-    padding: 8px;
+    min-width: 0;
+    padding: 8px 5px;
+    text-align: center;
+  }
+  .orders-review-metrics .metric-card:nth-child(-n + 2) {
+    grid-column: span 2;
+    padding: 9px 11px;
+    text-align: left;
   }
   .orders-review-metrics .metric-card .muted {
     font-size: 10px;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
   }
   .orders-review-metrics .metric-value {
-    font-size: 18px;
+    font-size: 17px;
     margin-top: 4px;
+  }
+  .orders-review-metrics .metric-card:nth-child(-n + 2) .metric-value {
+    font-size: 21px;
+    overflow-wrap: break-word;
   }
   .orders-review-filters .toolbar {
     align-items: stretch;
@@ -5399,11 +5412,5 @@ button.danger {
   }
   .orders-review-detail .stack-tight > .card {
     padding: 10px;
-  }
-}
-
-@media (max-width: 360px) {
-  .orders-review-metrics {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
 }
