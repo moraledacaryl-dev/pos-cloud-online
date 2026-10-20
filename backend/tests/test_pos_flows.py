@@ -711,3 +711,141 @@ def test_unavailable_qualifier_cannot_trigger_generic_checkout_discount():
     with pytest.raises(ValueError, match='price does not match'):
         create_order(db, OrderCreate(register_session_id=session['id'], lines=lines))
     db.close()
+
+
+def _seed_atomic_checkout_order(db):
+    register = seed_register(db)
+    item = seed_catalog(db)
+    session = open_register_session(db, RegisterSessionOpen(
+        register_id=register.id, business_date='2026-04-19', shift_name='AM',
+        opening_float=0, opening_note='open',
+    ))
+    order = create_order(db, OrderCreate(
+        register_session_id=session['id'], guest_name='Atomic checkout test',
+        lines=[{'catalog_item_id': item.id, 'quantity': 1, 'unit_price': 100, 'discount_amount': 0}],
+    ))
+    return order
+
+
+def _assert_atomic_checkout_not_settled(db, order_id):
+    db.expire_all()
+    order = db.get(PosOrder, order_id)
+    assert order.status == 'draft'
+    assert not order.payments
+    assert db.query(CashMovement).filter(CashMovement.source_order_id == order_id).count() == 0
+    assert db.query(SyncOutboxEvent).filter(SyncOutboxEvent.aggregate_type == 'order', SyncOutboxEvent.aggregate_id == order_id).count() == 0
+    assert db.query(SyncOutboxEvent).filter(SyncOutboxEvent.event_type == 'cash_movement.created').count() == 0
+
+
+def test_atomic_checkout_rolls_back_deferred_settlement(monkeypatch):
+    db = make_session()
+    order = _seed_atomic_checkout_order(db)
+    published = []
+    monkeypatch.setattr(pos_service, '_publish_kds_refresh', lambda *args, **kwargs: published.append((args, kwargs)))
+
+    staged = pay_order(db, order['id'], OrderPayPayload(payments=[
+        OrderPaymentCreate(tender_type='cash', amount_applied=100, amount_received=100),
+    ]), commit=False)
+    assert staged['status'] == 'paid'
+    assert db.query(CashMovement).filter(CashMovement.source_order_id == order['id']).count() == 1
+    assert published == []  # A rolled-back sale must never appear on the kitchen display.
+    db.rollback()
+
+    _assert_atomic_checkout_not_settled(db, order['id'])
+    assert published == []
+    db.close()
+
+
+def test_atomic_checkout_rolls_back_if_inventory_enqueue_fails(monkeypatch):
+    from types import SimpleNamespace
+
+    import app.api.orders as orders_api
+
+    db = make_session()
+    order = _seed_atomic_checkout_order(db)
+    published = []
+    monkeypatch.setattr(pos_service, '_publish_kds_refresh', lambda *args, **kwargs: published.append(True))
+
+    def fail_inventory(*args, **kwargs):
+        raise RuntimeError('Injected Inventory event failure')
+
+    monkeypatch.setattr(orders_api, 'enqueue_inventory_event', fail_inventory)
+    with pytest.raises(RuntimeError, match='Injected Inventory event failure'):
+        orders_api.settle_order(
+            order['id'],
+            OrderPayPayload(payments=[OrderPaymentCreate(tender_type='cash', amount_applied=100, amount_received=100)]),
+            db=db, current_user=SimpleNamespace(id=None),
+        )
+
+    _assert_atomic_checkout_not_settled(db, order['id'])
+    assert published == []
+    db.close()
+
+
+def test_atomic_checkout_rolls_back_if_operations_enqueue_fails(monkeypatch):
+    from types import SimpleNamespace
+
+    import app.api.orders as orders_api
+
+    db = make_session()
+    order = _seed_atomic_checkout_order(db)
+
+    def fail_operations(*args, **kwargs):
+        raise RuntimeError('Injected Operations event failure')
+
+    monkeypatch.setattr(orders_api, 'enqueue_operations_event', fail_operations)
+    with pytest.raises(RuntimeError, match='Injected Operations event failure'):
+        orders_api.settle_order(
+            order['id'],
+            OrderPayPayload(payments=[OrderPaymentCreate(tender_type='cash', amount_applied=100, amount_received=100)]),
+            db=db, current_user=SimpleNamespace(id=None),
+        )
+
+    _assert_atomic_checkout_not_settled(db, order['id'])
+    db.close()
+
+
+def test_atomic_checkout_commits_once_then_notifies_kitchen_and_blocks_replay(monkeypatch):
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+    import app.api.orders as orders_api
+
+    db = make_session()
+    order = _seed_atomic_checkout_order(db)
+    notifications = []
+    commits = []
+    original_commit = db.commit
+
+    def counted_commit():
+        commits.append(True)
+        original_commit()
+
+    def kitchen_notify(stations, reason, payload):
+        notifications.append((stations, reason, payload, db.get(PosOrder, order['id']).status,
+                              db.query(CashMovement).filter(CashMovement.source_order_id == order['id']).count()))
+
+    monkeypatch.setattr(db, 'commit', counted_commit)
+    monkeypatch.setattr(pos_service, '_publish_kds_refresh', kitchen_notify)
+    monkeypatch.setattr(orders_api.enqueue_operations_event.__globals__['settings'], 'operations_integration_enabled', True)
+
+    payment = OrderPayPayload(payments=[
+        OrderPaymentCreate(tender_type='cash', amount_applied=50, amount_received=50),
+        OrderPaymentCreate(tender_type='gcash', amount_applied=50, amount_received=50,
+                           accounting_financial_account_id=2, reference_no='GC-ATOMIC-1'),
+    ])
+    result = orders_api.settle_order(order['id'], payment, db=db, current_user=SimpleNamespace(id=None))
+    assert result['status'] == 'paid'
+    assert len(commits) == 1
+    assert len(notifications) == 1
+    assert notifications[0][1] == 'ticket_finalized'
+    assert notifications[0][3:] == ('paid', 1)
+    assert db.query(SyncOutboxEvent).filter(SyncOutboxEvent.event_type == 'inventory.sale_completed').count() == 1
+    assert db.query(SyncOutboxEvent).filter(SyncOutboxEvent.event_type == 'operations.v2.order.finalized').count() == 1
+    assert db.query(SyncOutboxEvent).filter(SyncOutboxEvent.event_type == 'payment.collected').count() == 1
+    with pytest.raises(HTTPException) as blocked:
+        orders_api.settle_order(order['id'], payment, db=db, current_user=SimpleNamespace(id=None))
+    assert blocked.value.status_code == 400
+    assert db.query(CashMovement).filter(CashMovement.source_order_id == order['id']).count() == 1
+    assert len(notifications) == 1
+    db.close()
