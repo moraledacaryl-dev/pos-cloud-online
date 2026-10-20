@@ -162,6 +162,8 @@ for (const scenario of [
   { label: 'mobile', width: 390, height: 844, registerCode: 'E2E-VISUAL-M' },
 ]) {
   test('Pass 9 screenshot and form alignment audit: ' + scenario.label, async ({ page }, testInfo) => {
+    // Expanded full-page screenshots of five operational routes and dialogs.
+    test.setTimeout(180_000);
     test.skip(process.env.E2E_FINANCIAL_FIXTURES !== '1', 'Requires isolated visual CI fixtures.');
     await page.setViewportSize({ width: scenario.width, height: scenario.height });
     await login(page);
