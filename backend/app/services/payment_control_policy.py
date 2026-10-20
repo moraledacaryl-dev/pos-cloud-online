@@ -13,10 +13,21 @@ CASH_MOVEMENT_DIRECTIONS = {
     'paid_out': 'out',
     'refund': 'out',
     'safe_drop': 'out',
+    'bank_deposit': 'out',
+    'drawer_transfer': 'out',
     'owner_withdrawal': 'out',
+    'adjustment_in': 'in',
     'adjustment_out': 'out',
 }
-SENSITIVE_CASH_MOVEMENTS = {'paid_out', 'safe_drop', 'owner_withdrawal', 'adjustment_out'}
+MANUAL_CASH_MOVEMENT_TYPES = {
+    'paid_in', 'paid_out', 'float_addition', 'safe_drop', 'bank_deposit',
+    'drawer_transfer', 'owner_withdrawal', 'adjustment_in', 'adjustment_out',
+    'cash_adjustment',
+}
+SENSITIVE_CASH_MOVEMENTS = {
+    'paid_out', 'safe_drop', 'bank_deposit', 'drawer_transfer',
+    'owner_withdrawal', 'adjustment_in', 'adjustment_out', 'cash_adjustment',
+}
 
 
 MONEY_QUANTUM = Decimal('0.01')
@@ -94,6 +105,8 @@ def validate_cash_movement_control(payload) -> dict:
 
     if direction not in CASH_DIRECTIONS:
         raise ValueError('Cash movement direction must be in or out.')
+    if movement_type not in MANUAL_CASH_MOVEMENT_TYPES:
+        raise ValueError('Cash movement type is not available for manual entry.')
     if amount <= 0:
         raise ValueError('Cash movement amount must be greater than zero.')
     expected_direction = CASH_MOVEMENT_DIRECTIONS.get(movement_type)
@@ -101,10 +114,11 @@ def validate_cash_movement_control(payload) -> dict:
         raise ValueError(f'{movement_type.replace("_", " ").title()} must use direction {expected_direction}.')
     if movement_type in SENSITIVE_CASH_MOVEMENTS:
         if not note:
-            raise ValueError('Sensitive cash-out movements require a reason note.')
+            raise ValueError('Sensitive cash movements require a reason note.')
         if not reference:
-            raise ValueError('Sensitive cash-out movements require a reference number.')
-        if not getattr(payload, 'approved_by_user_id', None):
-            raise ValueError('Sensitive cash-out movements require manager approval.')
+            raise ValueError('Sensitive cash movements require a reference number.')
+        # The API consumes a server-verified approval grant after this check.
+        # Client-supplied approver IDs are explicitly rejected, so requiring
+        # one here would make all sensitive cash requests impossible.
 
     return {'ok': True, 'direction': direction, 'movement_type': movement_type, 'amount': amount}
