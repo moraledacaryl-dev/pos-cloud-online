@@ -5336,7 +5336,9 @@ button.danger {
     padding: 8px;
   }
   .orders-review-metrics {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    /* Keep the three-column financial summary even if a legacy
+       responsive grid utility supplies its own column template. */
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
     gap: 6px;
   }
   .orders-review-metrics .metric-card {
@@ -5397,5 +5399,11 @@ button.danger {
   }
   .orders-review-detail .stack-tight > .card {
     padding: 10px;
+  }
+}
+
+@media (max-width: 360px) {
+  .orders-review-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
 }
