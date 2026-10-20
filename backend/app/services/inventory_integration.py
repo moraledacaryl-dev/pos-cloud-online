@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 import httpx
 from sqlalchemy.orm import Session
@@ -40,6 +41,20 @@ def should_reverse_inventory_for_refund(order_after_refund: dict) -> bool:
     return False
 
 
+def _valid_inventory_quantity(value, *, item_name: str) -> float:
+    """Prevent NaN, negative, zero or rounded-away stock quantities."""
+    try:
+        quantity = Decimal(str(value))
+        if not quantity.is_finite() or quantity <= 0:
+            raise ValueError
+        quantity = quantity.quantize(Decimal('0.0001'), rounding=ROUND_HALF_UP)
+        if quantity <= 0:
+            raise ValueError
+    except (InvalidOperation, TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f'Inventory quantity for {item_name} must be positive and finite.') from exc
+    return float(quantity)
+
+
 def build_inventory_event(order: dict, event_type: str, *, return_lines: list[dict] | None = None, return_id: str | None = None) -> dict:
     if event_type not in INVENTORY_EVENT_TYPES:
         raise ValueError(f'Unsupported Inventory event type: {event_type}')
@@ -52,9 +67,10 @@ def build_inventory_event(order: dict, event_type: str, *, return_lines: list[di
     source_lines = return_lines if event_type == 'sale_returned' else (order.get('lines') or [])
     for line in source_lines:
         external_product_id = str(line.get('external_product_id') or line.get('sku_code') or line.get('external_sku_id') or '').strip()
-        quantity = float(line.get('quantity') or 0)
-        if quantity <= 0:
-            continue
+        quantity = _valid_inventory_quantity(
+            line.get('quantity'),
+            item_name=str(line.get('item_name_snapshot') or line.get('item_name') or external_product_id or 'unknown item'),
+        )
         if not external_product_id:
             unmapped_lines.append({
                 'catalog_item_id': line.get('catalog_item_id'),
@@ -72,6 +88,8 @@ def build_inventory_event(order: dict, event_type: str, *, return_lines: list[di
 
     if event_type == 'sale_returned' and not return_id:
         raise ValueError('Physical returns require a unique refund identifier.')
+    if event_type == 'sale_returned' and not lines:
+        raise ValueError('Physical returns require at least one mapped returned item.')
     return {
         'external_event_id': f'pos:{order_uuid}:{event_type}:{return_id}' if return_id else f'pos:{order_uuid}:{event_type}',
         'external_sale_id': order_uuid,
@@ -85,6 +103,22 @@ def build_inventory_event(order: dict, event_type: str, *, return_lines: list[di
 
 def enqueue_inventory_event(db: Session, order: dict, event_type: str, *, return_lines: list[dict] | None = None, return_id: str | None = None, commit: bool = True) -> SyncOutboxEvent:
     payload = build_inventory_event(order, event_type, return_lines=return_lines, return_id=return_id)
+    if event_type == 'sale_voided':
+        # A catalog's SKU code can change after the sale. Reverse the immutable
+        # product IDs and quantities from the original sale outbox, not the live
+        # catalog or a reserialized order.
+        original = db.query(SyncOutboxEvent).filter(
+            SyncOutboxEvent.idempotency_key == f"inventory:pos:{payload['external_sale_id']}:sale_completed",
+        ).first()
+        if original is not None:
+            try:
+                original_payload = json.loads(original.payload_json or '{}')
+            except (TypeError, ValueError) as exc:
+                raise ValueError('Original Inventory sale payload is invalid; automatic void reversal is unsafe.') from exc
+            if original_payload.get('external_sale_id') != payload['external_sale_id'] or not isinstance(original_payload.get('lines'), list):
+                raise ValueError('Original Inventory sale mapping is invalid; automatic void reversal is unsafe.')
+            payload['lines'] = original_payload['lines']
+            payload['_unmapped_lines'] = original_payload.get('_unmapped_lines') or []
     row = create_outbox_event(
         db,
         aggregate_type='order',
@@ -153,6 +187,22 @@ async def run_inventory_outbox_sync(db: Session, limit: int = 25, *, event_id: i
         if row.next_retry_at and row.next_retry_at > now_text:
             skipped += 1
             continue
+        if row.event_type in {
+            INVENTORY_EVENT_TYPES['sale_voided'],
+            INVENTORY_EVENT_TYPES['sale_refunded'],
+            INVENTORY_EVENT_TYPES['sale_returned'],
+        }:
+            # Stock reversals must not overtake a delayed or retried sale.
+            # Legacy orders without a sale event retain their existing path.
+            original = db.query(SyncOutboxEvent).filter(
+                SyncOutboxEvent.aggregate_type == 'order',
+                SyncOutboxEvent.aggregate_id == row.aggregate_id,
+                SyncOutboxEvent.event_type == INVENTORY_EVENT_TYPES['sale_completed'],
+                SyncOutboxEvent.id < row.id,
+            ).order_by(SyncOutboxEvent.id.asc()).populate_existing().first()
+            if original is not None and original.status != 'synced':
+                skipped += 1
+                continue
         processed += 1
         row.last_attempt_at = now_text
         db.add(row)
@@ -212,7 +262,7 @@ async def run_inventory_outbox_sync(db: Session, limit: int = 25, *, event_id: i
             continue
 
         detail = response.text[:1200]
-        if response.status_code >= 500:
+        if response.status_code in {408, 425, 429} or response.status_code >= 500:
             _mark_retry(db, row, f'Inventory HTTP {response.status_code}: {detail}')
             retried += 1
         else:
