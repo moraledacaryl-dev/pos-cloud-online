@@ -3,12 +3,21 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const ordersPage = new URL('../app/orders/page.js', import.meta.url);
+const styles = new URL('../app/globals.css', import.meta.url);
 
-test('orders summary can form two compact columns on narrow mobile content widths', async () => {
-  const source = await readFile(ordersPage, 'utf8');
+test('orders KPI cards use the scoped compact 3-column layout on mobile', async () => {
+  const [source, css] = await Promise.all([
+    readFile(ordersPage, 'utf8'),
+    readFile(styles, 'utf8'),
+  ]);
   assert.match(
     source,
-    /gridTemplateColumns:\s*['"]repeat\(auto-fit, minmax\(min\(140px, 100%\), 1fr\)\)['"]/,
-    'Orders KPI rail should use a sub-180px minimum so a 390px mobile viewport can show two summary cards per row.',
+    /className="metric-rail orders-review-metrics"/,
+    'Orders KPI rail must retain the dedicated responsive class.',
+  );
+  assert.match(
+    css,
+    /\.orders-review-metrics\s*\{[^}]*grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\)/,
+    'The mobile KPI rail must fit three concise metrics per row.',
   );
 });
