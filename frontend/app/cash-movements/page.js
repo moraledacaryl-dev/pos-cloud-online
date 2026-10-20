@@ -18,6 +18,7 @@ const MOVEMENT_PRESETS = [
 ];
 
 const TRANSFER_TYPES = new Set(['safe_drop', 'bank_deposit', 'drawer_transfer']);
+const SENSITIVE_CASH_MOVEMENTS = new Set(['paid_out', 'safe_drop', 'bank_deposit', 'drawer_transfer', 'owner_withdrawal', 'adjustment_in', 'adjustment_out', 'cash_adjustment']);
 
 export default function CashMovementsPage() {
   const [sessions, setSessions] = useState([]);
@@ -54,9 +55,9 @@ export default function CashMovementsPage() {
   const isTransfer = TRANSFER_TYPES.has(String(form.movement_type || '').toLowerCase());
   const needsAccountDestination = ['safe_drop', 'bank_deposit'].includes(String(form.movement_type || '').toLowerCase());
   const needsRegisterDestination = form.movement_type === 'drawer_transfer';
-  const approvalRequired = isTransfer || form.movement_type === 'owner_withdrawal';
+  const approvalRequired = SENSITIVE_CASH_MOVEMENTS.has(form.movement_type);
   const amount = Number(form.amount || 0);
-  const drawerBefore = Number(selectedSession?.expected_cash || 0);
+  const drawerBefore = Number(selectedSession?.closing_expected_cash || 0);
   const drawerAfter = drawerBefore + (form.direction === 'in' ? amount : -amount);
   const transferRows = useMemo(() => rows.filter((row) => row.is_transfer), [rows]);
   const canSubmit = !!form.register_session_id
@@ -67,13 +68,12 @@ export default function CashMovementsPage() {
     && (!needsRegisterDestination || !!form.destination_register_id);
 
   function applyPreset(preset) {
-    const transfer = TRANSFER_TYPES.has(preset.movement_type);
     setForm((prev) => ({
       ...prev,
       ...preset,
       to_accounting_financial_account_id: '',
       destination_register_id: '',
-      requires_approval: transfer || preset.movement_type === 'owner_withdrawal',
+      requires_approval: SENSITIVE_CASH_MOVEMENTS.has(preset.movement_type),
     }));
   }
 
@@ -142,7 +142,7 @@ export default function CashMovementsPage() {
           <label className="field">Receipt / Reference {form.direction === 'out' ? '(required)' : ''}<input required={form.direction === 'out'} value={form.reference_no} onChange={(e) => setForm((prev) => ({ ...prev, reference_no: e.target.value }))} /></label>
           {needsAccountDestination && <label className="field">Destination Account<select required value={form.to_accounting_financial_account_id} onChange={(e) => setForm((prev) => ({ ...prev, to_accounting_financial_account_id: e.target.value }))}><option value="">Select destination</option>{accounts.map((row) => <option key={row.id} value={row.id}>{row.name}{row.account_type ? ` · ${humanizeCode(row.account_type)}` : ''}</option>)}</select></label>}
           {needsRegisterDestination && <label className="field">Destination Register<select required value={form.destination_register_id} onChange={(e) => setForm((prev) => ({ ...prev, destination_register_id: e.target.value }))}><option value="">Select destination</option>{registers.filter((row) => String(row.id) !== String(selectedSession?.register_id)).map((row) => <option key={row.id} value={row.id}>{row.name}{row.accounting_financial_account_id ? ' · linked' : ' · not linked'}</option>)}</select></label>}
-          <label className="field-inline"><input type="checkbox" checked={!!form.requires_approval || approvalRequired} onChange={(e) => setForm((prev) => ({ ...prev, requires_approval: e.target.checked }))} disabled={approvalRequired} /> {isTransfer ? 'Approval required for transfers' : form.movement_type === 'owner_withdrawal' ? 'Approval required for owner withdrawals' : 'Require manager approval'}</label>
+          <label className="field-inline"><input type="checkbox" checked={!!form.requires_approval || approvalRequired} onChange={(e) => setForm((prev) => ({ ...prev, requires_approval: e.target.checked }))} disabled={approvalRequired} /> {approvalRequired ? 'Manager approval required for this movement' : 'Require manager approval'}</label>
           {isTransfer && <div className={`card ${selectedSession?.register_accounting_financial_account_id ? 'success' : 'warn'}`} style={{ gridColumn: '1 / -1' }}><strong>Accounting drawer link</strong><div className="small" style={{ marginTop: 4 }}>From: {selectedSession?.register_name || 'selected register'} → {selectedSession?.register_accounting_financial_account_id ? `account ${selectedSession.register_accounting_financial_account_id}` : 'not linked'}. To: {destinationRegister?.name || 'manual destination'} → {destinationRegister?.accounting_financial_account_id || form.to_accounting_financial_account_id || 'not linked'}.</div></div>}
           <label className="field" style={{ gridColumn: '1 / -1' }}>Note<textarea value={form.note} onChange={(e) => setForm((prev) => ({ ...prev, note: e.target.value }))} /></label>
           <div className="action-review" style={{ gridColumn: '1 / -1' }}>
