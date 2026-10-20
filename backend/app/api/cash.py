@@ -101,6 +101,7 @@ def add_cash_movement(payload: CashMovementCreate, db: Session = Depends(get_db)
                 db, payload, approved_by_user_id=getattr(current_user, 'id', None),
                 commit=False,
             )
+            result.pop('_was_replay', None)
             _publish_cash_movement(db, result, payload, current_user, commit=False)
             db.commit()
             return result
@@ -119,9 +120,11 @@ def add_cash_movement(payload: CashMovementCreate, db: Session = Depends(get_db)
                 db, payload, approved_by_user_id=grant['approved_by_user_id'],
                 commit=False,
             )
-            _correct_cash_audit_attribution(
-                db, int(result['id']), current_user, grant, commit=False,
-            )
+            was_replay = bool(result.pop('_was_replay', False))
+            if not was_replay:
+                _correct_cash_audit_attribution(
+                    db, int(result['id']), current_user, grant, commit=False,
+                )
             _publish_cash_movement(db, result, payload, current_user, commit=False)
         db.commit()
         return result
