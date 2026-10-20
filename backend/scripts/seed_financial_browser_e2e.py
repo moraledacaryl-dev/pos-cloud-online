@@ -31,16 +31,23 @@ def main() -> None:
             outlet = Outlet(code=OUTLET_CODE, name='CI Financial Acceptance', business_unit='F&B', is_active=True)
             db.add(outlet)
             db.flush()
-        register = db.query(Register).filter(Register.code == REGISTER_CODE).first()
-        if register is None:
-            register = Register(
-                outlet_id=outlet.id, code=REGISTER_CODE,
-                name='CI Financial Drawer', register_type='cash_drawer',
-                accounting_financial_account_id=1,
-                accounting_financial_account_code='CI-TEST-DRAWER',
-                is_active=True,
-            )
-            db.add(register)
+        # Independent drawers prevent simultaneous Playwright specs from
+        # fighting over PostgreSQL's single-open-session-per-register invariant.
+        register_names = (
+            (REGISTER_CODE, 'CI Financial Drawer'),
+            ('E2E-VISUAL-D', 'CI Desktop Visual Drawer'),
+            ('E2E-VISUAL-M', 'CI Mobile Visual Drawer'),
+        )
+        for register_code, register_name in register_names:
+            register = db.query(Register).filter(Register.code == register_code).first()
+            if register is None:
+                db.add(Register(
+                    outlet_id=outlet.id, code=register_code,
+                    name=register_name, register_type='cash_drawer',
+                    accounting_financial_account_id=1,
+                    accounting_financial_account_code='CI-TEST-DRAWER',
+                    is_active=True,
+                ))
         item = db.query(CatalogItem).filter(CatalogItem.sku_code == ITEM_SKU).first()
         if item is None:
             item = CatalogItem(
