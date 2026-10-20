@@ -211,7 +211,11 @@ for (const scenario of [
           const summaryColumns = await page.locator('.orders-review-metrics').evaluate(
             (node) => getComputedStyle(node).gridTemplateColumns.split(' ').filter(Boolean).length,
           );
-          expect(summaryColumns, 'Mobile KPI rail should show three metrics per row').toBe(3);
+          expect(summaryColumns, 'Mobile KPI rail should give two tracks to monetary totals').toBe(4);
+          const moneyHeight = await page.locator('.orders-review-metrics .metric-card:nth-child(2) .metric-value').evaluate(
+            (node) => node.getBoundingClientRect().height,
+          );
+          expect(moneyHeight, 'The net sales peso amount must remain on a single line').toBeLessThan(30);
         }
         if (scenario.label === 'desktop') {
           // Capture the actual generated invoice popup, not a hand-drawn mockup.
