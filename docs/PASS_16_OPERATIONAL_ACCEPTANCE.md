@@ -76,6 +76,12 @@ Perform only on a disposable non-production database.
 
 If a future migration is intentionally irreversible, document the release-specific rollback strategy rather than pretending downgrade is available.
 
+The synthetic PostgreSQL restore workflow now also exercises the **0013 ⇄ 0012 migration cycle twice** against a disposable restored paid sale, requiring exactly unchanged financial/order/audit/outbox hashes and a successful Alembic schema check. It deliberately populates the two 0013 selling-rule columns and verifies that downgrade is **refused before dropping any column**, leaving the migration head and rules intact. This prevents silent conditional-pricing data loss if an unauthorized downgrade is attempted. The cycle retains its elapsed time and non-sensitive PASS markers as GitHub Actions evidence.
+
+**This is CI-only procedural and financial-content evidence.** It does not prove the actual staging application works at the old migration revision, certify a real production-derived backup, or authorize downgrade of a populated production POS database. A real rollback requiring removal of pricing rules must use an operator-approved export/restore strategy; the automatic downgrade intentionally fails closed.
+
+
+
 ## 4. Downstream staging contracts
 
 Use staging/test identities and disposable transaction references.
