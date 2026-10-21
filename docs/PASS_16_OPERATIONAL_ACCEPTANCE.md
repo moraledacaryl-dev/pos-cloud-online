@@ -90,6 +90,12 @@ The `Pass 16 Accounting HTTP outage and replay` GitHub Actions workflow uses an 
 
 This is **transport/idempotency regression evidence**, not certification of the actual Accounting staging API, its authentication, ledger postings, Inventory stock movements, or downstream reconciliation. Those requirements remain NOT RUN until tested against appropriate isolated staging services with recorded source references.
 
+### Inventory stock-event outage, retry and reversal sequencing (synthetic CI only)
+
+The `Pass 16 Inventory HTTP outage and replay` GitHub Actions workflow uses a disposable PostgreSQL 16 database and loopback-only synthetic Inventory stock receiver. It exercises the real POS Inventory outbox transport against a 503 before acceptance, successful retry, and a 503 after downstream acceptance with a lost acknowledgement. The receiver deduplicates the retry by immutable `external_event_id`, so the stock debit is applied once. It also verifies that a void does not overtake the original unsynchronized sale, and that the reversal uses the original sale's immutable SKU/quantity despite a later catalog change. The separate Accounting and Inventory outbox tests have distinct databases, services, and source references.
+
+This is **synthetic delivery and ordering evidence**, not validation of the actual Inventory staging API, token provisioning, master catalog, recipe consumption, physical stock-on-hand or cross-app reconciliation. Do not mark those acceptance items PASS based on this CI workflow.
+
 ## 5. Physical peripheral acceptance
 
 Execute on the actual supported hardware/network path.
