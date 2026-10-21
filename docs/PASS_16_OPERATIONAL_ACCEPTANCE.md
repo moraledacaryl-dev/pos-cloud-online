@@ -22,6 +22,13 @@ Use a staging environment isolated from production data and credentials.
 
 Record staging URL, commit, date/time, operator, and certification output location.
 
+### Automated isolated staging-runtime rehearsal (CI only)
+
+The `Pass 16 isolated staging runtime` GitHub Actions workflow provisions ephemeral PostgreSQL 16 and Redis 7, runs the POS backend under its real `ENVIRONMENT=staging` security policy, starts the sync worker and production-built frontend, and verifies the read-only health/readiness surfaces through a local public proxy. It rejects production-origin URL variants and mismatched commit SHAs; it requires direct staging runtime identity, migration head/schema checks, strict worker/dependency readiness, and hidden private operational endpoints. The workflow may use `PUBLIC_API_PREFIX=/api` for the isolated CI proxy. Real deployed staging typically uses the default empty prefix.
+
+This is a **staging-equivalent code/runtime gate on a disposable CI runner**, not a persistent independently deployed staging clone. Do not mark the staging clone checklist complete until the separate staging environment's exact commit, database/Redis isolation, restricted credentials, operator and URL are verified and its own certification is actually executed. Do not put production credentials, backups, financial transactions or real downstream data into CI. The certification command now requires `EXPECTED_COMMIT` to be the full 40-character release SHA and refuses to skip Alembic verification.
+
+
 ## 2. Backup restore and RTO/RPO
 
 Never restore a production dump over the live database.
