@@ -1,6 +1,7 @@
 """Protect the financial settlement boundary from stale totals and direct calls."""
 
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import create_engine, update
@@ -75,7 +76,7 @@ def _assert_not_settled(db, order_id):
     assert db.query(SyncOutboxEvent).filter(SyncOutboxEvent.event_type == "order.finalized").count() == 0
 
 
-@pytest.mark.parametrize("applied", ["99.99", "100.01", "-1", "NaN", "Infinity"])
+@pytest.mark.parametrize("applied", ["99.99", "100.01", "-1", "0"])
 def test_service_rejects_invalid_tender_without_financial_side_effects(applied):
     db, order_id = _draft_order()
     try:
@@ -86,6 +87,21 @@ def test_service_rejects_invalid_tender_without_financial_side_effects(applied):
                     OrderPaymentCreate(tender_type="cash", amount_applied=Decimal(applied)),
                 ]),
             )
+        db.rollback()
+        _assert_not_settled(db, order_id)
+    finally:
+        db.close()
+
+
+
+@pytest.mark.parametrize("amount", ["NaN", "Infinity", "-Infinity"])
+def test_service_rejects_nonfinite_tender_before_mutation(amount):
+    db, order_id = _draft_order()
+    try:
+        # Invoke the service boundary directly to bypass Pydantic's finite check.
+        payload = SimpleNamespace(payments=[SimpleNamespace(amount_applied=Decimal(amount))])
+        with pytest.raises(ValueError, match="finite"):
+            pay_order(db, order_id, payload)
         db.rollback()
         _assert_not_settled(db, order_id)
     finally:
