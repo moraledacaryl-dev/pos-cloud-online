@@ -16,10 +16,19 @@ on:
         required: true
         default: true
         type: boolean
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/visual-audit-screenshots.yml'
+      - 'frontend/e2e/visual-audit.spec.mjs'
+      - 'frontend/scripts/verify-visual-audit-manifest.mjs'
+      - 'backend/scripts/seed_visual_audit.py'
   pull_request:
     paths:
       - 'backend/scripts/seed_visual_audit.py'
       - 'frontend/e2e/visual-audit.spec.mjs'
+      - 'frontend/scripts/verify-visual-audit-manifest.mjs'
+      - 'frontend/tests/visualAuditEvidence.test.mjs'
       - 'frontend/package.json'
       - '.github/workflows/visual-audit-screenshots.yml'
 
@@ -112,6 +121,10 @@ jobs:
           ADMIN_USERNAME=ci-kitchen ADMIN_FULL_NAME='Visual Audit Kitchen' ADMIN_ROLE=kitchen ADMIN_PASSWORD='CiKitchenPassword-2026!' python scripts/create_admin.py
           PYTHONPATH=. python scripts/seed_visual_audit.py
 
+      - name: Verify evidence manifest contracts
+        working-directory: frontend
+        run: node --test tests/visualAuditEvidence.test.mjs
+
       - name: Build frontend
         working-directory: frontend
         run: npm run build
@@ -136,6 +149,10 @@ jobs:
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             echo "VISUAL_AUDIT_MODE=smoke" >> "$GITHUB_ENV"
             echo "VISUAL_AUDIT_FULL_PAGE=false" >> "$GITHUB_ENV"
+          elif [[ "${{ github.event_name }}" == "push" ]]; then
+            # Certify the exact merged source with the full 478-PNG matrix.
+            echo "VISUAL_AUDIT_MODE=full" >> "$GITHUB_ENV"
+            echo "VISUAL_AUDIT_FULL_PAGE=true" >> "$GITHUB_ENV"
           else
             echo "VISUAL_AUDIT_MODE=${{ inputs.mode }}" >> "$GITHUB_ENV"
             echo "VISUAL_AUDIT_FULL_PAGE=${{ inputs.full_page }}" >> "$GITHUB_ENV"
@@ -144,6 +161,11 @@ jobs:
       - name: Capture visual audit
         working-directory: frontend
         run: npx playwright test e2e/visual-audit.spec.mjs --project=chromium --reporter=list
+
+      - name: Verify screenshot evidence coverage and exact commit
+        working-directory: frontend
+        run: node scripts/verify-visual-audit-manifest.mjs
+
 
       - name: Summarize screenshot manifest
         if: always()
