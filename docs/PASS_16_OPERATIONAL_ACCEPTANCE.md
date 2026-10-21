@@ -84,6 +84,12 @@ For Accounting, Inventory, Staff, and Operations as applicable:
 
 Record only non-sensitive IDs, timestamps, response classes, and reconciliation results.
 
+### Accounting HTTP failure, retry, and replay (synthetic CI only)
+
+The `Pass 16 Accounting HTTP outage and replay` GitHub Actions workflow uses an ephemeral PostgreSQL 16 database and a loopback-only synthetic Accounting intake to exercise the **actual POS outbox transport** (not a mocked Python client). It verifies: 503 before downstream acceptance; local order and outbox preserved for retry; acceptance after recovery; downstream acceptance followed by a deliberately lost HTTP acknowledgement (503); replay with a stable `external_id`; exactly one downstream sale per source order; and no further send after an event reaches `synced`. Unknown intake routes return 404 rather than fake success. This uses only synthetic POS orders and never connects to production Accounting.
+
+This is **transport/idempotency regression evidence**, not certification of the actual Accounting staging API, its authentication, ledger postings, Inventory stock movements, or downstream reconciliation. Those requirements remain NOT RUN until tested against appropriate isolated staging services with recorded source references.
+
 ## 5. Physical peripheral acceptance
 
 Execute on the actual supported hardware/network path.
