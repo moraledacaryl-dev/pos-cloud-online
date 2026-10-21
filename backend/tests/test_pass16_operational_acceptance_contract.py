@@ -175,3 +175,36 @@ def test_staging_certification_rejects_invalid_inputs_without_http_calls():
              'refusing to run staging certification against production')
     rejected({'BACKEND_BASE': 'https://pos.hiddenoasis.app:443'},
              'refusing to run staging certification against production')
+
+
+def test_accounting_http_replay_ci_is_isolated_and_verifies_ambiguous_ack():
+    workflow = read('.github/workflows/pass16-accounting-replay-ci.yml')
+    assert 'pos_pass16_accounting_ci' in workflow
+    assert 'postgres:16' in workflow
+    assert 'PASS16_ACCOUNTING_REPLAY_CI' in workflow
+    assert 'pass16_accounting_replay.py' in workflow
+    assert 'PASS16_ACCOUNTING_LOST_ACK_IDEMPOTENT_REPLAY=PASS' in workflow
+
+    script = read('backend/scripts/pass16_accounting_replay.py')
+    assert 'pass16-replay-order-' in script
+    assert 'run_outbox_sync(db, limit=' in script
+    assert 'PASS16_ACCOUNTING_OUTAGE_RECOVERY=PASS' in script
+    assert 'PASS16_ACCOUNTING_HTTP_REPLAY_CERTIFICATION=PASS' in script
+    stub = read('backend/scripts/pass16_accounting_replay_stub.py')
+    assert '"fail_before_accept"' in stub
+    assert '"accept_then_503"' in stub
+    assert 'ORDERS[external_id] = data' in stub
+    assert 'unexpected synthetic Accounting route' in stub
+
+
+def test_accounting_replay_stub_rejects_non_ci_execution():
+    script = ROOT / 'backend/scripts/pass16_accounting_replay_stub.py'
+    result = subprocess.run(
+        ['python', str(script)],
+        cwd=ROOT,
+        env={**os.environ, 'GITHUB_ACTIONS': 'false',
+             'PASS16_ACCOUNTING_REPLAY_CI': '1', 'ENVIRONMENT': 'staging'},
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode != 0
+    assert 'requires isolated staging CI' in result.stderr
