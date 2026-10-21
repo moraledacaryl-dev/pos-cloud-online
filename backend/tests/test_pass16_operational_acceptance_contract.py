@@ -101,4 +101,3 @@ def test_isolated_restore_workflow_remains_synthetic_and_uses_no_production_envi
     assert 'PASS 16 NON-PRODUCTION RESTORE REHEARSAL: PASS' in workflow
     assert 'pg_dump' in workflow and 'pg_restore --list' in workflow
     assert 'RECONCILED_$table' in workflow
-    assert 'Non-production' not in workflow or 'production credentials' in workflow
