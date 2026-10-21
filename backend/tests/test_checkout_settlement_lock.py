@@ -19,8 +19,8 @@ from app.models.entities import (
 )
 from app.schemas.common import (
     OrderCreate,
-    OrderPayPayload,
     OrderPaymentCreate,
+    OrderPayPayload,
     RegisterSessionOpen,
 )
 from app.services.pos_service import create_order, open_register_session, pay_order
