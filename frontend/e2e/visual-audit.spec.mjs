@@ -177,7 +177,7 @@ async function logoutIfPresent(page) {
 
 function shouldCaptureRoute(roleCase, route) {
   if (MODE !== 'smoke') return true;
-  const smoke = new Set(['/dashboard', '/pos', '/orders', '/users', '/kitchen']);
+  const smoke = new Set(['/dashboard', '/pos', '/orders', '/catalog', '/users', '/kitchen']);
   return smoke.has(route) && (roleCase.allowed.has(route) || route === '/users' || route === '/kitchen');
 }
 
