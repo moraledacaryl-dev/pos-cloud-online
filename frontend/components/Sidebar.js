@@ -76,10 +76,10 @@ const Sidebar = forwardRef(function Sidebar({ mobileOpen = false, onNavigate, on
   return (
     <aside ref={ref} id="primary-navigation" className={className} aria-label="Primary navigation">
       <div className="brand">
-        <div className="brand-badge" aria-hidden="true">PO</div>
+        <div className="brand-badge" aria-hidden="true">HO<span className="brand-pulse" /></div>
         <div className="brand-copy">
-          <h2>Dedicated POS</h2>
-          <div className="small muted-on-dark">Fast sales and drawer control</div>
+          <h2>Hidden Oasis<span className="brand-product">Point of sale</span></h2>
+
         </div>
         <button type="button" className="drawer-close" aria-label="Close navigation menu" onClick={onClose}>×</button>
         <button type="button" className="sidebar-toggle" aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} onClick={() => setCollapsed((v) => !v)}>

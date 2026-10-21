@@ -3,69 +3,51 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { getDashboard } from '../../lib/api';
+import PosIcon from '../../components/PosIcon';
 
 const shortcuts = [
-  ['/pos', 'Open POS', 'Start cashier workflow and accept payments quickly.'],
-  ['/orders', 'Orders', 'Review ticket history, tenders, and cashier notes.'],
-  ['/sessions', 'Shift Sessions', 'Open, monitor, and close register shifts.'],
-  ['/cash-movements', 'Cash Movements', 'Paid in, paid out, float, and drawer control.'],
-  ['/sync', 'Sync Queue', 'Review pending sales and drawer events before accounting ingestion.'],
+  ['/orders', 'Orders', 'Tickets, payments, and order history', 'orders'],
+  ['/sessions', 'Shift Sessions', 'Open shifts and reconcile the drawer', 'shift'],
+  ['/cash-movements', 'Cash Movements', 'Cash in, paid out, and safe drops', 'cash'],
+  ['/sync', 'Sync Queue', 'Delivery status and retries', 'sync'],
 ];
-
 function money(value) {
   return `₱${Number(value || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
-
 export default function DashboardPage() {
   const [summary, setSummary] = useState(null);
   const [error, setError] = useState('');
-
   useEffect(() => {
-    getDashboard().then(setSummary).catch((err) => setError(err.message || 'Failed to load dashboard.'));
+    getDashboard().then(setSummary).catch(err => setError(err.message || 'Failed to load dashboard.'));
   }, []);
-
+  const metrics = [
+    ['Open Sessions', summary?.open_sessions, 'shift', '/sessions'],
+    ['Open Draft / Held Orders', summary?.orders_open, 'orders', '/orders'],
+    ['Active Menu Items', summary?.catalog_count, 'menu', '/catalog'],
+    ['Pending Sync', summary?.pending_sync, 'sync', '/sync'],
+  ];
   return (
-    <div className="stack">
-      <section className="section">
-        <h1>Dashboard</h1>
-        <p className="muted">Live view of POS activity, open shifts, sales, and accounting sync status.</p>
-        {!!error && <p className="error-text" style={{ marginTop: 8 }}>{error}</p>}
+    <div className="stack pos-dashboard">
+      <section className="dashboard-heading">
+        <div><div className="eyebrow">Service overview</div><h1>Dashboard</h1></div>
+        <Link href="/pos" className="button-link primary dashboard-open"><PosIcon name="terminal" />Open POS<PosIcon name="arrow" /></Link>
       </section>
-
-      <section className="section">
-        <div className="metric-rail">
-          <div className="metric-card"><div className="muted">Open Sessions</div><div className="metric-value">{summary?.open_sessions ?? '-'}</div></div>
-          <div className="metric-card"><div className="muted">Pending Sync</div><div className="metric-value">{summary?.pending_sync ?? '-'}</div></div>
-          <div className="metric-card"><div className="muted">Sales Today</div><div className="metric-value">{summary ? money(summary.sales_today) : '-'}</div></div>
-          <div className="metric-card"><div className="muted">Cash In Today</div><div className="metric-value">{summary ? money(summary.cash_today) : '-'}</div></div>
-          <div className="metric-card"><div className="muted">Open Draft / Held Orders</div><div className="metric-value">{summary?.orders_open ?? '-'}</div></div>
-          <div className="metric-card"><div className="muted">Active Menu Items</div><div className="metric-value">{summary?.catalog_count ?? '-'}</div></div>
-        </div>
+      {!!error && <p className="error-text" role="alert">{error}</p>}
+      <section className="sales-overview" aria-label="Today's sales">
+        <div className="sales-feature"><div className="sales-feature-top"><span>Sales Today</span><PosIcon name="cash" /></div><strong>{summary ? money(summary.sales_today) : '—'}</strong><div className="sales-feature-bottom"><span>Hidden Oasis</span><span>Point of sale</span></div></div>
+        <div className="cash-feature"><span className="summary-icon"><PosIcon name="cash" /></span><div><span>Cash In Today</span><strong>{summary ? money(summary.cash_today) : '—'}</strong></div><Link href="/cash-movements">View cash movements <span aria-hidden="true">↗</span></Link></div>
       </section>
-
-      <section className="section">
-        <h2>Latest Session</h2>
-        {summary?.latest_session ? (
-          <div className="card-grid" style={{ marginTop: 10 }}>
-            <div className="card"><div className="muted">Session</div><div className="metric-value" style={{ fontSize: 22 }}>{summary.latest_session.session_code}</div></div>
-            <div className="card"><div className="muted">Register</div><div className="metric-value" style={{ fontSize: 22 }}>{summary.latest_session.register_name || '-'}</div></div>
-            <div className="card"><div className="muted">Expected Cash</div><div className="metric-value" style={{ fontSize: 22 }}>{money(summary.latest_session.closing_expected_cash)}</div></div>
-            <div className="card"><div className="muted">Status</div><div className="metric-value" style={{ fontSize: 22 }}>{summary.latest_session.status}</div></div>
-          </div>
-        ) : <p className="muted" style={{ marginTop: 8 }}>No session data yet.</p>}
+      <section className="dashboard-metrics" aria-label="POS activity">{metrics.map(([label, value, icon, href]) => <Link href={href} key={label} className="dashboard-stat"><div><span>{label}</span><strong>{value ?? '—'}</strong></div><span className="summary-icon"><PosIcon name={icon} /></span></Link>)}</section>
+      <section className="section dashboard-session">
+        <div className="panel-title"><h2>Latest Session</h2><Link href="/sessions" className="subtle-link">View sessions ↗</Link></div>
+        {summary?.latest_session ? <div className="session-summary">
+          <div><span>Session</span><strong>{summary.latest_session.session_code}</strong></div>
+          <div><span>Register</span><strong>{summary.latest_session.register_name || '—'}</strong></div>
+          <div><span>Expected Cash</span><strong>{money(summary.latest_session.closing_expected_cash)}</strong></div>
+          <div><span>Status</span><strong><span className={`badge ${summary.latest_session.status === 'open' ? 'success' : 'info'}`}>{summary.latest_session.status}</span></strong></div>
+        </div> : <p className="muted">{summary ? 'No session data yet.' : 'Loading session…'}</p>}
       </section>
-
-      <section className="section">
-        <h2>Shortcuts</h2>
-        <div className="card-grid" style={{ marginTop: 10 }}>
-          {shortcuts.map(([href, label, note]) => (
-            <Link key={href} href={href} className="card card-link">
-              <div className="row" style={{ justifyContent: 'space-between' }}><strong>{label}</strong><span>→</span></div>
-              <div className="small muted">{note}</div>
-            </Link>
-          ))}
-        </div>
-      </section>
+      <section className="dashboard-shortcuts" aria-label="Shortcuts">{shortcuts.map(([href, label, note, icon]) => <Link key={href} href={href} className="dashboard-shortcut"><span className="summary-icon"><PosIcon name={icon} /></span><div><strong>{label}</strong><span>{note}</span></div><PosIcon name="arrow" /></Link>)}</section>
     </div>
   );
 }

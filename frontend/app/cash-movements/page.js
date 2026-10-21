@@ -121,7 +121,7 @@ export default function CashMovementsPage() {
     <div className="stack">
       <section className="section">
         <h1>Cash Movements</h1>
-        <p className="muted">Record paid outs, safe drops, bank deposits, and drawer transfers with destination tracking, approval awareness, and transfer history.</p>
+        <p className="muted">Paid outs, safe drops, deposits, and drawer transfers.</p>
         {!!notice && <p className="notice-text" style={{ marginTop: 8 }}>{notice}</p>}
         {!!error && <p className="error-text" style={{ marginTop: 8 }}>{error}</p>}
       </section>

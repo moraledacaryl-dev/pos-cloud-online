@@ -272,7 +272,7 @@ export default function KitchenPage({ initialStation = '', initialView = '' }) {
       <section className="section kds-topbar">
         <div>
           <h1>{defaults.title}</h1>
-          <p className="muted">One kitchen screen for active work, held items, ready orders, and all-day totals.</p>
+          <p className="muted">Active tickets and station queues.</p>
         </div>
         <div className="kds-top-actions">
           <span className={`badge ${connectionState === 'connected' ? 'success' : connectionState === 'connecting' ? 'warn' : 'danger'}`}>{connectionState === 'connected' ? 'Live updates connected' : connectionState === 'connecting' ? 'Connecting · polling active' : 'Live updates offline · polling active'}</span>
