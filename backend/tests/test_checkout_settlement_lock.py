@@ -135,15 +135,15 @@ def test_checkout_reloads_cached_order_total_under_lock_before_settlement():
             .values(total_amount=200)
             .execution_options(synchronize_session=False)
         )
-        db.commit()
         assert cached.total_amount == 100
         with pytest.raises(ValueError, match="exactly equal"):
             pay_order(db, order_id, OrderPayPayload(payments=[
                 OrderPaymentCreate(tender_type="cash", amount_applied=100),
             ]))
+        assert cached.total_amount == 200
         db.rollback()
         _assert_not_settled(db, order_id)
-        assert db.get(PosOrder, order_id).total_amount == 200
+        assert db.get(PosOrder, order_id).total_amount == 100
     finally:
         db.close()
 
