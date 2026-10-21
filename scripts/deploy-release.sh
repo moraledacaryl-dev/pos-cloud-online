@@ -9,6 +9,7 @@ EVIDENCE_DIR="${EVIDENCE_DIR:-/var/lib/hiddenoasis-pos/deploy-evidence}"
 PUBLIC_BASE="${PUBLIC_BASE:-}"
 ALLOW_ACCOUNTING_UNAVAILABLE="${ALLOW_ACCOUNTING_UNAVAILABLE:-false}"
 CERTIFICATION_SCRIPT="${CERTIFICATION_SCRIPT:-scripts/production-certify.sh}"
+DEPLOY_TARGET_GATE_SCRIPT="${DEPLOY_TARGET_GATE_SCRIPT:-scripts/deploy-target-gate.py}"
 
 fail() { echo "DEPLOY FAIL: $*" >&2; exit 1; }
 wait_for_http() {
@@ -50,6 +51,16 @@ if [[ -z "$PUBLIC_BASE" && "$TARGET_ENVIRONMENT" == "production" ]]; then
 fi
 [[ "$PUBLIC_BASE" =~ ^https://[^[:space:]]+$ ]] || fail 'PUBLIC_BASE must be the HTTPS URL for the selected environment'
 [[ "$EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]] || fail 'EXPECTED_COMMIT must be a full 40-character lowercase commit SHA'
+# The Actions environment label is not evidence of which actual server
+# SERVER_HOST points to. Before backup, git switch, or systemd changes,
+# verify the selected HTTPS origin and the backend's real runtime environment.
+[[ -f "$DEPLOY_TARGET_GATE_SCRIPT" ]] || fail "deployment target gate not found: $DEPLOY_TARGET_GATE_SCRIPT"
+python3 "$DEPLOY_TARGET_GATE_SCRIPT" validate-url
+if ! curl -fsS --connect-timeout 3 --max-time 10 'http://127.0.0.1:8100/internal/healthz/details' \
+    | python3 "$DEPLOY_TARGET_GATE_SCRIPT" validate-runtime; then
+  fail "local backend environment identity check failed; refusing to change any service"
+fi
+
 [[ -d "$APP_DIR/.git" ]] || fail "not a Git checkout: $APP_DIR"
 
 cd "$APP_DIR"
@@ -66,10 +77,12 @@ EVIDENCE_FILE="$EVIDENCE_DIR/$EXPECTED_COMMIT.txt"
 rollback_code() {
   local exit_code=$?
   if [[ $exit_code -eq 0 ]]; then return; fi
-  # ERR can fire inside a subshell whose working directory is backend/ or
-  # frontend/. Disable the trap and re-anchor before using repository-relative
-  # paths so rollback itself cannot recurse or look under backend/backend.
+  # With errtrace (-E), a failed subshell can raise ERR in the subshell
+  # AND again in its parent. Do not run destructive rollback twice.
+  # The failed child propagates its exit status so the top-level trap
+  # performs one restore of code, frontend build and systemd units.
   trap - ERR
+  if (( BASH_SUBSHELL > 0 )); then return "$exit_code"; fi
   cd "$APP_DIR" || true
   echo "Deployment failed; restoring code commit $PREVIOUS_COMMIT" >&2
   git switch --detach "$PREVIOUS_COMMIT" || true
@@ -113,7 +126,7 @@ systemctl stop pos-frontend pos-sync-worker pos-backend
   # production mode, database URLs, credentials, or feature flags. CI also runs
   # against the application's deterministic defaults rather than live env state.
   env -i \
-    PATH="$PATH" \
+    PATH="$APP_DIR/backend/.venv/bin:$PATH" \
     HOME="${HOME:-/root}" \
     LANG="${LANG:-C.UTF-8}" \
     PYTHONPATH=. \

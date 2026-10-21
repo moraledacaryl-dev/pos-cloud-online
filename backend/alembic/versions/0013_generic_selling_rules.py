@@ -25,6 +25,26 @@ def upgrade():
 def downgrade():
     connection = op.get_bind()
     columns = {column["name"] for column in sa.inspect(connection).get_columns("catalog_items")}
+
+    # This migration introduced two user-editable selling-rule columns. A
+    # blind downgrade would permanently discard populated rule data. Refuse
+    # to downgrade when either field has values so an operator can arrange an
+    # approved export/recovery path instead of silent pricing data loss.
+    existing = [
+        field for field in ("conditional_prices_json", "pricing_tags_json")
+        if field in columns
+    ]
+    if existing:
+        nonnull = " OR ".join(f"{field} IS NOT NULL" for field in existing)
+        populated = connection.execute(
+            sa.text(f"SELECT EXISTS (SELECT 1 FROM catalog_items WHERE {nonnull})")
+        ).scalar_one()
+        if populated:
+            raise RuntimeError(
+                "0013 downgrade blocked: populated conditional pricing/tags "
+                "would be lost; preserve selling rules before an approved rollback."
+            )
+
     if "conditional_prices_json" in columns:
         op.drop_column("catalog_items", "conditional_prices_json")
     if "pricing_tags_json" in columns:

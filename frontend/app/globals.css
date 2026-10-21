@@ -5459,3 +5459,55 @@ button.danger {
     scroll-margin-top: 8px;
   }
 }
+
+/* Screenshot-audit remediation: keyboard/touch access to every service area on narrow POS screens. */
+.spaces-area-picker {
+  display: none;
+}
+
+.catalog-toolbar-controls .catalog-search-input {
+  width: 220px;
+  max-width: 100%;
+}
+
+@media (max-width: 760px) {
+  .terminal-main .pos-spaces-screen > .spaces-command-strip {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .terminal-main .pos-spaces-screen > .spaces-command-strip > .spaces-area-tabs {
+    display: none;
+  }
+
+  .terminal-main .pos-spaces-screen .spaces-area-picker {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 0;
+    font-size: 13px;
+    font-weight: 650;
+    color: var(--text);
+  }
+
+  .terminal-main .pos-spaces-screen .spaces-area-picker select,
+  .terminal-main .pos-spaces-screen .start-order-first-button {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+  }
+
+  .catalog-toolbar-controls {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+    gap: 8px;
+  }
+
+  .catalog-toolbar-controls > button,
+  .catalog-toolbar-controls > select,
+  .catalog-toolbar-controls > .catalog-search-input {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+  }
+}

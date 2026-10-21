@@ -57,6 +57,16 @@ jobs:
       - name: Run backend tests
         run: python -m pytest tests
 
+      - name: Check deployment safety tests without a python shell alias
+        run: |
+          set -euo pipefail
+          PYTHON_BIN="$(command -v python)"
+          test -x "$PYTHON_BIN"
+          # Simulate the production deployment's sanitized subprocess PATH:
+          # this intentionally has no bare 'python' executable.
+          /usr/bin/env -i PATH=/usr/bin:/bin HOME="$HOME" LANG=C.UTF-8 PYTHONPATH=. \
+            "$PYTHON_BIN" -m pytest -q tests/test_pass16_operational_acceptance_contract.py
+
   frontend:
     name: Frontend build and tests
     runs-on: ubuntu-latest

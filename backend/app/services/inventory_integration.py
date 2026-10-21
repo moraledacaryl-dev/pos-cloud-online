@@ -127,7 +127,10 @@ def enqueue_inventory_event(db: Session, order: dict, event_type: str, *, return
         payload=payload,
         idempotency_key=f"inventory:{payload['external_event_id']}",
     )
-    if row.status != 'synced':
+    # Only a newly created (or legacy generic pending) row may be moved into
+    # the Inventory queue. Preserve retries, their backoff clock, blocked and
+    # suppressed decisions, and acknowledged rows on duplicate enqueue calls.
+    if row.status in {'pending', 'failed'}:
         row.status = 'inventory_pending'
         row.last_error = None
         db.add(row)

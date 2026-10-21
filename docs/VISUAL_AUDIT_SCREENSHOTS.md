@@ -85,6 +85,10 @@ The workflow starts isolated PostgreSQL, Redis, backend, frontend, and proxy ser
 
 Pull requests that change the screenshot harness automatically run smoke mode so broken selectors or capture logic cannot merge unnoticed.
 
+Pushes to `main` that change the capture harness or evidence verifier now run **full mode automatically**, including viewport and expanded full-page images. This also starts the full audit after this change is first merged. The workflow validates **478 PNGs covering 239 role/route/viewport/state scenarios**, verifies actual files and PNG signatures, rejects duplicate/missing captures, and binds its manifest to the exact `GITHUB_SHA`. PRs still use smoke mode (41 viewport PNGs); manually dispatched runs continue to support full/smoke selections. An incomplete image set fails the workflow, even if Playwright reported success.
+
+The full automatic run is **synthetic isolated evidence** for the merged source, not live-production screenshot or physical-device proof. Review the downloaded images and file human usability findings before completing operational sign-off.
+
 ## Local / server command
 
 Once an isolated test stack is already running at the configured `E2E_BASE_URL` with the four E2E users provisioned:
@@ -109,6 +113,11 @@ To reduce artifact size:
 VISUAL_AUDIT_FULL_PAGE=false npm run test:visual-audit
 ```
 
+## Healthy visual baseline versus failure-state captures
+
+The default route/role/viewport screenshots must represent a **healthy synthetic integration state**, not a permanent outage warning. The workflow now runs an ephemeral PostgreSQL and Redis, a real POS backend and sync worker, and a loopback-only read-only Accounting health fixture on port 18993. Before screenshots, it requires Accounting to be reachable, the worker heartbeat non-stale, strict integration readiness and a 405 response to fake Accounting financial writes. This makes the main page screenshots better evidence of the expected normal production interface without sending transactions anywhere.
+
+The existing deliberately degraded screenshots (browser offline, aborted POS API calls, invalid login, denied roles) remain in the same artifact. The audit continues to use disposable users, rooms, orders and menu items; it is **not a production or live downstream transaction test**.
 ## Safety
 
 The workflow is intended for isolated/disposable data only. It must not be pointed at production for scenario capture. Some states intentionally submit an invalid login and intentionally abort API calls; the harness also exercises authenticated role navigation. Keep production screenshot collection read-only and use a separate workflow if production evidence is ever required.

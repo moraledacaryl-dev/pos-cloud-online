@@ -49,3 +49,23 @@ def test_deploy_propagates_the_narrow_accounting_outage_override():
     assert 'allow_accounting_unavailable' in workflow
     assert 'git show "$EXPECTED_COMMIT:scripts/deploy-release.sh"' in workflow
     assert 'git show "$EXPECTED_COMMIT:scripts/production-certify.sh"' in workflow
+
+
+
+def test_deploy_uses_virtualenv_in_sanitized_subprocess_path_and_single_rollback():
+    text = (REPO_ROOT / 'scripts' / 'deploy-release.sh').read_text()
+    assert 'PATH="$APP_DIR/backend/.venv/bin:$PATH"' in text
+    assert 'if (( BASH_SUBSHELL > 0 )); then return "$exit_code"; fi' in text
+    assert text.index('if (( BASH_SUBSHELL > 0 ))') < text.index('git switch --detach "$PREVIOUS_COMMIT"')
+    assert text.count('trap rollback_code ERR') == 1
+
+
+def test_ci_exercises_deploy_safety_with_path_missing_python_alias():
+    text = (REPO_ROOT / '.github/workflows/ci.yml').read_text()
+    assert 'Check deployment safety tests without a python shell alias' in text
+    assert 'PATH=/usr/bin:/bin' in text
+    assert 'tests/test_pass16_operational_acceptance_contract.py' in text
+    contract = (REPO_ROOT / 'backend/tests/test_pass16_operational_acceptance_contract.py').read_text()
+    assert 'import sys' in contract
+    assert contract.count('[sys.executable,') >= 3
+    assert "['python'," not in contract

@@ -4,10 +4,11 @@ This script is intentionally only invoked by the screenshot workflow. It creates
 catalog, register, session, and order density to exercise real operational layouts.
 """
 from datetime import date
+import os
 from decimal import Decimal
 
 from app.db.database import SessionLocal
-from app.models.entities import Register
+from app.models.entities import Register, SyncOutboxEvent
 from app.schemas.common import CatalogItemCreate, OrderCreate, OrderLineCreate, RegisterSessionOpen
 from app.services.pos_service import (
     create_catalog_item,
@@ -57,6 +58,15 @@ def _is_active(row):
 
 
 def main():
+    # This fixture creates synthetic register/order financial events and must
+    # never operate against a live PostgreSQL database.
+    if not (
+        os.environ.get("GITHUB_ACTIONS") == "true"
+        and os.environ.get("VISUAL_AUDIT_CI") == "1"
+        and os.environ.get("ENVIRONMENT") == "development"
+        and os.environ.get("DATABASE_URL", "").endswith("/pos_visual_audit")
+    ):
+        raise RuntimeError("Visual audit data fixture only runs in isolated GitHub CI")
     db = SessionLocal()
     try:
         ensure_default_outlet_registers(db)
@@ -134,6 +144,23 @@ def main():
                 ), user_id=None)
                 if idx in {1, 5}:
                     set_order_status(db, _id(order), "held", user_id=None)
+
+        # The audit is about visual layout, not sending actual money events.
+        # Preserve seeded event history but suppress delivery to any downstream.
+        # A real sync worker can then provide heartbeat without fabricating an
+        # Accounting financial acknowledgement or generating false 503 alerts.
+        suppressed = 0
+        for event in db.query(SyncOutboxEvent).all():
+            if event.status in {
+                "pending", "failed", "error", "blocked",
+                "inventory_pending", "inventory_retry",
+                "operations_pending", "operations_retry", "operations_blocked",
+            }:
+                event.status = "suppressed"
+                event.last_error = None
+                suppressed += 1
+        db.commit()
+        print(f"visual_audit_suppressed_synthetic_events={suppressed}")
 
         print(f"visual_audit_catalog_items={len(list_catalog_items(db, active_only=True, available_only=True))}")
         print(f"visual_audit_open_sessions={len(list_register_sessions(db, status='open', limit=20))}")

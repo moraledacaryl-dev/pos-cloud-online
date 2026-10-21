@@ -22,6 +22,21 @@ Use a staging environment isolated from production data and credentials.
 
 Record staging URL, commit, date/time, operator, and certification output location.
 
+### Protected staging deployment prerequisites (real infrastructure)
+
+On 2026-10-21 staging dispatch run #39600425046, release verification passed but deployment stopped **before** code switch/backup/service restart because the GitHub `staging` Environment provided an empty `PUBLIC_BASE`. A GitHub Actions job environment label alone does not prove `SERVER_HOST` points to a staging server.
+
+Before re-dispatch, an authorized GitHub administrator must open **Settings → Environments → staging** and configure the **Environment variable** `PUBLIC_BASE` to the actual **HTTPS staging POS origin** (not `https://pos.hiddenoasis.app`). Confirm the `staging` Environment secrets `SERVER_HOST`, `SERVER_PORT`, `SERVER_USER`, and `SERVER_SSH_KEY` resolve to a dedicated staging host with isolated POS database, Redis, credentials and systemd units. Do not copy production secrets as a shortcut. Do not use the production POS host for staging. The staging machine needs a previously provisioned, healthy POS backend reporting `environment: staging` on its private detailed health endpoint before this automated release workflow can deploy to it.
+
+The protected Deploy POS workflow now validates the selected HTTPS origin **before opening SSH**. Its release script independently verifies the remote backend-reported environment matches `TARGET_ENVIRONMENT` **before backups, git checkout, systemd or service changes**. A rejected target must be fixed in GitHub environment configuration or staging infrastructure, never by bypassing the gate. Initial staging infrastructure bootstrap is separate from routine production release automation.
+
+### Automated isolated staging-runtime rehearsal (CI only)
+
+The `Pass 16 isolated staging runtime` GitHub Actions workflow provisions ephemeral PostgreSQL 16 and Redis 7, runs the POS backend under its real `ENVIRONMENT=staging` security policy, starts the sync worker and production-built frontend, and verifies the read-only health/readiness surfaces through a local public proxy. It rejects production-origin URL variants and mismatched commit SHAs; it requires direct staging runtime identity, migration head/schema checks, strict worker/dependency readiness, and hidden private operational endpoints. The workflow may use `PUBLIC_API_PREFIX=/api` for the isolated CI proxy. Real deployed staging typically uses the default empty prefix.
+
+This is a **staging-equivalent code/runtime gate on a disposable CI runner**, not a persistent independently deployed staging clone. Do not mark the staging clone checklist complete until the separate staging environment's exact commit, database/Redis isolation, restricted credentials, operator and URL are verified and its own certification is actually executed. Do not put production credentials, backups, financial transactions or real downstream data into CI. The certification command now requires `EXPECTED_COMMIT` to be the full 40-character release SHA and refuses to skip Alembic verification.
+
+
 ## 2. Backup restore and RTO/RPO
 
 Never restore a production dump over the live database.
@@ -33,6 +48,19 @@ Never restore a production dump over the live database.
 - [ ] Compare backup timestamp with rehearsal start to calculate observed recovery point age.
 - [ ] Verify representative users/registers/catalog/orders and reconciliation totals after restore without recording sensitive data in Git.
 - [ ] Record backup retention and the business-approved RTO/RPO targets.
+
+### Automated synthetic restore smoke test (separate from operational evidence)
+
+The `Pass 16 isolated synthetic restore` GitHub Actions workflow creates **only test fixtures** in ephemeral PostgreSQL 16, makes a custom-format dump, restores it into a disposable database, checks the current Alembic revision and hashes the restored synthetic paid order, cash/GCash split tenders, line, cash movement, audit and outbox records against the source. It also corrupts a tender on the disposable restored database to prove mismatches fail, then restores its original value. The workflow exercises the restore script's fail-closed guards. Its result is code-level **restore procedure and synthetic financial-content validation**, not evidence that an actual production backup is recoverable. The fixture is SQL-seeded for recovery testing and does not claim to execute the live cashier checkout process. Do **not** use a production dump in GitHub Actions, upload it as an artifact, or put production credentials into the runner.
+
+For a real approved restore rehearsal on isolated infrastructure, set all of these explicitly before running `scripts/pass16-restore-rehearsal.sh`:
+
+- `BACKUP_FILE`: path to a locally secured, authorized PostgreSQL custom-format backup;
+- `NON_PRODUCTION_CONFIRM=I_CONFIRM_NON_PRODUCTION_RESTORE_TARGET`;
+- `TARGET_DATABASE_URL`: a connection URI to a **new empty** loopback PostgreSQL database whose name starts with `pos_pass16_restore_` (for example `postgresql://user@127.0.0.1:5432/pos_pass16_restore_drill`);
+- `EXPECTED_HEAD`: the specific Alembic revision expected **inside that backup**, such as `0013_generic_selling_rules` for the current schema; this must be reviewed for every new release rather than inheriting a stale default.
+
+The runner blocks missing confirmation, missing expected head, unsafe target names/hosts and non-empty public schemas. Localhost checks alone cannot establish that an SSH tunnel or a database operator has not redirected the connection: verify infrastructure routing, isolation and disposable nature of the **actual database** before giving confirmation. A successful synthetic drill does not satisfy this checklist's measured production-derived RTO/RPO or restored-business-data reconciliation.
 
 ## 3. Migration forward/rollback rehearsal
 
@@ -47,6 +75,12 @@ Perform only on a disposable non-production database.
 - [ ] Record elapsed time and any manual intervention required.
 
 If a future migration is intentionally irreversible, document the release-specific rollback strategy rather than pretending downgrade is available.
+
+The synthetic PostgreSQL restore workflow now also exercises the **0013 ⇄ 0012 migration cycle twice** against a disposable restored paid sale, requiring exactly unchanged financial/order/audit/outbox hashes and a successful Alembic schema check. It deliberately populates the two 0013 selling-rule columns and verifies that downgrade is **refused before dropping any column**, leaving the migration head and rules intact. This prevents silent conditional-pricing data loss if an unauthorized downgrade is attempted. The cycle retains its elapsed time and non-sensitive PASS markers as GitHub Actions evidence.
+
+**This is CI-only procedural and financial-content evidence.** It does not prove the actual staging application works at the old migration revision, certify a real production-derived backup, or authorize downgrade of a populated production POS database. A real rollback requiring removal of pricing rules must use an operator-approved export/restore strategy; the automatic downgrade intentionally fails closed.
+
+
 
 ## 4. Downstream staging contracts
 
@@ -63,6 +97,24 @@ For Accounting, Inventory, Staff, and Operations as applicable:
 - [ ] no secret/token is included in saved evidence.
 
 Record only non-sensitive IDs, timestamps, response classes, and reconciliation results.
+
+### Accounting HTTP failure, retry, and replay (synthetic CI only)
+
+The `Pass 16 Accounting HTTP outage and replay` GitHub Actions workflow uses an ephemeral PostgreSQL 16 database and a loopback-only synthetic Accounting intake to exercise the **actual POS outbox transport** (not a mocked Python client). It verifies: 503 before downstream acceptance; local order and outbox preserved for retry; acceptance after recovery; downstream acceptance followed by a deliberately lost HTTP acknowledgement (503); replay with a stable `external_id`; exactly one downstream sale per source order; and no further send after an event reaches `synced`. Unknown intake routes return 404 rather than fake success. This uses only synthetic POS orders and never connects to production Accounting.
+
+This is **transport/idempotency regression evidence**, not certification of the actual Accounting staging API, its authentication, ledger postings, Inventory stock movements, or downstream reconciliation. Those requirements remain NOT RUN until tested against appropriate isolated staging services with recorded source references.
+
+### Inventory outbox snapshot integrity (source-side safeguard)
+
+Inventory outbox idempotency keys now retain the first persisted payload. If checkout or a subsequent retry path enqueues the same sale or return identity after catalog changes, POS must not rewrite the original mapped SKU/quantity or reset an existing ACK, retry/backoff, suppressed, or blocked decision. Conflicting Inventory source identities fail closed rather than repurposing a persisted key. This closes a source-side gap not covered by the downstream receiver's idempotency alone. Regression tests verify ACKed, lost-ACK retry and blocked cases, plus original-SKU void reversal.
+
+This is a source-code hardening rule. It does not certify real inventory warehouse quantities or a live production reconciliation.
+
+### Inventory stock-event outage, retry and reversal sequencing (synthetic CI only)
+
+The `Pass 16 Inventory HTTP outage and replay` GitHub Actions workflow uses a disposable PostgreSQL 16 database and loopback-only synthetic Inventory stock receiver. It exercises the real POS Inventory outbox transport against a 503 before acceptance, successful retry, and a 503 after downstream acceptance with a lost acknowledgement. The receiver deduplicates the retry by immutable `external_event_id`, so the stock debit is applied once. It also verifies that a void does not overtake the original unsynchronized sale, and that the reversal uses the original sale's immutable SKU/quantity despite a later catalog change. The separate Accounting and Inventory outbox tests have distinct databases, services, and source references.
+
+This is **synthetic delivery and ordering evidence**, not validation of the actual Inventory staging API, token provisioning, master catalog, recipe consumption, physical stock-on-hand or cross-app reconciliation. Do not mark those acceptance items PASS based on this CI workflow.
 
 ## 5. Physical peripheral acceptance
 

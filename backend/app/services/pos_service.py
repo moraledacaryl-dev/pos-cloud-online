@@ -1183,6 +1183,19 @@ def create_outbox_event(db: Session, *, aggregate_type: str, aggregate_id: int, 
     suppression_reason = outbox_suppression_reason(event_type, payload)
     existing = db.query(SyncOutboxEvent).filter(SyncOutboxEvent.idempotency_key == key).first()
     if existing:
+        if str(event_type).startswith('inventory.'):
+            # The Inventory receiver may already have applied this event even
+            # when its acknowledgement was lost. Rewriting an outbox payload
+            # under the same idempotency key can apply a different SKU/quantity
+            # on retry or make a later void reverse the wrong stock movement.
+            # Treat the first persisted Inventory event as immutable.
+            if (
+                existing.event_type != event_type
+                or existing.aggregate_type != aggregate_type
+                or existing.aggregate_id != int(aggregate_id)
+            ):
+                raise ValueError('Inventory outbox idempotency key conflicts with a different source event.')
+            return existing
         existing.payload_json = json_dumps(payload, ensure_ascii=False)
         if suppression_reason:
             existing.status = 'suppressed'
@@ -1931,16 +1944,31 @@ def merge_order_table(db: Session, order_id: int, target_table_label: str, targe
 
 
 def pay_order(db: Session, order_id: int, payload: OrderPayPayload, user_id: int | None = None, *, commit: bool = True):
-    row = db.query(PosOrder).options(selectinload(PosOrder.lines), selectinload(PosOrder.payments), selectinload(PosOrder.register), selectinload(PosOrder.session)).filter(PosOrder.id == int(order_id)).with_for_update().first()
+    row = db.query(PosOrder).options(selectinload(PosOrder.lines), selectinload(PosOrder.payments), selectinload(PosOrder.register), selectinload(PosOrder.session)).filter(PosOrder.id == int(order_id)).with_for_update().populate_existing().first()
     if not row:
         raise ValueError('Order not found.')
-    if row.status in {'voided', 'paid', 'folio_pending'}:
+    if row.status not in ACTIVE_TABLE_ORDER_STATUSES:
         raise ValueError('This order cannot be paid.')
     if not row.lines:
         raise ValueError('Order must have at least one line before payment.')
     payments = payload.payments or []
     if not payments:
         raise ValueError('At least one payment line is required.')
+
+    # Recalculate against the latest locked order, not an API preflight snapshot.
+    # A concurrent cashier edit must never produce a paid order with missing or
+    # excess tender, even when this service is called directly by another job.
+    order_total = _validated_money(row.total_amount, 'Order total')
+    if order_total <= 0:
+        raise ValueError('Order total must be greater than zero before payment.')
+    applied_total = Decimal('0')
+    for payment in payments:
+        applied_amount = _validated_money(payment.amount_applied, 'Payment amount')
+        if applied_amount <= 0:
+            raise ValueError('Payment amount_applied must be greater than zero.')
+        applied_total += applied_amount
+    if applied_total != order_total:
+        raise ValueError('Payment applied total must exactly equal the current order total. Refresh the order before checkout.')
 
     db.query(RoomChargePosting).filter(RoomChargePosting.order_id == row.id).delete(synchronize_session=False)
     row.payments.clear()
