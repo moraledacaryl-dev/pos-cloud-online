@@ -6,7 +6,7 @@ import logging
 import re
 import uuid
 from datetime import UTC, datetime
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from decimal import Decimal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import func, or_
@@ -53,66 +53,24 @@ from app.schemas.common import (
 )
 from app.services.approval_service import create_manager_approval
 from app.services.audit_service import write_audit_log
+from app.services.financial_precision import (
+    MONEY_QUANTUM,
+    QUANTITY_QUANTUM,
+    _money,
+    _quantity,
+    _validated_money,
+    _validated_quantity,
+    _validated_rate,
+)
+from app.services.financial_precision import (
+    _decimal as _decimal,
+)
 from app.services.kds_stream import publish_kds_event
 from app.services.permission_service import get_user_permission_keys
 
 logger = logging.getLogger(__name__)
 
-MONEY_QUANTUM = Decimal('0.01')
-QUANTITY_QUANTUM = Decimal('0.0001')
-
-
-def _decimal(value) -> Decimal:
-    if value is None or value == '':
-        return Decimal('0')
-    if isinstance(value, Decimal):
-        return value
-    return Decimal(str(value))
-
-
-def _money(value) -> Decimal:
-    return _decimal(value).quantize(MONEY_QUANTUM, rounding=ROUND_HALF_UP)
-
-
-def _quantity(value) -> Decimal:
-    return _decimal(value).quantize(QUANTITY_QUANTUM, rounding=ROUND_HALF_UP)
-
-
-def _validated_money(value, label: str, *, allow_negative: bool = False) -> Decimal:
-    """Reject non-finite and negative money before quantization can conceal them."""
-    try:
-        amount = _decimal(value)
-        if not amount.is_finite():
-            raise ValueError(f'{label} must be a finite amount.')
-        if amount < 0 and not allow_negative:
-            raise ValueError(f'{label} cannot be negative.')
-        return amount.quantize(MONEY_QUANTUM, rounding=ROUND_HALF_UP)
-    except (InvalidOperation, TypeError, OverflowError) as exc:
-        raise ValueError(f'{label} must be a valid finite amount.') from exc
-
-
-def _validated_rate(value, label: str) -> Decimal:
-    """Catalog tax/service rates are stored as fractions (0.12 means 12%)."""
-    try:
-        rate = _decimal(value)
-        if not rate.is_finite() or not Decimal('0') <= rate <= Decimal('1'):
-            raise ValueError(f'{label} must be a finite fraction between 0 and 1.')
-        return rate.quantize(Decimal('0.000001'), rounding=ROUND_HALF_UP)
-    except (InvalidOperation, TypeError, OverflowError) as exc:
-        raise ValueError(f'{label} must be a finite fraction between 0 and 1.') from exc
-
-
-def _validated_quantity(value) -> Decimal:
-    try:
-        quantity = _decimal(value)
-        if not quantity.is_finite() or quantity <= 0:
-            raise ValueError('Line quantity must be greater than zero and finite.')
-        rounded = quantity.quantize(QUANTITY_QUANTUM, rounding=ROUND_HALF_UP)
-        if rounded <= 0:
-            raise ValueError('Line quantity must be greater than zero after rounding.')
-        return rounded
-    except (InvalidOperation, TypeError, OverflowError) as exc:
-        raise ValueError('Line quantity must be greater than zero and finite.') from exc
+# Re-exported precision helpers preserve existing service consumers and call sites.
 
 
 def _validated_catalog_financials(catalog: CatalogItem) -> tuple[Decimal, Decimal, Decimal]:
