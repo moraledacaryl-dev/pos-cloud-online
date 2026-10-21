@@ -27,6 +27,7 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
   deployments: write
 
 jobs:
@@ -46,6 +47,17 @@ jobs:
           [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
           git cat-file -e "$RELEASE_SHA^{commit}"
           echo "sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
+      - name: Require successful main CI on the exact production release SHA
+        if: ${{ inputs.target_environment == 'production' }}
+        env:
+          TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
+          RELEASE_SHA: ${{ steps.release.outputs.sha }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_API_URL: ${{ github.api_url }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/verify-release-ci.py
       - name: Frontend contract tests and build
         working-directory: frontend
         run: |
