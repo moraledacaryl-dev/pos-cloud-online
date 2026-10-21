@@ -7,6 +7,7 @@ Not a checkout, payment, real Inventory API, or production acceptance test.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from decimal import Decimal
 from urllib.parse import urlsplit
@@ -112,7 +113,7 @@ def seed():
                 void_id = void.id
                 db.flush()
                 assert sale.id < void.id
-                assert '"external_product_id": "PASS16-COFFEE"' in void.payload_json
+                assert json.loads(void.payload_json)["lines"] == [{"external_product_id": SKU, "quantity": 3.0}]
                 assert "UNSAFE-CHANGED-SKU" not in void.payload_json
         db.commit()
         assert void_id is not None
