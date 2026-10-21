@@ -39,6 +39,10 @@ def test_visual_workflow_has_real_health_worker_and_emulates_no_production_finan
     assert 'python -m app.workers.sync_worker' in content
     assert 'python scripts/visual_audit_accounting_stub.py' in content
     assert 'VISUAL_AUDIT_HEALTHY_BASELINE=PASS' in content
+    assert 'Provision ephemeral integration signing credentials' in content
+    assert 'openssl rand -hex 32' in content
+    assert 'ACCOUNTING_INTEGRATION_SECRET=' in content
+    assert 'INTEGRATION_API_KEY=' in content
     assert 'http://127.0.0.1:8100/readyz/integrations' in content
     assert 'http://127.0.0.1:18993/api/integrations/pos/order' in content
     assert '" = 405' in content or ' = 405' in content
