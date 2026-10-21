@@ -69,7 +69,7 @@ for url in \
   "$BACKEND_BASE/healthz" \
   "$BACKEND_BASE/readyz" \
   "$BACKEND_BASE/readyz/integrations" \
-  "$PUBLIC_BASE/" \
+  "$PUBLIC_BASE/login" \
   "$PUBLIC_BASE$PUBLIC_API_PREFIX/healthz" \
   "$PUBLIC_BASE$PUBLIC_API_PREFIX/readyz" \
   "$PUBLIC_BASE$PUBLIC_API_PREFIX/readyz/integrations"
