@@ -1,3 +1,5 @@
+import os
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -55,3 +57,47 @@ def test_production_certifier_does_not_overclaim_operational_acceptance():
     assert 'docs/PASS_16_OPERATIONAL_ACCEPTANCE.md' in script
     assert 'proves the deployed code/runtime gate only' in script
     assert 'before declaring literal operational acceptance' in script
+
+
+def test_restore_rehearsal_rejects_missing_revision_and_unsafe_database_urls(tmp_path):
+    # Script must refuse risky targets before attempting any PostgreSQL connection.
+    backup = tmp_path / 'placeholder.dump'
+    backup.write_text('not-a-real-dump')
+    script = ROOT / 'scripts' / 'pass16-restore-rehearsal.sh'
+    base = {
+        **os.environ,
+        'BACKUP_FILE': str(backup),
+        'NON_PRODUCTION_CONFIRM': 'I_CONFIRM_NON_PRODUCTION_RESTORE_TARGET',
+        'EXPECTED_HEAD': '0013_generic_selling_rules',
+        'TARGET_DATABASE_URL': 'postgresql://ci:ci@127.0.0.1:5432/pos_pass16_restore_ci',
+    }
+
+    def rejected(env, explanation):
+        result = subprocess.run(
+            ['bash', str(script)], cwd=ROOT, env={**base, **env},
+            check=False, capture_output=True, text=True,
+        )
+        assert result.returncode != 0
+        assert explanation in result.stderr
+
+    rejected({'EXPECTED_HEAD': ''}, 'EXPECTED_HEAD must explicitly match')
+    rejected({'NON_PRODUCTION_CONFIRM': ''}, 'NON_PRODUCTION_CONFIRM')
+    rejected({'TARGET_DATABASE_URL': 'postgresql://ci:ci@127.0.0.1:5432/hiddenoasis_pos_live'},
+             'refusing a restore target')
+    rejected({'TARGET_DATABASE_URL': 'postgresql://ci:ci@127.0.0.1:5432/pos_ci'},
+             'refusing a restore target')
+    rejected({'TARGET_DATABASE_URL': 'postgresql://ci:ci@db.example.com:5432/pos_pass16_restore_ci'},
+             'refusing a restore target')
+    rejected({'TARGET_DATABASE_URL': 'postgresql://ci:ci@127.0.0.1:5432/pos_pass16_restore_ci?service=other'},
+             'refusing a restore target')
+
+
+def test_isolated_restore_workflow_remains_synthetic_and_uses_no_production_environment():
+    workflow = read('.github/workflows/pass16-restore-ci.yml')
+    assert 'postgres:16' in workflow
+    assert 'pos_pass16_source' in workflow
+    assert 'pos_pass16_restore_ci' in workflow
+    assert 'EXPECTED_HEAD: 0013_generic_selling_rules' in workflow
+    assert 'PASS 16 NON-PRODUCTION RESTORE REHEARSAL: PASS' in workflow
+    assert 'pg_dump' in workflow and 'pg_restore --list' in workflow
+    assert 'RECONCILED_$table' in workflow
