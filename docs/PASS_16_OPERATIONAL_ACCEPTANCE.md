@@ -90,6 +90,12 @@ The `Pass 16 Accounting HTTP outage and replay` GitHub Actions workflow uses an 
 
 This is **transport/idempotency regression evidence**, not certification of the actual Accounting staging API, its authentication, ledger postings, Inventory stock movements, or downstream reconciliation. Those requirements remain NOT RUN until tested against appropriate isolated staging services with recorded source references.
 
+### Inventory outbox snapshot integrity (source-side safeguard)
+
+Inventory outbox idempotency keys now retain the first persisted payload. If checkout or a subsequent retry path enqueues the same sale or return identity after catalog changes, POS must not rewrite the original mapped SKU/quantity or reset an existing ACK, retry/backoff, suppressed, or blocked decision. Conflicting Inventory source identities fail closed rather than repurposing a persisted key. This closes a source-side gap not covered by the downstream receiver's idempotency alone. Regression tests verify ACKed, lost-ACK retry and blocked cases, plus original-SKU void reversal.
+
+This is a source-code hardening rule. It does not certify real inventory warehouse quantities or a live production reconciliation.
+
 ### Inventory stock-event outage, retry and reversal sequencing (synthetic CI only)
 
 The `Pass 16 Inventory HTTP outage and replay` GitHub Actions workflow uses a disposable PostgreSQL 16 database and loopback-only synthetic Inventory stock receiver. It exercises the real POS Inventory outbox transport against a 503 before acceptance, successful retry, and a 503 after downstream acceptance with a lost acknowledgement. The receiver deduplicates the retry by immutable `external_event_id`, so the stock debit is applied once. It also verifies that a void does not overtake the original unsynchronized sale, and that the reversal uses the original sale's immutable SKU/quantity despite a later catalog change. The separate Accounting and Inventory outbox tests have distinct databases, services, and source references.

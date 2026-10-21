@@ -1183,6 +1183,19 @@ def create_outbox_event(db: Session, *, aggregate_type: str, aggregate_id: int, 
     suppression_reason = outbox_suppression_reason(event_type, payload)
     existing = db.query(SyncOutboxEvent).filter(SyncOutboxEvent.idempotency_key == key).first()
     if existing:
+        if str(event_type).startswith('inventory.'):
+            # The Inventory receiver may already have applied this event even
+            # when its acknowledgement was lost. Rewriting an outbox payload
+            # under the same idempotency key can apply a different SKU/quantity
+            # on retry or make a later void reverse the wrong stock movement.
+            # Treat the first persisted Inventory event as immutable.
+            if (
+                existing.event_type != event_type
+                or existing.aggregate_type != aggregate_type
+                or existing.aggregate_id != int(aggregate_id)
+            ):
+                raise ValueError('Inventory outbox idempotency key conflicts with a different source event.')
+            return existing
         existing.payload_json = json_dumps(payload, ensure_ascii=False)
         if suppression_reason:
             existing.status = 'suppressed'

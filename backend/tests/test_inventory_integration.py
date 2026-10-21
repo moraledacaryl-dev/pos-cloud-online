@@ -416,3 +416,99 @@ def test_inventory_transient_http_failures_remain_eligible_for_retry(monkeypatch
     assert row.retry_count == 1
     assert row.next_retry_at is not None
     assert calls['posts'] == 1
+
+
+def test_synced_inventory_sale_snapshot_is_immutable_across_duplicate_enqueue():
+    db = _inventory_outbox_session()
+    original = order_payload()
+    sale = integration.enqueue_inventory_event(db, original, 'sale_completed', commit=False)
+    original_payload = sale.payload_json
+    original_id = sale.id
+    sale.status = 'synced'
+    sale.synced_at = '2026-10-21T10:00:00'
+    db.commit()
+
+    edited = order_payload(lines=[
+        {'sku_code': 'DIFFERENT-SKU', 'quantity': 99, 'item_name_snapshot': 'Updated catalog'},
+    ])
+    duplicated = integration.enqueue_inventory_event(db, edited, 'sale_completed', commit=False)
+
+    assert duplicated.id == original_id
+    assert duplicated.status == 'synced'
+    assert duplicated.synced_at == '2026-10-21T10:00:00'
+    assert duplicated.payload_json == original_payload
+    assert db.query(SyncOutboxEvent).count() == 1
+
+    # Downstream stock return must use exactly the originally acknowledged
+    # physical SKU/quantity, even if the current POS catalog was replaced.
+    void = integration.enqueue_inventory_event(db, edited, 'sale_voided', commit=False)
+    assert json.loads(void.payload_json)['lines'] == json.loads(original_payload)['lines']
+    assert 'DIFFERENT-SKU' not in void.payload_json
+    db.close()
+
+
+def test_inventory_reenqueue_after_lost_ack_preserves_payload_and_retry_clock():
+    db = _inventory_outbox_session()
+    original = integration.enqueue_inventory_event(
+        db, order_payload(), 'sale_completed', commit=False,
+    )
+    payload = original.payload_json
+    original.status = 'inventory_retry'
+    original.retry_count = 2
+    original.next_retry_at = '2026-10-21T23:00:00'
+    original.last_error = 'Inventory HTTP 503: acknowledgement lost'
+    db.commit()
+
+    changed = order_payload(lines=[
+        {'sku_code': 'LATER-CATALOG-SKU', 'quantity': 100, 'item_name_snapshot': 'Changed after sale'},
+    ])
+    replay = integration.enqueue_inventory_event(db, changed, 'sale_completed', commit=False)
+    assert replay.id == original.id
+    assert replay.payload_json == payload
+    assert replay.status == 'inventory_retry'
+    assert replay.retry_count == 2
+    assert replay.next_retry_at == '2026-10-21T23:00:00'
+    assert replay.last_error == 'Inventory HTTP 503: acknowledgement lost'
+    assert db.query(SyncOutboxEvent).count() == 1
+    db.close()
+
+
+def test_inventory_reenqueue_cannot_silently_reopen_blocked_snapshot():
+    db = _inventory_outbox_session()
+    incomplete = order_payload(lines=[
+        {'catalog_item_id': 9, 'sku_code': None, 'external_sku_id': None,
+         'item_name_snapshot': 'Original unmapped item', 'quantity': 1},
+    ])
+    original = integration.enqueue_inventory_event(db, incomplete, 'sale_completed', commit=False)
+    original.status = 'blocked'
+    original.last_error = 'Inventory SKU mapping requires review'
+    payload = original.payload_json
+    db.commit()
+
+    changed = order_payload(lines=[
+        {'sku_code': 'NEW-MAPPING', 'quantity': 1, 'item_name_snapshot': 'Mapped later'},
+    ])
+    repeated = integration.enqueue_inventory_event(db, changed, 'sale_completed', commit=False)
+    assert repeated.status == 'blocked'
+    assert repeated.last_error == 'Inventory SKU mapping requires review'
+    assert repeated.payload_json == payload
+    assert db.query(SyncOutboxEvent).count() == 1
+    db.close()
+
+
+def test_inventory_idempotency_key_collision_with_other_aggregate_fails_closed():
+    db = _inventory_outbox_session()
+    key = 'inventory:pos:order-uuid-15:sale_completed'
+    row = SyncOutboxEvent(
+        event_uuid=str(uuid.uuid4()), aggregate_type='order', aggregate_id=999,
+        event_type='inventory.sale_completed', idempotency_key=key,
+        payload_json='{"external_product_id":"ORIGINAL"}', status='synced',
+    )
+    db.add(row)
+    db.commit()
+
+    with pytest.raises(ValueError, match='idempotency key conflicts'):
+        integration.enqueue_inventory_event(db, order_payload(), 'sale_completed', commit=False)
+    db.rollback()
+    assert db.query(SyncOutboxEvent).one().payload_json == '{"external_product_id":"ORIGINAL"}'
+    db.close()
