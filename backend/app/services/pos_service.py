@@ -52,23 +52,26 @@ from app.schemas.common import (
     RoomChargePostingStatusUpdate,
 )
 from app.services.approval_service import create_manager_approval
+from app.services.audit_service import write_audit_log
 from app.services.financial_precision import (
     MONEY_QUANTUM,
     QUANTITY_QUANTUM,
-    _decimal as _decimal,
     _money,
     _quantity,
     _validated_money,
     _validated_quantity,
     _validated_rate,
 )
-from app.services.audit_service import write_audit_log
+from app.services.financial_precision import (
+    _decimal as _decimal,
+)
 from app.services.kds_stream import publish_kds_event
 from app.services.permission_service import get_user_permission_keys
 
 logger = logging.getLogger(__name__)
 
 # Re-exported precision helpers preserve existing service consumers and call sites.
+
 
 def _validated_catalog_financials(catalog: CatalogItem) -> tuple[Decimal, Decimal, Decimal]:
     label = catalog.display_name or catalog.menu_item_name or 'Catalog item'
