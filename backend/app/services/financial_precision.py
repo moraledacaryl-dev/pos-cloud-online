@@ -7,7 +7,6 @@ Do not use binary floating-point arithmetic for settlement calculations.
 
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
-
 MONEY_QUANTUM = Decimal('0.01')
 QUANTITY_QUANTUM = Decimal('0.0001')
 
