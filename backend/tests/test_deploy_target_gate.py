@@ -72,7 +72,6 @@ def test_deploy_validates_environment_before_backups_or_services():
     workflow = (ROOT / '.github/workflows/deploy-pos.yml').read_text()
     assert 'python3 "$DEPLOY_TARGET_GATE_SCRIPT" validate-url' in release
     assert 'python3 "$DEPLOY_TARGET_GATE_SCRIPT" validate-runtime' in release
-    assert release.index('validate-runtime') < release.index('run_production_backup\n') if False else True
     assert release.index('validate-runtime') < release.index('run_production_backup\n\n')
     assert release.index('validate-runtime') < release.index('git switch --detach "$EXPECTED_COMMIT"')
     assert 'Verify destination URL before opening SSH' in workflow
