@@ -23,9 +23,11 @@ on:
       - 'frontend/e2e/visual-audit.spec.mjs'
       - 'frontend/scripts/verify-visual-audit-manifest.mjs'
       - 'backend/scripts/seed_visual_audit.py'
+      - 'backend/scripts/visual_audit_accounting_stub.py'
   pull_request:
     paths:
       - 'backend/scripts/seed_visual_audit.py'
+      - 'backend/scripts/visual_audit_accounting_stub.py'
       - 'frontend/e2e/visual-audit.spec.mjs'
       - 'frontend/scripts/verify-visual-audit-manifest.mjs'
       - 'frontend/tests/visualAuditEvidence.test.mjs'
@@ -73,7 +75,9 @@ jobs:
       RATE_LIMIT_ENABLED: 'false'
       RATE_LIMIT_BACKEND: redis
       CORS_ORIGINS: http://127.0.0.1:8080
-      ACCOUNTING_API_BASE: http://127.0.0.1:9/api
+      ACCOUNTING_API_BASE: http://127.0.0.1:18993/api
+      SYNC_WORKER_POLL_SECONDS: '1'
+      VISUAL_AUDIT_CI: '1'
       HTTP_TIMEOUT_SECONDS: '1'
       NEXT_PUBLIC_API_BASE: /api
       E2E_BASE_URL: http://127.0.0.1:8080
@@ -129,19 +133,47 @@ jobs:
         working-directory: frontend
         run: npm run build
 
-      - name: Start isolated POS stack
+      - name: Start isolated POS stack with real sync heartbeat
         run: |
+          set -euo pipefail
+          (cd backend && python scripts/visual_audit_accounting_stub.py > /tmp/visual-audit-accounting.log 2>&1 & echo $! > /tmp/visual-audit-accounting.pid)
           (cd backend && python -m uvicorn app.main:app --host 127.0.0.1 --port 8100 > /tmp/visual-audit-backend.log 2>&1 & echo $! > /tmp/visual-audit-backend.pid)
+          (cd backend && python -m app.workers.sync_worker > /tmp/visual-audit-worker.log 2>&1 & echo $! > /tmp/visual-audit-worker.pid)
           (cd frontend && npm run start -- -H 127.0.0.1 -p 3100 > /tmp/visual-audit-frontend.log 2>&1 & echo $! > /tmp/visual-audit-frontend.pid)
           (cd frontend && node e2e/ci-proxy.mjs > /tmp/visual-audit-proxy.log 2>&1 & echo $! > /tmp/visual-audit-proxy.pid)
-          for i in $(seq 1 45); do
-            if curl -fsS http://127.0.0.1:8100/healthz >/dev/null && curl -fsS http://127.0.0.1:8080/login >/dev/null; then exit 0; fi
+          ready=0
+          for i in $(seq 1 50); do
+            if curl -fsS http://127.0.0.1:18993/healthz >/dev/null 2>&1 &&
+               curl -fsS http://127.0.0.1:8100/healthz >/dev/null 2>&1 &&
+               curl -fsS http://127.0.0.1:8080/login >/dev/null 2>&1 &&
+               curl -fsS http://127.0.0.1:8100/readyz/integrations >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
             sleep 1
           done
-          cat /tmp/visual-audit-backend.log || true
-          cat /tmp/visual-audit-frontend.log || true
-          cat /tmp/visual-audit-proxy.log || true
-          exit 1
+          test "$ready" = 1 || {
+            tail -60 /tmp/visual-audit-accounting.log || true
+            tail -60 /tmp/visual-audit-worker.log || true
+            tail -60 /tmp/visual-audit-backend.log || true
+            tail -60 /tmp/visual-audit-frontend.log || true
+            tail -60 /tmp/visual-audit-proxy.log || true
+            exit 1
+          }
+
+      - name: Require healthy Accounting and sync worker screenshot baseline
+        run: |
+          set -euo pipefail
+          curl -fsS http://127.0.0.1:8100/internal/healthz/details > /tmp/visual-audit-health.json
+          python - <<'PY'
+          import json
+          report = json.load(open('/tmp/visual-audit-health.json'))
+          assert report.get('sales_ready'), 'POS selling readiness failed before screenshots'
+          assert report.get('accounting_api', {}).get('ok'), 'Synthetic Accounting health is not ready'
+          assert not report.get('sync_worker', {}).get('is_stale'), 'Real POS sync worker is not healthy'
+          print('VISUAL_AUDIT_HEALTHY_BASELINE=PASS')
+          PY
+          test "$(curl -sS -o /dev/null -w '%{http_code}' -X POST -d '{}' http://127.0.0.1:18993/api/integrations/pos/order)" = 405
 
       - name: Resolve audit mode
         shell: bash
@@ -199,6 +231,8 @@ jobs:
         if: failure()
         run: |
           cat /tmp/visual-audit-backend.log || true
+          cat /tmp/visual-audit-worker.log || true
+          cat /tmp/visual-audit-accounting.log || true
           cat /tmp/visual-audit-frontend.log || true
           cat /tmp/visual-audit-proxy.log || true
 
@@ -208,3 +242,5 @@ jobs:
           kill "$(cat /tmp/visual-audit-proxy.pid)" 2>/dev/null || true
           kill "$(cat /tmp/visual-audit-frontend.pid)" 2>/dev/null || true
           kill "$(cat /tmp/visual-audit-backend.pid)" 2>/dev/null || true
+          kill "$(cat /tmp/visual-audit-worker.pid)" 2>/dev/null || true
+          kill "$(cat /tmp/visual-audit-accounting.pid)" 2>/dev/null || true
