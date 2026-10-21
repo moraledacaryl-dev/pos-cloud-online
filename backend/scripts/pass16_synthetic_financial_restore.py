@@ -86,8 +86,8 @@ def seed(source_url: str) -> None:
         )
         register_id = _insert_id(
             conn, """
-            INSERT INTO registers (outlet_id, code, name, register_type, is_active)
-            VALUES (%s, 'PASS16-CI-REG', 'Synthetic Recovery Register', 'cash_drawer', true)
+            INSERT INTO registers (outlet_id, code, name, register_type, cash_tender_label, default_order_type, is_active)
+            VALUES (%s, 'PASS16-CI-REG', 'Synthetic Recovery Register', 'cash_drawer', 'Cash', 'dine_in', true)
             RETURNING id
             """, (outlet_id,),
         )
@@ -96,18 +96,19 @@ def seed(source_url: str) -> None:
             INSERT INTO register_sessions
               (session_code, register_id, business_date, status, opened_by_user_id,
                closed_by_user_id, opening_float, closing_expected_cash,
-               closing_actual_cash, variance_amount)
+               closing_actual_cash, variance_amount, blind_close)
             VALUES ('PASS16-SESSION', %s, '2026-10-21', 'closed', %s,
-                    %s, 200.00, 323.45, 323.45, 0.00)
+                    %s, 200.00, 323.45, 323.45, 0.00, false)
             RETURNING id
             """, (register_id, user_id, user_id),
         )
         item_id = _insert_id(
             conn, """
             INSERT INTO catalog_items
-              (menu_item_name, display_name, sku_code, category_name, price, is_active, is_available)
+              (menu_item_name, display_name, sku_code, category_name, module_slug, price,
+               pricing_role, tax_rate, service_charge_rate, is_active, is_available, sort_order)
             VALUES ('Synthetic Test Food', 'Synthetic Test Food', 'PASS16-ITEM', 'CI-only',
-                    90.00, true, true) RETURNING id
+                    'restaurant', 90.00, 'standard', 0.00, 0.00, true, true, 0) RETURNING id
             """,
         )
         order_id = _insert_id(
@@ -116,18 +117,20 @@ def seed(source_url: str) -> None:
               (order_uuid, order_no, register_session_id, register_id, cashier_user_id,
                business_date, order_type, status, kitchen_status, subtotal_amount,
                discount_amount, tax_amount, service_charge_amount, total_amount,
-               paid_amount, balance_due, primary_tender)
+               paid_amount, balance_due, primary_tender, synced_to_accounting)
             VALUES ('pass16-order-uuid', 'PASS16-SALE-1', %s, %s, %s, '2026-10-21',
                     'dine_in', 'paid', 'queued', 180.00, 0.00, 0.00, 0.00,
-                    180.00, 180.00, 0.00, 'mixed') RETURNING id
+                    180.00, 180.00, 0.00, 'mixed', false) RETURNING id
             """, (session_id, register_id, user_id),
         )
         _insert_id(
             conn, """
             INSERT INTO pos_order_lines
               (order_id, catalog_item_id, item_name_snapshot, quantity,
-               unit_price, discount_amount, line_total)
-            VALUES (%s, %s, 'Synthetic Test Food', 2, 90.00, 0.00, 180.00)
+               unit_price, discount_amount, line_total, kitchen_status,
+               acknowledgement_state, item_readiness, ready_quantity)
+            VALUES (%s, %s, 'Synthetic Test Food', 2, 90.00, 0.00, 180.00,
+                    'queued', 'unacknowledged', 'not_ready', 0)
             RETURNING id
             """, (order_id, item_id),
         )
@@ -153,9 +156,10 @@ def seed(source_url: str) -> None:
             conn, """
             INSERT INTO cash_movements
               (cash_event_uuid, register_session_id, register_id, source_order_id,
-               event_date, direction, movement_type, category, amount, reference_no)
+               event_date, direction, movement_type, category, amount, reference_no,
+               requires_approval, synced_to_accounting)
             VALUES ('pass16-cash-uuid', %s, %s, %s, '2026-10-21', 'in',
-                    'cash_sale', 'Cash Sale', 123.45, 'PASS16-CASH')
+                    'cash_sale', 'Cash Sale', 123.45, 'PASS16-CASH', false, false)
             RETURNING id
             """, (session_id, register_id, order_id),
         )
