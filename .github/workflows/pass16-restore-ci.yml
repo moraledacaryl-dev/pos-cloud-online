@@ -109,6 +109,155 @@ jobs:
             "UPDATE pos_order_payments SET amount_applied = 56.55 WHERE reference_no = 'PASS16-GCASH'"
           PASS16_SYNTHETIC_RESTORE=1 python backend/scripts/pass16_synthetic_financial_restore.py verify | tee -a /tmp/pass16-rehearsal.txt
           echo "PASS16_TAMPER_DETECTION=PASS" | tee -a /tmp/pass16-rehearsal.txt
+      - name: Rehearse financial-preserving migration roundtrip and reject destructive pricing rollback
+        run: |
+          set -euo pipefail
+          PASS16_MIGRATION_CI=1 PYTHONPATH=backend python backend/scripts/pass16_migration_cycle.py | tee /tmp/pass16-migration-cycle.txt
+          grep -q '^PASS16_MIGRATION_SOURCE_FINANCIAL_BASELINE=PASS        run: |
+          if BACKUP_FILE=/tmp/pass16-synthetic.dump NON_PRODUCTION_CONFIRM=I_CONFIRM_NON_PRODUCTION_RESTORE_TARGET bash scripts/pass16-restore-rehearsal.sh > /tmp/pass16-nonempty-refusal.log 2>&1; then
+            echo "Restore overwrote populated database" >&2; exit 1
+          fi
+          grep -q "target public schema is not empty" /tmp/pass16-nonempty-refusal.log
+      - name: Record synthetic-only scope
+        run: |
+          {
+            echo "### Pass 16 isolated synthetic restore"
+            echo "- Commit: $GITHUB_SHA"
+            echo "- Disposable PostgreSQL 16 only; no production credentials, data, orders, or restores."
+            echo "- Expected Alembic head: $EXPECTED_HEAD"
+            echo "- Fail-closed guards for missing confirmation, unsafe target, missing revision and nonempty database: checked."
+            echo "- Restored and hashed synthetic paid order, split cash/GCash payments, cash movements, immutable line, audit and outbox event facts. A deliberately corrupted restored tender was rejected and repaired on the disposable CI database."
+            echo "- Does NOT prove production backup recoverability, RTO/RPO, hardware, or operational acceptance."
+          echo "- Safely rehearsed 0013 -> 0012 -> 0013 twice, preserved synthetic sale/tender/audit/outbox fingerprints, and proved populated pricing fields cannot be silently discarded."
+          echo "- Migration compatibility test is synthetic schema/data evidence only; not a real staging application rollback."
+          grep '^MIGRATION_CYCLE_ELAPSED_SECONDS=' /tmp/pass16-migration-cycle.txt
+            grep '^RESTORE_ELAPSED_SECONDS=' /tmp/pass16-rehearsal.txt
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain non-sensitive drill evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pass16-synthetic-restore-log
+          path: |
+            /tmp/pass16-rehearsal.txt
+            /tmp/pass16-migration-cycle.txt
+            /tmp/pass16-nonempty-refusal.log
+          if-no-files-found: ignore
+          retention-days: 30
+ /tmp/pass16-migration-cycle.txt
+          grep -q '^PASS16_MIGRATION_FINANCIAL_ROUNDTRIP=PASS        run: |
+          if BACKUP_FILE=/tmp/pass16-synthetic.dump NON_PRODUCTION_CONFIRM=I_CONFIRM_NON_PRODUCTION_RESTORE_TARGET bash scripts/pass16-restore-rehearsal.sh > /tmp/pass16-nonempty-refusal.log 2>&1; then
+            echo "Restore overwrote populated database" >&2; exit 1
+          fi
+          grep -q "target public schema is not empty" /tmp/pass16-nonempty-refusal.log
+      - name: Record synthetic-only scope
+        run: |
+          {
+            echo "### Pass 16 isolated synthetic restore"
+            echo "- Commit: $GITHUB_SHA"
+            echo "- Disposable PostgreSQL 16 only; no production credentials, data, orders, or restores."
+            echo "- Expected Alembic head: $EXPECTED_HEAD"
+            echo "- Fail-closed guards for missing confirmation, unsafe target, missing revision and nonempty database: checked."
+            echo "- Restored and hashed synthetic paid order, split cash/GCash payments, cash movements, immutable line, audit and outbox event facts. A deliberately corrupted restored tender was rejected and repaired on the disposable CI database."
+            echo "- Does NOT prove production backup recoverability, RTO/RPO, hardware, or operational acceptance."
+            grep '^RESTORE_ELAPSED_SECONDS=' /tmp/pass16-rehearsal.txt
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain non-sensitive drill evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pass16-synthetic-restore-log
+          path: |
+            /tmp/pass16-rehearsal.txt
+            /tmp/pass16-nonempty-refusal.log
+          if-no-files-found: ignore
+          retention-days: 30
+ /tmp/pass16-migration-cycle.txt
+          grep -q '^PASS16_POPULATED_PRICING_DOWNGRADE_REFUSED=PASS        run: |
+          if BACKUP_FILE=/tmp/pass16-synthetic.dump NON_PRODUCTION_CONFIRM=I_CONFIRM_NON_PRODUCTION_RESTORE_TARGET bash scripts/pass16-restore-rehearsal.sh > /tmp/pass16-nonempty-refusal.log 2>&1; then
+            echo "Restore overwrote populated database" >&2; exit 1
+          fi
+          grep -q "target public schema is not empty" /tmp/pass16-nonempty-refusal.log
+      - name: Record synthetic-only scope
+        run: |
+          {
+            echo "### Pass 16 isolated synthetic restore"
+            echo "- Commit: $GITHUB_SHA"
+            echo "- Disposable PostgreSQL 16 only; no production credentials, data, orders, or restores."
+            echo "- Expected Alembic head: $EXPECTED_HEAD"
+            echo "- Fail-closed guards for missing confirmation, unsafe target, missing revision and nonempty database: checked."
+            echo "- Restored and hashed synthetic paid order, split cash/GCash payments, cash movements, immutable line, audit and outbox event facts. A deliberately corrupted restored tender was rejected and repaired on the disposable CI database."
+            echo "- Does NOT prove production backup recoverability, RTO/RPO, hardware, or operational acceptance."
+            grep '^RESTORE_ELAPSED_SECONDS=' /tmp/pass16-rehearsal.txt
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain non-sensitive drill evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pass16-synthetic-restore-log
+          path: |
+            /tmp/pass16-rehearsal.txt
+            /tmp/pass16-nonempty-refusal.log
+          if-no-files-found: ignore
+          retention-days: 30
+ /tmp/pass16-migration-cycle.txt
+          grep -Eq '^MIGRATION_CYCLE_ELAPSED_SECONDS=[0-9]+        run: |
+          if BACKUP_FILE=/tmp/pass16-synthetic.dump NON_PRODUCTION_CONFIRM=I_CONFIRM_NON_PRODUCTION_RESTORE_TARGET bash scripts/pass16-restore-rehearsal.sh > /tmp/pass16-nonempty-refusal.log 2>&1; then
+            echo "Restore overwrote populated database" >&2; exit 1
+          fi
+          grep -q "target public schema is not empty" /tmp/pass16-nonempty-refusal.log
+      - name: Record synthetic-only scope
+        run: |
+          {
+            echo "### Pass 16 isolated synthetic restore"
+            echo "- Commit: $GITHUB_SHA"
+            echo "- Disposable PostgreSQL 16 only; no production credentials, data, orders, or restores."
+            echo "- Expected Alembic head: $EXPECTED_HEAD"
+            echo "- Fail-closed guards for missing confirmation, unsafe target, missing revision and nonempty database: checked."
+            echo "- Restored and hashed synthetic paid order, split cash/GCash payments, cash movements, immutable line, audit and outbox event facts. A deliberately corrupted restored tender was rejected and repaired on the disposable CI database."
+            echo "- Does NOT prove production backup recoverability, RTO/RPO, hardware, or operational acceptance."
+            grep '^RESTORE_ELAPSED_SECONDS=' /tmp/pass16-rehearsal.txt
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain non-sensitive drill evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pass16-synthetic-restore-log
+          path: |
+            /tmp/pass16-rehearsal.txt
+            /tmp/pass16-nonempty-refusal.log
+          if-no-files-found: ignore
+          retention-days: 30
+ /tmp/pass16-migration-cycle.txt
+          grep -q '^PASS16_SYNTHETIC_MIGRATION_REHEARSAL=PASS        run: |
+          if BACKUP_FILE=/tmp/pass16-synthetic.dump NON_PRODUCTION_CONFIRM=I_CONFIRM_NON_PRODUCTION_RESTORE_TARGET bash scripts/pass16-restore-rehearsal.sh > /tmp/pass16-nonempty-refusal.log 2>&1; then
+            echo "Restore overwrote populated database" >&2; exit 1
+          fi
+          grep -q "target public schema is not empty" /tmp/pass16-nonempty-refusal.log
+      - name: Record synthetic-only scope
+        run: |
+          {
+            echo "### Pass 16 isolated synthetic restore"
+            echo "- Commit: $GITHUB_SHA"
+            echo "- Disposable PostgreSQL 16 only; no production credentials, data, orders, or restores."
+            echo "- Expected Alembic head: $EXPECTED_HEAD"
+            echo "- Fail-closed guards for missing confirmation, unsafe target, missing revision and nonempty database: checked."
+            echo "- Restored and hashed synthetic paid order, split cash/GCash payments, cash movements, immutable line, audit and outbox event facts. A deliberately corrupted restored tender was rejected and repaired on the disposable CI database."
+            echo "- Does NOT prove production backup recoverability, RTO/RPO, hardware, or operational acceptance."
+            grep '^RESTORE_ELAPSED_SECONDS=' /tmp/pass16-rehearsal.txt
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain non-sensitive drill evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pass16-synthetic-restore-log
+          path: |
+            /tmp/pass16-rehearsal.txt
+            /tmp/pass16-nonempty-refusal.log
+          if-no-files-found: ignore
+          retention-days: 30
+ /tmp/pass16-migration-cycle.txt
+          PASS16_SYNTHETIC_RESTORE=1 python backend/scripts/pass16_synthetic_financial_restore.py verify | tee -a /tmp/pass16-rehearsal.txt
       - name: Refuse repeated restore into populated target
         run: |
           if BACKUP_FILE=/tmp/pass16-synthetic.dump NON_PRODUCTION_CONFIRM=I_CONFIRM_NON_PRODUCTION_RESTORE_TARGET bash scripts/pass16-restore-rehearsal.sh > /tmp/pass16-nonempty-refusal.log 2>&1; then
