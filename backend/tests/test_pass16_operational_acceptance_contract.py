@@ -1,5 +1,6 @@
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -119,7 +120,7 @@ def test_financial_restore_fixture_rejects_execution_outside_github_ci():
         'TARGET_DATABASE_URL': 'postgresql://pos:pos@127.0.0.1:5432/pos_pass16_restore_ci',
     }
     completed = subprocess.run(
-        ['python', str(fixture), 'seed'],
+        [sys.executable, str(fixture), 'seed'],
         env=env, cwd=ROOT, capture_output=True, text=True, check=False,
     )
     assert completed.returncode != 0
@@ -200,7 +201,7 @@ def test_accounting_http_replay_ci_is_isolated_and_verifies_ambiguous_ack():
 def test_accounting_replay_stub_rejects_non_ci_execution():
     script = ROOT / 'backend/scripts/pass16_accounting_replay_stub.py'
     result = subprocess.run(
-        ['python', str(script)],
+        [sys.executable, str(script)],
         cwd=ROOT,
         env={**os.environ, 'GITHUB_ACTIONS': 'false',
              'PASS16_ACCOUNTING_REPLAY_CI': '1', 'ENVIRONMENT': 'staging'},
@@ -236,7 +237,7 @@ def test_inventory_http_replay_is_a_disposable_real_transport_contract():
 def test_inventory_http_receiver_refuses_non_ci_execution():
     receiver = ROOT / 'backend/scripts/pass16_inventory_replay_stub.py'
     result = subprocess.run(
-        ['python', str(receiver)], cwd=ROOT,
+        [sys.executable, str(receiver)], cwd=ROOT,
         env={**os.environ, 'GITHUB_ACTIONS': 'false',
              'PASS16_INVENTORY_REPLAY_CI': '1', 'ENVIRONMENT': 'staging'},
         capture_output=True, text=True, check=False,

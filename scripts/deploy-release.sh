@@ -77,10 +77,12 @@ EVIDENCE_FILE="$EVIDENCE_DIR/$EXPECTED_COMMIT.txt"
 rollback_code() {
   local exit_code=$?
   if [[ $exit_code -eq 0 ]]; then return; fi
-  # ERR can fire inside a subshell whose working directory is backend/ or
-  # frontend/. Disable the trap and re-anchor before using repository-relative
-  # paths so rollback itself cannot recurse or look under backend/backend.
+  # With errtrace (-E), a failed subshell can raise ERR in the subshell
+  # AND again in its parent. Do not run destructive rollback twice.
+  # The failed child propagates its exit status so the top-level trap
+  # performs one restore of code, frontend build and systemd units.
   trap - ERR
+  if (( BASH_SUBSHELL > 0 )); then return "$exit_code"; fi
   cd "$APP_DIR" || true
   echo "Deployment failed; restoring code commit $PREVIOUS_COMMIT" >&2
   git switch --detach "$PREVIOUS_COMMIT" || true
@@ -124,7 +126,7 @@ systemctl stop pos-frontend pos-sync-worker pos-backend
   # production mode, database URLs, credentials, or feature flags. CI also runs
   # against the application's deterministic defaults rather than live env state.
   env -i \
-    PATH="$PATH" \
+    PATH="$APP_DIR/backend/.venv/bin:$PATH" \
     HOME="${HOME:-/root}" \
     LANG="${LANG:-C.UTF-8}" \
     PYTHONPATH=. \
