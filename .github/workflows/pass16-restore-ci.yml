@@ -1,0 +1,140 @@
+name: Pass 16 isolated synthetic restore
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  restore-synthetic:
+    name: Disposable PostgreSQL backup and restore
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: pos
+          POSTGRES_PASSWORD: pos
+          POSTGRES_DB: pos_pass16_source
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U pos -d pos_pass16_source"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      ENVIRONMENT: test
+      DATABASE_URL: postgresql+psycopg://pos:pos@127.0.0.1:5432/pos_pass16_source
+      PGPASSWORD: pos
+      SECRET_KEY: synthetic-pass16-only
+      ACCESS_TOKEN_SECRET: synthetic-pass16-access-only
+      REFRESH_TOKEN_SECRET: synthetic-pass16-refresh-only
+      STARTUP_REQUIRE_MIGRATIONS: 'false'
+      RATE_LIMIT_ENABLED: 'false'
+      RATE_LIMIT_BACKEND: memory
+      ACCOUNTING_API_TOKEN: synthetic-placeholder-only
+      EXPECTED_HEAD: 0013_generic_selling_rules
+      TARGET_DATABASE_URL: postgresql://pos:pos@127.0.0.1:5432/pos_pass16_restore_ci
+
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.lock
+      - name: PostgreSQL client and locked backend requirements
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y postgresql-client
+          python -m pip install --upgrade pip
+          python -m pip install -r backend/requirements.lock
+      - name: Upgrade synthetic source to current head
+        working-directory: backend
+        run: |
+          alembic upgrade head
+          alembic current | grep -F "$EXPECTED_HEAD"
+          alembic heads | grep -F "$EXPECTED_HEAD"
+          alembic check
+      - name: Seed synthetic evidence and prepare empty disposable database
+        run: |
+          psql -X -v ON_ERROR_STOP=1 postgresql://pos:pos@127.0.0.1:5432/pos_pass16_source <<'SQL'
+          INSERT INTO users (username, hashed_password, role, is_active, session_version)
+          VALUES ('ci-pass16-synthetic', 'not-a-usable-password-hash', 'cashier', true, 1);
+          INSERT INTO outlets (code, name, is_active)
+          VALUES ('PASS16-CI', 'Synthetic restore-only outlet', true);
+          INSERT INTO registers (outlet_id, code, name, register_type, cash_tender_label, default_order_type, is_active)
+          SELECT id, 'PASS16-CI-REG', 'Synthetic restore-only register', 'cash_drawer', 'Cash', 'dine_in', true
+          FROM outlets WHERE code='PASS16-CI';
+          SQL
+          createdb -h 127.0.0.1 -U pos pos_pass16_restore_ci
+          test "$(psql -X -v ON_ERROR_STOP=1 "$TARGET_DATABASE_URL" -Atqc "select count(*) from pg_catalog.pg_tables where schemaname='public'")" = 0
+      - name: Dump synthetic source as PostgreSQL custom archive
+        run: |
+          pg_dump -h 127.0.0.1 -U pos -d pos_pass16_source --format=custom --no-owner --no-privileges --file=/tmp/pass16-synthetic.dump
+          pg_restore --list /tmp/pass16-synthetic.dump >/dev/null
+          test -s /tmp/pass16-synthetic.dump
+      - name: Verify fail-closed protections
+        run: |
+          set -euo pipefail
+          if BACKUP_FILE=/tmp/pass16-synthetic.dump NON_PRODUCTION_CONFIRM= bash scripts/pass16-restore-rehearsal.sh > /tmp/guard-no-confirm.log 2>&1; then
+            echo "Missing confirmation incorrectly accepted" >&2; exit 1
+          fi
+          grep -q NON_PRODUCTION_CONFIRM /tmp/guard-no-confirm.log
+          if BACKUP_FILE=/tmp/pass16-synthetic.dump NON_PRODUCTION_CONFIRM=I_CONFIRM_NON_PRODUCTION_RESTORE_TARGET TARGET_DATABASE_URL=postgresql://pos:pos@127.0.0.1:5432/pos_pass16_source bash scripts/pass16-restore-rehearsal.sh > /tmp/guard-unsafe-target.log 2>&1; then
+            echo "Unsafe database name incorrectly accepted" >&2; exit 1
+          fi
+          grep -q 'refusing a restore target' /tmp/guard-unsafe-target.log
+          if BACKUP_FILE=/tmp/pass16-synthetic.dump NON_PRODUCTION_CONFIRM=I_CONFIRM_NON_PRODUCTION_RESTORE_TARGET EXPECTED_HEAD= bash scripts/pass16-restore-rehearsal.sh > /tmp/guard-no-head.log 2>&1; then
+            echo "Missing revision incorrectly accepted" >&2; exit 1
+          fi
+          grep -q EXPECTED_HEAD /tmp/guard-no-head.log
+          test "$(psql -X -v ON_ERROR_STOP=1 "$TARGET_DATABASE_URL" -Atqc "select count(*) from pg_catalog.pg_tables where schemaname='public'")" = 0
+      - name: Restore disposable database and reconcile source records
+        run: |
+          set -euo pipefail
+          BACKUP_FILE=/tmp/pass16-synthetic.dump NON_PRODUCTION_CONFIRM=I_CONFIRM_NON_PRODUCTION_RESTORE_TARGET bash scripts/pass16-restore-rehearsal.sh | tee /tmp/pass16-rehearsal.txt
+          grep -Eq '^RESTORE_ELAPSED_SECONDS=[0-9]+$' /tmp/pass16-rehearsal.txt
+          grep -q 'PASS 16 NON-PRODUCTION RESTORE REHEARSAL: PASS' /tmp/pass16-rehearsal.txt
+          for table in users outlets registers pos_orders pos_order_payments; do
+            original="$(psql -X -v ON_ERROR_STOP=1 postgresql://pos:pos@127.0.0.1:5432/pos_pass16_source -Atqc "select count(*) from $table")"
+            restored="$(psql -X -v ON_ERROR_STOP=1 "$TARGET_DATABASE_URL" -Atqc "select count(*) from $table")"
+            test "$original" = "$restored"
+            echo "RECONCILED_$table=$restored" | tee -a /tmp/pass16-rehearsal.txt
+          done
+          test "$(psql -X -v ON_ERROR_STOP=1 "$TARGET_DATABASE_URL" -Atqc "select count(*) from users where username='ci-pass16-synthetic'")" = 1
+          test "$(psql -X -v ON_ERROR_STOP=1 "$TARGET_DATABASE_URL" -Atqc "select count(*) from registers where code='PASS16-CI-REG'")" = 1
+      - name: Refuse repeated restore into populated target
+        run: |
+          if BACKUP_FILE=/tmp/pass16-synthetic.dump NON_PRODUCTION_CONFIRM=I_CONFIRM_NON_PRODUCTION_RESTORE_TARGET bash scripts/pass16-restore-rehearsal.sh > /tmp/pass16-nonempty-refusal.log 2>&1; then
+            echo "Restore overwrote populated database" >&2; exit 1
+          fi
+          grep -q "target public schema is not empty" /tmp/pass16-nonempty-refusal.log
+      - name: Record synthetic-only scope
+        run: |
+          {
+            echo "### Pass 16 isolated synthetic restore"
+            echo "- Commit: $GITHUB_SHA"
+            echo "- Disposable PostgreSQL 16 only; no production credentials, data, orders, or restores."
+            echo "- Expected Alembic head: $EXPECTED_HEAD"
+            echo "- Fail-closed guards for missing confirmation, unsafe target, missing revision and nonempty database: checked."
+            echo "- Restored synthetic user, outlet, register and reconciled table counts."
+            echo "- Does NOT prove production backup recoverability, RTO/RPO, hardware, or operational acceptance."
+            grep '^RESTORE_ELAPSED_SECONDS=' /tmp/pass16-rehearsal.txt
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain non-sensitive drill evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pass16-synthetic-restore-log
+          path: |
+            /tmp/pass16-rehearsal.txt
+            /tmp/pass16-nonempty-refusal.log
+          if-no-files-found: ignore
+          retention-days: 30
