@@ -152,6 +152,9 @@ jobs:
             fi
             sleep 1
           done
+          if [[ "$ready" != 1 ]]; then
+            curl -fsS http://127.0.0.1:8100/internal/healthz/details | python -c 'import json,sys; r=json.load(sys.stdin); print("Visual baseline readiness reasons:", r.get("reasons"))' || true
+          fi
           test "$ready" = 1 || {
             tail -60 /tmp/visual-audit-accounting.log || true
             tail -60 /tmp/visual-audit-worker.log || true
