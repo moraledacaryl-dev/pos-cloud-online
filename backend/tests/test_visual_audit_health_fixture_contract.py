@@ -43,3 +43,17 @@ def test_visual_workflow_has_real_health_worker_and_emulates_no_production_finan
     assert 'http://127.0.0.1:18993/api/integrations/pos/order' in content
     assert '" = 405' in content or ' = 405' in content
     assert "abort('failed')" in (ROOT / "frontend/e2e/visual-audit.spec.mjs").read_text()
+
+
+def test_visual_seed_suppresses_only_disposable_synthetic_events():
+    seed = (ROOT / "backend/scripts/seed_visual_audit.py").read_text()
+    assert 'VISUAL_AUDIT_CI' in seed and 'GITHUB_ACTIONS' in seed
+    assert '"/pos_visual_audit"' in seed
+    assert 'SyncOutboxEvent' in seed
+    assert 'event.status = "suppressed"' in seed
+    assert 'visual_audit_suppressed_synthetic_events' in seed
+    # Only the CI-only visual fixture is allowed to clear its own pending
+    # financial notifications; never a production-facing script.
+    guard = seed.index('Visual audit data fixture only runs in isolated GitHub CI')
+    suppression = seed.index('event.status = "suppressed"')
+    assert guard < suppression
