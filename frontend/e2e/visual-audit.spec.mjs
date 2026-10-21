@@ -193,7 +193,7 @@ async function captureRouteMatrix(page, roleCase, viewportName) {
         const picker = page.getByRole('combobox', { name: 'Service area' });
         await expect(picker, 'all POS service areas must be accessible without a horizontal swipe').toBeVisible();
         await picker.selectOption('Takeout');
-        await expect(page.locator('.spaces-panel-head h2')).toHaveText('Takeout');
+        await expect(page.locator('.spaces-map-panel .spaces-panel-head h2')).toHaveText('Takeout');
         await picker.selectOption('Lobby');
       }
       if (viewportName === 'mobile' && route === '/catalog') {
