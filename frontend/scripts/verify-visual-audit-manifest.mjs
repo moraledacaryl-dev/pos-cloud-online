@@ -19,7 +19,7 @@ export const ALLOWED = {
   ]),
   kitchen: new Set(['/dashboard', '/kitchen', '/kitchen-board', '/bar', '/expo', '/catalog', '/recipes']),
 };
-const SMOKE_ROUTES = new Set(['/dashboard', '/pos', '/orders', '/users', '/kitchen']);
+const SMOKE_ROUTES = new Set(['/dashboard', '/pos', '/orders', '/catalog', '/users', '/kitchen']);
 const SPECIAL_FAILURE_ROUTES = ['/dashboard', '/pos', '/orders', '/sync'];
 const PNG_HEADER = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 
