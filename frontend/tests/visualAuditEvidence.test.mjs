@@ -34,11 +34,11 @@ test('full screenshot matrix requires 478 separate PNG files', () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('smoke screenshot matrix requires 41 separate viewport PNGs', () => {
+test('smoke screenshot matrix requires 45 separate viewport PNGs', () => {
   const { root, manifest } = fixture('smoke', false);
   try {
-    assert.equal(manifest.captures.length, 41);
-    assert.equal(verifyManifest(manifest, root, SHA).captureStates, 41);
+    assert.equal(manifest.captures.length, 45);
+    assert.equal(verifyManifest(manifest, root, SHA).captureStates, 45);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

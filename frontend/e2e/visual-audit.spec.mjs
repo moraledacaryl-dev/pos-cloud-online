@@ -177,7 +177,7 @@ async function logoutIfPresent(page) {
 
 function shouldCaptureRoute(roleCase, route) {
   if (MODE !== 'smoke') return true;
-  const smoke = new Set(['/dashboard', '/pos', '/orders', '/users', '/kitchen']);
+  const smoke = new Set(['/dashboard', '/pos', '/orders', '/catalog', '/users', '/kitchen']);
   return smoke.has(route) && (roleCase.allowed.has(route) || route === '/users' || route === '/kitchen');
 }
 
@@ -189,6 +189,20 @@ async function captureRouteMatrix(page, roleCase, viewportName) {
     const denied = page.locator('[data-route-status="403"]');
     if (roleCase.allowed.has(route)) {
       await expect(denied, `${roleCase.role} should be allowed on ${route}`).toHaveCount(0);
+      if (viewportName === 'mobile' && route === '/pos') {
+        const picker = page.getByRole('combobox', { name: 'Service area' });
+        await expect(picker, 'all POS service areas must be accessible without a horizontal swipe').toBeVisible();
+        await picker.selectOption('Takeout');
+        await expect(page.locator('.spaces-map-panel .spaces-panel-head h2')).toHaveText('Takeout');
+        await picker.selectOption('Lobby');
+      }
+      if (viewportName === 'mobile' && route === '/catalog') {
+        const search = page.getByRole('textbox', { name: 'Search catalog' });
+        const filter = page.getByRole('combobox', { name: 'Availability filter' });
+        const searchWidth = await search.evaluate((element) => element.getBoundingClientRect().width);
+        const filterWidth = await filter.evaluate((element) => element.getBoundingClientRect().width);
+        expect(Math.abs(searchWidth - filterWidth), 'mobile catalog filter controls should align').toBeLessThan(2);
+      }
       await capture(page, { role: roleCase.role, viewport: viewportName, route, state: 'allowed-default', note: `HTTP ${response?.status() || 'client-navigation'}; allowed route` });
     } else {
       await expect(denied, `${roleCase.role} should be denied on ${route}`).toBeVisible();

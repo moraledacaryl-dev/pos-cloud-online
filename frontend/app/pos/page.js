@@ -1246,7 +1246,8 @@ export default function PosPage() {
       {sessions.length > 0 && !currentSessionIsStale && terminalScreen === 'spaces' && (
         <section className="pos-redesign pos-spaces-screen">
           <div className="spaces-command-strip">
-            <div className="spaces-area-tabs">{serviceAreas.map((area) => <button key={area} type="button" className={activeArea === area ? 'active' : ''} onClick={() => setActiveArea(area)}>{area}</button>)}</div>
+            <label className="spaces-area-picker">Service area<select aria-label="Service area" value={activeArea} onChange={(event) => setActiveArea(event.target.value)}>{serviceAreas.map((area) => <option key={area} value={area}>{area}</option>)}</select></label>
+            <div className="spaces-area-tabs" role="group" aria-label="Service areas">{serviceAreas.map((area) => <button key={area} type="button" aria-pressed={activeArea === area} className={activeArea === area ? 'active' : ''} onClick={() => setActiveArea(area)}>{area}</button>)}</div>
             <button type="button" className="primary start-order-first-button" onClick={beginUnassignedDineInOrder}>Start Order First</button>
           </div>
           <div className="spaces-grid">

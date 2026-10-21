@@ -111,14 +111,14 @@ export default function CatalogPage() {
               {!!catalogStatus?.imported_rows && <span className="small muted">{catalogStatus.imported_rows} selling rows</span>}
             </div>
           </div>
-          <div className="row wrap">
+          <div className="row wrap catalog-toolbar-controls">
             <button className="primary" onClick={handleSync} disabled={busy}>{busy ? 'Working...' : 'Refresh Selling Catalog'}</button>
             <select aria-label="Availability filter" value={availabilityFilter} onChange={(e) => setAvailabilityFilter(e.target.value)}>
               <option value="all">All items</option>
               <option value="available">Available only</option>
               <option value="sold_out">Sold out / hidden</option>
             </select>
-            <input aria-label="Search catalog" placeholder="Search catalog" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 220 }} />
+            <input aria-label="Search catalog" placeholder="Search catalog" className="catalog-search-input" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
         </div>
         {catalogStatus?.state === 'stale' && <p className="error-text" style={{ marginTop: 8 }}>The selling snapshot is more than 24 hours old. Refresh before relying on prices or item availability.</p>}
