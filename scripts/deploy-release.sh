@@ -9,6 +9,7 @@ EVIDENCE_DIR="${EVIDENCE_DIR:-/var/lib/hiddenoasis-pos/deploy-evidence}"
 PUBLIC_BASE="${PUBLIC_BASE:-}"
 ALLOW_ACCOUNTING_UNAVAILABLE="${ALLOW_ACCOUNTING_UNAVAILABLE:-false}"
 CERTIFICATION_SCRIPT="${CERTIFICATION_SCRIPT:-scripts/production-certify.sh}"
+DEPLOY_TARGET_GATE_SCRIPT="${DEPLOY_TARGET_GATE_SCRIPT:-scripts/deploy-target-gate.py}"
 
 fail() { echo "DEPLOY FAIL: $*" >&2; exit 1; }
 wait_for_http() {
@@ -50,6 +51,16 @@ if [[ -z "$PUBLIC_BASE" && "$TARGET_ENVIRONMENT" == "production" ]]; then
 fi
 [[ "$PUBLIC_BASE" =~ ^https://[^[:space:]]+$ ]] || fail 'PUBLIC_BASE must be the HTTPS URL for the selected environment'
 [[ "$EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]] || fail 'EXPECTED_COMMIT must be a full 40-character lowercase commit SHA'
+# The Actions environment label is not evidence of which actual server
+# SERVER_HOST points to. Before backup, git switch, or systemd changes,
+# verify the selected HTTPS origin and the backend's real runtime environment.
+[[ -f "$DEPLOY_TARGET_GATE_SCRIPT" ]] || fail "deployment target gate not found: $DEPLOY_TARGET_GATE_SCRIPT"
+python3 "$DEPLOY_TARGET_GATE_SCRIPT" validate-url
+if ! curl -fsS --connect-timeout 3 --max-time 10 'http://127.0.0.1:8100/internal/healthz/details' \
+    | python3 "$DEPLOY_TARGET_GATE_SCRIPT" validate-runtime; then
+  fail "local backend environment identity check failed; refusing to change any service"
+fi
+
 [[ -d "$APP_DIR/.git" ]] || fail "not a Git checkout: $APP_DIR"
 
 cd "$APP_DIR"
