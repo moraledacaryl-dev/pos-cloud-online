@@ -1,0 +1,174 @@
+name: Pass 16 isolated staging runtime
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  staging-runtime:
+    name: PostgreSQL Redis worker frontend and staging health
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: pos
+          POSTGRES_PASSWORD: pos
+          POSTGRES_DB: pos_pass16_staging_ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U pos -d pos_pass16_staging_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      ENVIRONMENT: staging
+      DATABASE_URL: postgresql+psycopg://pos:pos@127.0.0.1:5432/pos_pass16_staging_ci
+      REDIS_URL: redis://127.0.0.1:6379/0
+      SECRET_KEY: StagingPassSixteenSigningKey_2026_0123456789abcdef
+      ACCOUNTING_INTEGRATION_SECRET: StagingPassSixteenAccounting_2026_abcdef0123456789
+      INTEGRATION_API_KEY: StagingPassSixteenIntegration_2026_abcdef0123456789
+      ALLOW_DEFAULT_ADMIN_BOOTSTRAP: 'false'
+      STARTUP_REQUIRE_MIGRATIONS: 'true'
+      RATE_LIMIT_ENABLED: 'true'
+      RATE_LIMIT_BACKEND: redis
+      RATE_LIMIT_PER_MINUTE: '2000'
+      SYNC_WORKER_POLL_SECONDS: '1'
+      CORS_ORIGINS: http://127.0.0.1:8080
+      ACCOUNTING_API_BASE: http://127.0.0.1:9/api
+      HTTP_TIMEOUT_SECONDS: '1'
+      NEXT_PUBLIC_API_BASE: /api
+      TARGET_ENVIRONMENT: staging
+      PUBLIC_BASE: http://127.0.0.1:8080
+      BACKEND_BASE: http://127.0.0.1:8100
+      PUBLIC_API_PREFIX: /api
+      APP_DIR: .
+    steps:
+      - name: Checkout exact release
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.lock
+      - name: Set up Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install locked backend and frontend
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r backend/requirements.lock
+          (cd frontend && npm ci)
+      - name: Upgrade disposable PostgreSQL schema
+        working-directory: backend
+        run: |
+          alembic upgrade head
+          alembic current | grep -F 0013_generic_selling_rules
+          alembic heads | grep -F 0013_generic_selling_rules
+          alembic check
+      - name: Build production-mode frontend for isolated staging
+        working-directory: frontend
+        run: npm run build
+      - name: Start isolated backend worker frontend and public proxy
+        run: |
+          set -euo pipefail
+          (cd backend && python -m uvicorn app.main:app --host 127.0.0.1 --port 8100 > /tmp/pass16-stage-backend.log 2>&1) &
+          echo $! > /tmp/pass16-stage-backend.pid
+          (cd backend && python -m app.workers.sync_worker > /tmp/pass16-stage-worker.log 2>&1) &
+          echo $! > /tmp/pass16-stage-worker.pid
+          (cd frontend && npm run start -- -H 127.0.0.1 -p 3100 > /tmp/pass16-stage-frontend.log 2>&1) &
+          echo $! > /tmp/pass16-stage-frontend.pid
+          (cd frontend && node e2e/ci-proxy.mjs > /tmp/pass16-stage-proxy.log 2>&1) &
+          echo $! > /tmp/pass16-stage-proxy.pid
+          ready=0
+          for i in $(seq 1 50); do
+            if curl -fsS http://127.0.0.1:8100/healthz >/dev/null 2>&1 &&
+               curl -fsS http://127.0.0.1:8080/login >/dev/null 2>&1 &&
+               curl -fsS http://127.0.0.1:8100/readyz/integrations >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" = 1 || {
+            echo 'Staging-equivalent services failed to reach ready state'
+            tail -30 /tmp/pass16-stage-backend.log || true
+            tail -30 /tmp/pass16-stage-worker.log || true
+            tail -30 /tmp/pass16-stage-proxy.log || true
+            exit 1
+          }
+      - name: Reject production URLs and wrong release before any HTTP probe
+        run: |
+          set -euo pipefail
+          if PUBLIC_BASE='https://POS.HIDDENOASIS.APP:443' BACKEND_BASE='http://127.0.0.1:8100' EXPECTED_COMMIT="$GITHUB_SHA" \
+            bash scripts/pass16-staging-certify.sh >/tmp/pass16-stage-prod-refusal.log 2>&1; then
+            echo 'Production-like URL was accepted' >&2
+            exit 1
+          fi
+          grep -q 'refusing to run staging certification against production' /tmp/pass16-stage-prod-refusal.log
+          if EXPECTED_COMMIT=0000000000000000000000000000000000000000 \
+            bash scripts/pass16-staging-certify.sh >/tmp/pass16-stage-sha-refusal.log 2>&1; then
+            echo 'Wrong release SHA was accepted' >&2
+            exit 1
+          fi
+          grep -q 'does not match EXPECTED_COMMIT' /tmp/pass16-stage-sha-refusal.log
+      - name: Certify staging runtime and protected health endpoints
+        run: |
+          set -euo pipefail
+          EXPECTED_COMMIT="$GITHUB_SHA" bash scripts/pass16-staging-certify.sh | tee /tmp/pass16-stage-certification.txt
+          grep -q 'PASS 16 STAGING AUTOMATED CERTIFICATION: PASS' /tmp/pass16-stage-certification.txt
+      - name: Record synthetic staging scope
+        run: |
+          {
+            echo '### Pass 16 isolated staging-equivalent runtime'
+            echo "Commit: $GITHUB_SHA"
+            echo 'Ephemeral GitHub runner + PostgreSQL 16 + Redis 7 + real backend/worker + production-built frontend.'
+            echo 'Checks: actual backend ENVIRONMENT=staging, strict readiness, public health hiding, exact Git SHA, Alembic head and schema.'
+            echo 'Negative checks: production URL variants and mismatched SHA rejected.'
+            echo 'No production database, credentials, downstream service or real sale is involved.'
+            echo 'Does not certify an independently deployed staging clone or physical operational acceptance.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Show isolated service logs on failure
+        if: failure()
+        run: |
+          tail -100 /tmp/pass16-stage-backend.log || true
+          tail -100 /tmp/pass16-stage-worker.log || true
+          tail -100 /tmp/pass16-stage-frontend.log || true
+          tail -100 /tmp/pass16-stage-proxy.log || true
+      - name: Upload non-sensitive staging certification evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pass16-isolated-staging-runtime
+          path: |
+            /tmp/pass16-stage-certification.txt
+            /tmp/pass16-stage-prod-refusal.log
+            /tmp/pass16-stage-sha-refusal.log
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Stop all ephemeral service processes
+        if: always()
+        run: |
+          for name in backend worker frontend proxy; do
+            file="/tmp/pass16-stage-$name.pid"
+            if [ -f "$file" ]; then
+              kill "$(cat "$file")" 2>/dev/null || true
+            fi
+          done
