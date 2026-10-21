@@ -244,3 +244,48 @@ def test_inventory_http_receiver_refuses_non_ci_execution():
     )
     assert result.returncode != 0
     assert 'restricted to isolated staging CI' in result.stderr
+
+
+
+def test_migration_downgrade_protects_populated_pricing_rules():
+    migration = read('backend/alembic/versions/0013_generic_selling_rules.py')
+    assert 'def downgrade():' in migration
+    assert 'SELECT EXISTS (SELECT 1 FROM catalog_items WHERE' in migration
+    assert 'populated conditional pricing/tags' in migration
+    assert migration.index('if populated:') < migration.index('op.drop_column("catalog_items", "conditional_prices_json")')
+    assert migration.index('if populated:') < migration.index('op.drop_column("catalog_items", "pricing_tags_json")')
+
+
+def test_synthetic_restore_runs_protected_migration_roundtrip():
+    script = read('backend/scripts/pass16_migration_cycle.py')
+    workflow = read('.github/workflows/pass16-restore-ci.yml')
+    for marker in (
+        'PASS16_MIGRATION_SOURCE_FINANCIAL_BASELINE=PASS',
+        'PASS16_MIGRATION_FINANCIAL_ROUNDTRIP=PASS',
+        'PASS16_POPULATED_PRICING_DOWNGRADE_REFUSED=PASS',
+        'PASS16_SYNTHETIC_MIGRATION_REHEARSAL=PASS',
+    ):
+        assert marker in script
+        assert marker in workflow
+    assert "pos_pass16_restore_ci" in script
+    assert "PASS16_MIGRATION_CI" in script
+    assert 'migrate(url, "downgrade", PREVIOUS)' in script
+    assert 'migrate(url, "upgrade", CURRENT)' in script
+    assert "migrate(url, \"downgrade\", PREVIOUS, expect_failure=True)" in script
+    assert "PASS16_MIGRATION_CI=1 PYTHONPATH=backend python backend/scripts/pass16_migration_cycle.py" in workflow
+    assert workflow.index('Rehearse financial-preserving migration roundtrip') < workflow.index('Refuse repeated restore into populated target')
+
+
+def test_migration_cycle_refuses_to_run_without_disposable_github_environment():
+    script = ROOT / 'backend/scripts/pass16_migration_cycle.py'
+    result = subprocess.run(
+        [sys.executable, str(script)],
+        cwd=ROOT,
+        env={**os.environ, 'GITHUB_ACTIONS': 'false',
+             'PASS16_MIGRATION_CI': '1', 'ENVIRONMENT': 'test',
+             'DATABASE_URL': 'postgresql+psycopg://pos:pos@127.0.0.1:5432/pos_pass16_source',
+             'TARGET_DATABASE_URL': 'postgresql://pos:pos@127.0.0.1:5432/pos_pass16_restore_ci'},
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode != 0
+    assert 'requires isolated GitHub CI' in result.stderr
