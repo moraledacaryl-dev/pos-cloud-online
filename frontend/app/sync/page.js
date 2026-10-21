@@ -246,7 +246,7 @@ export default function SyncPage() {
         <div className="toolbar">
           <div>
             <h2>Diagnostics</h2>
-            <p className="muted">Surface worker staleness, API reachability, and migration state before forcing retries.</p>
+            <p className="muted">Connections and worker status.</p>
           </div>
           {loading && <span className="badge info">Refreshing…</span>}
         </div>

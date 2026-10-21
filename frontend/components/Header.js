@@ -31,8 +31,8 @@ export default function Header({ menuButtonRef, menuOpen = false, onMenuToggle }
           <span aria-hidden="true">☰</span>
         </button>
         <div>
-          <div className="topbar-title">{title}</div>
-          <div className="topbar-subtitle">{subtitle}</div>
+          <div className="topbar-breadcrumb"><span>Hidden Oasis</span><span aria-hidden="true">/</span><strong>{title}</strong></div>
+          <span className="sr-only">{subtitle}</span>
         </div>
       </div>
       {pathname !== '/login' && <button className="secondary" onClick={handleLogout}>Logout</button>}

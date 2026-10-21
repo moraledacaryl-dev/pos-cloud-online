@@ -129,7 +129,7 @@ export default function SessionsPage() {
     <div className="stack">
       <section className="section">
         <h1>Register Sessions</h1>
-        <p className="muted">Open, blind-close, verify by denomination, reopen with reason, and keep archived close history easy to filter.</p>
+        <p className="muted">Open shifts, reconcile cash, and review closed sessions.</p>
         {!!notice && <p className="notice-text" style={{ marginTop: 8 }}>{notice}</p>}
         {!!error && <p className="error-text" style={{ marginTop: 8 }}>{error}</p>}
       </section>

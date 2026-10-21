@@ -284,7 +284,7 @@ export default function RoomChargesPage() {
             <div className="row" style={{ justifyContent: 'space-between' }}>
               <div>
                 <strong>{filters.view === 'all' ? 'Posting Queue' : `${STATUS_VIEWS.find((view) => view.key === filters.view)?.label || 'Queue'} Screen`}</strong>
-                <div className="small muted">Clearer pending vs manually posted vs settled front-desk list</div>
+                <div className="small muted">Charges awaiting front-desk posting</div>
               </div>
               <span className="small muted">{queueRows.length} results</span>
             </div>

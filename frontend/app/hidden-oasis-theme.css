@@ -285,8 +285,6 @@ button,
 
 button:hover,
 .button-link:hover {
-  background: var(--brand-hover);
-  border-color: var(--brand-hover);
   opacity: 1;
 }
 

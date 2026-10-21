@@ -122,7 +122,7 @@ export default function RegistersPage() {
     <div className="stack">
       <section className="section">
         <h1>Registers</h1>
-        <p className="muted">Connect each POS register to a real accounting drawer using a searchable picker instead of typing raw IDs blindly.</p>
+        <p className="muted">Registers, outlets, and linked cash drawers.</p>
         {!!notice && <p className="notice-text" style={{ marginTop: 8 }}>{notice}</p>}
         {!!error && <p className="error-text" style={{ marginTop: 8 }}>{error}</p>}
         {!!accountingUnavailable && <div className="integration-status warn" role="status"><strong>Accounting unavailable</strong><p>{accountingUnavailable}</p></div>}
