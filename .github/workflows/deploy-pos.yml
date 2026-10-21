@@ -67,12 +67,19 @@ jobs:
     environment:
       name: ${{ inputs.target_environment }}
     steps:
+      - name: Checkout deploy target gate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Verify destination URL before opening SSH
+        env:
+          TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
+          PUBLIC_BASE: ${{ vars.PUBLIC_BASE || (inputs.target_environment == 'production' && 'https://pos.hiddenoasis.app') || '' }}
+        run: python3 scripts/deploy-target-gate.py validate-url
       - name: Deploy and certify exact SHA
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
         env:
           EXPECTED_COMMIT: ${{ needs.verify-release.outputs.release_sha }}
           TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
-          PUBLIC_BASE: ${{ vars.PUBLIC_BASE }}
+          PUBLIC_BASE: ${{ vars.PUBLIC_BASE || (inputs.target_environment == 'production' && 'https://pos.hiddenoasis.app') || '' }}
           ALLOW_ACCOUNTING_UNAVAILABLE: ${{ inputs.allow_accounting_unavailable }}
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -87,11 +94,13 @@ jobs:
             git cat-file -e "$EXPECTED_COMMIT^{commit}"
             DEPLOY_SCRIPT="$(mktemp /tmp/pos-deploy-release.XXXXXX)"
             CERTIFICATION_SCRIPT="$(mktemp /tmp/pos-production-certify.XXXXXX)"
-            trap 'rm -f "$DEPLOY_SCRIPT" "$CERTIFICATION_SCRIPT"' EXIT
+            TARGET_GATE_SCRIPT="$(mktemp /tmp/pos-deploy-target-gate.XXXXXX)"
+            trap 'rm -f "$DEPLOY_SCRIPT" "$CERTIFICATION_SCRIPT" "$TARGET_GATE_SCRIPT"' EXIT
             git show "$EXPECTED_COMMIT:scripts/deploy-release.sh" > "$DEPLOY_SCRIPT"
             git show "$EXPECTED_COMMIT:scripts/production-certify.sh" > "$CERTIFICATION_SCRIPT"
-            chmod 0700 "$DEPLOY_SCRIPT" "$CERTIFICATION_SCRIPT"
-            CONFIRM_DEPLOY=YES EXPECTED_COMMIT="$EXPECTED_COMMIT" TARGET_ENVIRONMENT="$TARGET_ENVIRONMENT" PUBLIC_BASE="$PUBLIC_BASE" ALLOW_ACCOUNTING_UNAVAILABLE="$ALLOW_ACCOUNTING_UNAVAILABLE" CERTIFICATION_SCRIPT="$CERTIFICATION_SCRIPT" bash "$DEPLOY_SCRIPT"
+            git show "$EXPECTED_COMMIT:scripts/deploy-target-gate.py" > "$TARGET_GATE_SCRIPT"
+            chmod 0700 "$DEPLOY_SCRIPT" "$CERTIFICATION_SCRIPT" "$TARGET_GATE_SCRIPT"
+            CONFIRM_DEPLOY=YES EXPECTED_COMMIT="$EXPECTED_COMMIT" TARGET_ENVIRONMENT="$TARGET_ENVIRONMENT" PUBLIC_BASE="$PUBLIC_BASE" ALLOW_ACCOUNTING_UNAVAILABLE="$ALLOW_ACCOUNTING_UNAVAILABLE" CERTIFICATION_SCRIPT="$CERTIFICATION_SCRIPT" DEPLOY_TARGET_GATE_SCRIPT="$TARGET_GATE_SCRIPT" bash "$DEPLOY_SCRIPT"
       - id: evidence
         name: Capture non-sensitive deployment evidence
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5

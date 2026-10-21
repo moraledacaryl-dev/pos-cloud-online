@@ -22,6 +22,14 @@ Use a staging environment isolated from production data and credentials.
 
 Record staging URL, commit, date/time, operator, and certification output location.
 
+### Protected staging deployment prerequisites (real infrastructure)
+
+On 2026-10-21 staging dispatch run #39600425046, release verification passed but deployment stopped **before** code switch/backup/service restart because the GitHub `staging` Environment provided an empty `PUBLIC_BASE`. A GitHub Actions job environment label alone does not prove `SERVER_HOST` points to a staging server.
+
+Before re-dispatch, an authorized GitHub administrator must open **Settings → Environments → staging** and configure the **Environment variable** `PUBLIC_BASE` to the actual **HTTPS staging POS origin** (not `https://pos.hiddenoasis.app`). Confirm the `staging` Environment secrets `SERVER_HOST`, `SERVER_PORT`, `SERVER_USER`, and `SERVER_SSH_KEY` resolve to a dedicated staging host with isolated POS database, Redis, credentials and systemd units. Do not copy production secrets as a shortcut. Do not use the production POS host for staging. The staging machine needs a previously provisioned, healthy POS backend reporting `environment: staging` on its private detailed health endpoint before this automated release workflow can deploy to it.
+
+The protected Deploy POS workflow now validates the selected HTTPS origin **before opening SSH**. Its release script independently verifies the remote backend-reported environment matches `TARGET_ENVIRONMENT` **before backups, git checkout, systemd or service changes**. A rejected target must be fixed in GitHub environment configuration or staging infrastructure, never by bypassing the gate. Initial staging infrastructure bootstrap is separate from routine production release automation.
+
 ### Automated isolated staging-runtime rehearsal (CI only)
 
 The `Pass 16 isolated staging runtime` GitHub Actions workflow provisions ephemeral PostgreSQL 16 and Redis 7, runs the POS backend under its real `ENVIRONMENT=staging` security policy, starts the sync worker and production-built frontend, and verifies the read-only health/readiness surfaces through a local public proxy. It rejects production-origin URL variants and mismatched commit SHAs; it requires direct staging runtime identity, migration head/schema checks, strict worker/dependency readiness, and hidden private operational endpoints. The workflow may use `PUBLIC_API_PREFIX=/api` for the isolated CI proxy. Real deployed staging typically uses the default empty prefix.
