@@ -208,3 +208,38 @@ def test_accounting_replay_stub_rejects_non_ci_execution():
     )
     assert result.returncode != 0
     assert 'requires isolated staging CI' in result.stderr
+
+
+def test_inventory_http_replay_is_a_disposable_real_transport_contract():
+    workflow = read('.github/workflows/pass16-inventory-replay-ci.yml')
+    runner = read('backend/scripts/pass16_inventory_replay.py')
+    receiver = read('backend/scripts/pass16_inventory_replay_stub.py')
+    assert 'postgres:16' in workflow
+    assert 'pos_pass16_inventory_ci' in workflow
+    assert 'INVENTORY_API_BASE: http://127.0.0.1:18992/api/v1' in workflow
+    assert 'INVENTORY_INTEGRATION_ENABLED:' in workflow
+    assert 'pass16_inventory_replay.py' in workflow
+    assert 'PASS16_INVENTORY_HTTP_REPLAY_CERTIFICATION' in workflow
+    assert 'run_inventory_outbox_sync(db, limit=limit)' in runner
+    assert 'enqueue_inventory_event(db, original, "sale_completed"' in runner
+    assert 'enqueue_inventory_event(db, modified, "sale_voided"' in runner
+    assert 'PASS16_INVENTORY_REVERSAL_WAITS_FOR_SALE=PASS' in runner
+    assert 'PASS16_INVENTORY_LOST_ACK_IDEMPOTENT_REPLAY=PASS' in runner
+    assert 'PASS16_INVENTORY_ORIGINAL_SKU_REVERSAL=PASS' in runner
+    assert 'external_event_id' in receiver
+    assert 'STOCK_DELTAS' in receiver
+    assert '"accept_then_503"' in receiver
+    assert 'X-Integration-Token' in receiver
+    assert 'unexpected synthetic Inventory route' in receiver
+
+
+def test_inventory_http_receiver_refuses_non_ci_execution():
+    receiver = ROOT / 'backend/scripts/pass16_inventory_replay_stub.py'
+    result = subprocess.run(
+        ['python', str(receiver)], cwd=ROOT,
+        env={**os.environ, 'GITHUB_ACTIONS': 'false',
+             'PASS16_INVENTORY_REPLAY_CI': '1', 'ENVIRONMENT': 'staging'},
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode != 0
+    assert 'restricted to isolated staging CI' in result.stderr
