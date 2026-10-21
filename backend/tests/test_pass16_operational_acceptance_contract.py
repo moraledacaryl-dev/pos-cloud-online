@@ -12,7 +12,7 @@ def read(path: str) -> str:
 def test_staging_certification_refuses_production_target():
     script = read('scripts/pass16-staging-certify.sh')
     assert 'TARGET_ENVIRONMENT' in script
-    assert 'https://pos.hiddenoasis.app' in script
+    assert "parsed.hostname.lower().rstrip('.') == 'pos.hiddenoasis.app'" in script
     assert 'refusing to run staging certification against production' in script
     assert 'PASS 16 STAGING AUTOMATED CERTIFICATION: PASS' in script
 
