@@ -12,7 +12,7 @@ def read(path: str) -> str:
 def test_staging_certification_refuses_production_target():
     script = read('scripts/pass16-staging-certify.sh')
     assert 'TARGET_ENVIRONMENT' in script
-    assert 'https://pos.hiddenoasis.app' in script
+    assert "parsed.hostname.lower().rstrip('.') == 'pos.hiddenoasis.app'" in script
     assert 'refusing to run staging certification against production' in script
     assert 'PASS 16 STAGING AUTOMATED CERTIFICATION: PASS' in script
 
@@ -124,3 +124,54 @@ def test_financial_restore_fixture_rejects_execution_outside_github_ci():
     )
     assert completed.returncode != 0
     assert 'restricted to the isolated GitHub CI drill' in completed.stderr
+
+
+def test_staging_certification_cannot_skip_migration_or_real_runtime_checks():
+    script = read('scripts/pass16-staging-certify.sh')
+    assert 'EXPECTED_COMMIT must be an explicit full 40-character SHA' in script
+    assert '/internal/healthz/details' in script
+    assert "report.get('environment') != 'staging'" in script
+    assert 'staging migration verification cannot be skipped' in script
+    assert 'staging Alembic schema drift' in script
+    assert 'public gateway hides private health diagnostics' in script
+    assert 'PUBLIC_API_PREFIX' in script
+
+
+def test_staging_workflow_uses_disposable_dependencies_and_actual_runtime():
+    workflow = read('.github/workflows/pass16-staging-ci.yml')
+    assert 'postgres:16' in workflow and 'redis:7' in workflow
+    assert 'pos_pass16_staging_ci' in workflow
+    assert 'ENVIRONMENT: staging' in workflow
+    assert 'python -m app.workers.sync_worker' in workflow
+    assert 'npm run build' in workflow
+    assert 'bash scripts/pass16-staging-certify.sh' in workflow
+    assert 'PASS 16 STAGING AUTOMATED CERTIFICATION: PASS' in workflow
+    assert 'POS.HIDDENOASIS.APP:443' in workflow
+
+
+def test_staging_certification_rejects_invalid_inputs_without_http_calls():
+    script = ROOT / 'scripts/pass16-staging-certify.sh'
+    base = {
+        **os.environ,
+        'TARGET_ENVIRONMENT': 'staging',
+        'APP_DIR': str(ROOT),
+        'PUBLIC_BASE': 'http://127.0.0.1:8080',
+        'BACKEND_BASE': 'http://127.0.0.1:8100',
+        'EXPECTED_COMMIT': '0' * 40,
+    }
+
+    def rejected(overrides, message):
+        result = subprocess.run(
+            ['bash', str(script)], cwd=ROOT, env={**base, **overrides},
+            check=False, capture_output=True, text=True,
+        )
+        assert result.returncode != 0
+        assert message in result.stderr
+
+    rejected({'EXPECTED_COMMIT': ''}, 'EXPECTED_COMMIT must be')
+    rejected({'TARGET_ENVIRONMENT': 'production'}, 'TARGET_ENVIRONMENT must')
+    rejected({'PUBLIC_API_PREFIX': '/internal'}, 'PUBLIC_API_PREFIX must')
+    rejected({'PUBLIC_BASE': 'https://POS.HIDDENOASIS.APP:443'},
+             'refusing to run staging certification against production')
+    rejected({'BACKEND_BASE': 'https://pos.hiddenoasis.app:443'},
+             'refusing to run staging certification against production')
