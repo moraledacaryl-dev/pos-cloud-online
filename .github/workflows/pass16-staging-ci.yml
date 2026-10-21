@@ -48,7 +48,8 @@ jobs:
       RATE_LIMIT_PER_MINUTE: '2000'
       SYNC_WORKER_POLL_SECONDS: '1'
       CORS_ORIGINS: http://127.0.0.1:8080
-      ACCOUNTING_API_BASE: http://127.0.0.1:9/api
+      ACCOUNTING_API_BASE: http://127.0.0.1:18990/api
+      PASS16_STAGING_CI: '1'
       HTTP_TIMEOUT_SECONDS: '1'
       NEXT_PUBLIC_API_BASE: /api
       TARGET_ENVIRONMENT: staging
@@ -89,6 +90,8 @@ jobs:
       - name: Start isolated backend worker frontend and public proxy
         run: |
           set -euo pipefail
+          (cd backend && python scripts/pass16_mock_accounting.py > /tmp/pass16-stage-accounting-mock.log 2>&1) &
+          echo $! > /tmp/pass16-stage-accounting-mock.pid
           (cd backend && python -m uvicorn app.main:app --host 127.0.0.1 --port 8100 > /tmp/pass16-stage-backend.log 2>&1) &
           echo $! > /tmp/pass16-stage-backend.pid
           (cd backend && python -m app.workers.sync_worker > /tmp/pass16-stage-worker.log 2>&1) &
@@ -166,7 +169,7 @@ jobs:
       - name: Stop all ephemeral service processes
         if: always()
         run: |
-          for name in backend worker frontend proxy; do
+          for name in backend worker frontend proxy accounting-mock; do
             file="/tmp/pass16-stage-$name.pid"
             if [ -f "$file" ]; then
               kill "$(cat "$file")" 2>/dev/null || true
