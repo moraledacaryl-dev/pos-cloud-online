@@ -177,7 +177,7 @@ async function logoutIfPresent(page) {
 
 function shouldCaptureRoute(roleCase, route) {
   if (MODE !== 'smoke') return true;
-  const smoke = new Set(['/dashboard', '/pos', '/orders', '/catalog', '/users', '/kitchen']);
+  const smoke = new Set(['/dashboard', '/pos', '/orders', '/catalog', '/settings', '/users', '/kitchen']);
   return smoke.has(route) && (roleCase.allowed.has(route) || route === '/users' || route === '/kitchen');
 }
 
@@ -195,6 +195,17 @@ async function captureRouteMatrix(page, roleCase, viewportName) {
         await picker.selectOption('Takeout');
         await expect(page.locator('.spaces-map-panel .spaces-panel-head h2')).toHaveText('Takeout');
         await picker.selectOption('Lobby');
+      }
+      if (viewportName === 'mobile' && route === '/settings' && roleCase.role === 'owner') {
+        const saveBar = page.locator('.settings-save-bar');
+        await expect(saveBar, 'clean Settings should not obscure the form with a sticky save bar').toHaveCount(0);
+        const baseField = page.getByLabel('Accounting API Base');
+        const originalBase = await baseField.inputValue();
+        await baseField.fill(originalBase + '?visual-audit-unsaved=1');
+        await expect(saveBar, 'edited Settings must expose Save and Discard actions').toBeVisible();
+        await page.getByRole('button', { name: 'Discard changes' }).click();
+        await expect(saveBar, 'discard must restore the unobstructed clean state').toHaveCount(0);
+        await expect(baseField).toHaveValue(originalBase);
       }
       if (viewportName === 'mobile' && route === '/catalog') {
         const search = page.getByRole('textbox', { name: 'Search catalog' });
