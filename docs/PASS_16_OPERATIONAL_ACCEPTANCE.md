@@ -36,14 +36,14 @@ Never restore a production dump over the live database.
 
 ### Automated synthetic restore smoke test (separate from operational evidence)
 
-The \`Pass 16 isolated synthetic restore\` GitHub Actions workflow creates **only test fixtures** in ephemeral PostgreSQL 16, makes a custom-format dump, restores it into a disposable database, checks the current Alembic revision and representative fixture counts, and exercises the restore script's fail-closed guards. Its result is code-level **restore procedure validation**, not evidence that an actual production backup is recoverable. Do **not** use a production dump in GitHub Actions, upload it as an artifact, or put production credentials into the runner.
+The `Pass 16 isolated synthetic restore` GitHub Actions workflow creates **only test fixtures** in ephemeral PostgreSQL 16, makes a custom-format dump, restores it into a disposable database, checks the current Alembic revision and representative fixture counts, and exercises the restore script's fail-closed guards. Its result is code-level **restore procedure validation**, not evidence that an actual production backup is recoverable. Do **not** use a production dump in GitHub Actions, upload it as an artifact, or put production credentials into the runner.
 
-For a real approved restore rehearsal on isolated infrastructure, set all of these explicitly before running \`scripts/pass16-restore-rehearsal.sh\`:
+For a real approved restore rehearsal on isolated infrastructure, set all of these explicitly before running `scripts/pass16-restore-rehearsal.sh`:
 
-- \`BACKUP_FILE\`: path to a locally secured, authorized PostgreSQL custom-format backup;
-- \`NON_PRODUCTION_CONFIRM=I_CONFIRM_NON_PRODUCTION_RESTORE_TARGET\`;
-- \`TARGET_DATABASE_URL\`: a connection URI to a **new empty** loopback PostgreSQL database whose name starts with \`pos_pass16_restore_\` (for example \`postgresql://user@127.0.0.1:5432/pos_pass16_restore_drill\`);
-- \`EXPECTED_HEAD\`: the specific Alembic revision expected **inside that backup**, such as \`0013_generic_selling_rules\` for the current schema; this must be reviewed for every new release rather than inheriting a stale default.
+- `BACKUP_FILE`: path to a locally secured, authorized PostgreSQL custom-format backup;
+- `NON_PRODUCTION_CONFIRM=I_CONFIRM_NON_PRODUCTION_RESTORE_TARGET`;
+- `TARGET_DATABASE_URL`: a connection URI to a **new empty** loopback PostgreSQL database whose name starts with `pos_pass16_restore_` (for example `postgresql://user@127.0.0.1:5432/pos_pass16_restore_drill`);
+- `EXPECTED_HEAD`: the specific Alembic revision expected **inside that backup**, such as `0013_generic_selling_rules` for the current schema; this must be reviewed for every new release rather than inheriting a stale default.
 
 The runner blocks missing confirmation, missing expected head, unsafe target names/hosts and non-empty public schemas. Localhost checks alone cannot establish that an SSH tunnel or a database operator has not redirected the connection: verify infrastructure routing, isolation and disposable nature of the **actual database** before giving confirmation. A successful synthetic drill does not satisfy this checklist's measured production-derived RTO/RPO or restored-business-data reconciliation.
 
