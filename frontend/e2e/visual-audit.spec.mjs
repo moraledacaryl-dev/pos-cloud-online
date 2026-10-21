@@ -47,6 +47,7 @@ const ROLE_CASES = [
 
 const manifest = {
   generated_at: new Date().toISOString(),
+  source_sha: process.env.GITHUB_SHA || null,
   mode: MODE,
   base_url: process.env.E2E_BASE_URL || 'http://127.0.0.1:8080',
   full_page_enabled: CAPTURE_FULL_PAGE,

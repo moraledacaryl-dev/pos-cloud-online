@@ -85,6 +85,10 @@ The workflow starts isolated PostgreSQL, Redis, backend, frontend, and proxy ser
 
 Pull requests that change the screenshot harness automatically run smoke mode so broken selectors or capture logic cannot merge unnoticed.
 
+Pushes to `main` that change the capture harness or evidence verifier now run **full mode automatically**, including viewport and expanded full-page images. This also starts the full audit after this change is first merged. The workflow validates **478 PNGs covering 239 role/route/viewport/state scenarios**, verifies actual files and PNG signatures, rejects duplicate/missing captures, and binds its manifest to the exact `GITHUB_SHA`. PRs still use smoke mode (41 viewport PNGs); manually dispatched runs continue to support full/smoke selections. An incomplete image set fails the workflow, even if Playwright reported success.
+
+The full automatic run is **synthetic isolated evidence** for the merged source, not live-production screenshot or physical-device proof. Review the downloaded images and file human usability findings before completing operational sign-off.
+
 ## Local / server command
 
 Once an isolated test stack is already running at the configured `E2E_BASE_URL` with the four E2E users provisioned:
