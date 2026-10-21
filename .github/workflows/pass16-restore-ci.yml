@@ -64,15 +64,7 @@ jobs:
           alembic check
       - name: Seed synthetic evidence and prepare empty disposable database
         run: |
-          psql -X -v ON_ERROR_STOP=1 postgresql://pos:pos@127.0.0.1:5432/pos_pass16_source <<'SQL'
-          INSERT INTO users (username, hashed_password, role, is_active, session_version)
-          VALUES ('ci-pass16-synthetic', 'not-a-usable-password-hash', 'cashier', true, 1);
-          INSERT INTO outlets (code, name, is_active)
-          VALUES ('PASS16-CI', 'Synthetic restore-only outlet', true);
-          INSERT INTO registers (outlet_id, code, name, register_type, cash_tender_label, default_order_type, is_active)
-          SELECT id, 'PASS16-CI-REG', 'Synthetic restore-only register', 'cash_drawer', 'Cash', 'dine_in', true
-          FROM outlets WHERE code='PASS16-CI';
-          SQL
+          PASS16_SYNTHETIC_RESTORE=1 python backend/scripts/pass16_synthetic_financial_restore.py seed
           createdb -h 127.0.0.1 -U pos pos_pass16_restore_ci
           test "$(psql -X -v ON_ERROR_STOP=1 "$TARGET_DATABASE_URL" -Atqc "select count(*) from pg_catalog.pg_tables where schemaname='public'")" = 0
       - name: Dump synthetic source as PostgreSQL custom archive
@@ -102,14 +94,21 @@ jobs:
           BACKUP_FILE=/tmp/pass16-synthetic.dump NON_PRODUCTION_CONFIRM=I_CONFIRM_NON_PRODUCTION_RESTORE_TARGET bash scripts/pass16-restore-rehearsal.sh | tee /tmp/pass16-rehearsal.txt
           grep -Eq '^RESTORE_ELAPSED_SECONDS=[0-9]+$' /tmp/pass16-rehearsal.txt
           grep -q 'PASS 16 NON-PRODUCTION RESTORE REHEARSAL: PASS' /tmp/pass16-rehearsal.txt
-          for table in users outlets registers pos_orders pos_order_payments; do
-            original="$(psql -X -v ON_ERROR_STOP=1 postgresql://pos:pos@127.0.0.1:5432/pos_pass16_source -Atqc "select count(*) from $table")"
-            restored="$(psql -X -v ON_ERROR_STOP=1 "$TARGET_DATABASE_URL" -Atqc "select count(*) from $table")"
-            test "$original" = "$restored"
-            echo "RECONCILED_$table=$restored" | tee -a /tmp/pass16-rehearsal.txt
-          done
-          test "$(psql -X -v ON_ERROR_STOP=1 "$TARGET_DATABASE_URL" -Atqc "select count(*) from users where username='ci-pass16-synthetic'")" = 1
-          test "$(psql -X -v ON_ERROR_STOP=1 "$TARGET_DATABASE_URL" -Atqc "select count(*) from registers where code='PASS16-CI-REG'")" = 1
+          PASS16_SYNTHETIC_RESTORE=1 python backend/scripts/pass16_synthetic_financial_restore.py verify | tee -a /tmp/pass16-rehearsal.txt
+      - name: Reject tampered restored payment and recover exact synthetic state
+        run: |
+          set -euo pipefail
+          psql -X -v ON_ERROR_STOP=1 "$TARGET_DATABASE_URL" -c \
+            "UPDATE pos_order_payments SET amount_applied = 56.54 WHERE reference_no = 'PASS16-GCASH'"
+          if PASS16_SYNTHETIC_RESTORE=1 python backend/scripts/pass16_synthetic_financial_restore.py verify > /tmp/pass16-tamper-check.log 2>&1; then
+            echo "Corrupted restored tender was incorrectly certified" >&2
+            exit 1
+          fi
+          grep -q AssertionError /tmp/pass16-tamper-check.log
+          psql -X -v ON_ERROR_STOP=1 "$TARGET_DATABASE_URL" -c \
+            "UPDATE pos_order_payments SET amount_applied = 56.55 WHERE reference_no = 'PASS16-GCASH'"
+          PASS16_SYNTHETIC_RESTORE=1 python backend/scripts/pass16_synthetic_financial_restore.py verify | tee -a /tmp/pass16-rehearsal.txt
+          echo "PASS16_TAMPER_DETECTION=PASS" | tee -a /tmp/pass16-rehearsal.txt
       - name: Refuse repeated restore into populated target
         run: |
           if BACKUP_FILE=/tmp/pass16-synthetic.dump NON_PRODUCTION_CONFIRM=I_CONFIRM_NON_PRODUCTION_RESTORE_TARGET bash scripts/pass16-restore-rehearsal.sh > /tmp/pass16-nonempty-refusal.log 2>&1; then
@@ -124,7 +123,7 @@ jobs:
             echo "- Disposable PostgreSQL 16 only; no production credentials, data, orders, or restores."
             echo "- Expected Alembic head: $EXPECTED_HEAD"
             echo "- Fail-closed guards for missing confirmation, unsafe target, missing revision and nonempty database: checked."
-            echo "- Restored synthetic user, outlet, register and reconciled table counts."
+            echo "- Restored and hashed synthetic paid order, split cash/GCash payments, cash movements, immutable line, audit and outbox event facts. A deliberately corrupted restored tender was rejected and repaired on the disposable CI database."
             echo "- Does NOT prove production backup recoverability, RTO/RPO, hardware, or operational acceptance."
             grep '^RESTORE_ELAPSED_SECONDS=' /tmp/pass16-rehearsal.txt
           } >> "$GITHUB_STEP_SUMMARY"

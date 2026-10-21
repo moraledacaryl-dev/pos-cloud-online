@@ -100,4 +100,27 @@ def test_isolated_restore_workflow_remains_synthetic_and_uses_no_production_envi
     assert 'EXPECTED_HEAD: 0013_generic_selling_rules' in workflow
     assert 'PASS 16 NON-PRODUCTION RESTORE REHEARSAL: PASS' in workflow
     assert 'pg_dump' in workflow and 'pg_restore --list' in workflow
-    assert 'RECONCILED_$table' in workflow
+    assert 'PASS16_SYNTHETIC_RESTORE=1 python backend/scripts/pass16_synthetic_financial_restore.py seed' in workflow
+    assert 'PASS16_SYNTHETIC_RESTORE=1 python backend/scripts/pass16_synthetic_financial_restore.py verify' in workflow
+    fixture = read('backend/scripts/pass16_synthetic_financial_restore.py')
+    assert 'sync_outbox_events' in fixture and 'pos_order_payments' in fixture
+    assert 'cash_movements' in fixture and 'audit_logs' in fixture
+    assert 'PASS16_SYNTHETIC_FINANCIAL_RECONCILIATION=PASS' in fixture
+
+
+def test_financial_restore_fixture_rejects_execution_outside_github_ci():
+    fixture = ROOT / 'backend/scripts/pass16_synthetic_financial_restore.py'
+    env = {
+        **os.environ,
+        'ENVIRONMENT': 'test',
+        'PASS16_SYNTHETIC_RESTORE': '1',
+        'GITHUB_ACTIONS': 'false',
+        'DATABASE_URL': 'postgresql+psycopg://pos:pos@127.0.0.1:5432/pos_pass16_source',
+        'TARGET_DATABASE_URL': 'postgresql://pos:pos@127.0.0.1:5432/pos_pass16_restore_ci',
+    }
+    completed = subprocess.run(
+        ['python', str(fixture), 'seed'],
+        env=env, cwd=ROOT, capture_output=True, text=True, check=False,
+    )
+    assert completed.returncode != 0
+    assert 'restricted to the isolated GitHub CI drill' in completed.stderr
