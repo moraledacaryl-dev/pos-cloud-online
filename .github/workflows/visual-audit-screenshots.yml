@@ -115,6 +115,11 @@ jobs:
           npm ci
           npx playwright install --with-deps chromium
 
+      - name: Provision ephemeral integration signing credentials
+        run: |
+          echo "ACCOUNTING_INTEGRATION_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          echo "INTEGRATION_API_KEY=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+
       - name: Migrate and provision visual-audit users and scenarios
         working-directory: backend
         run: |
