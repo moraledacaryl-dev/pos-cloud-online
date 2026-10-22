@@ -188,3 +188,43 @@ def test_inventory_worker_quarantines_bad_payload_and_continues(
     assert good.status == "synced"
     assert len(calls) == 1
     assert calls[0][1]["external_sale_id"] == "inventory-15"
+
+
+@pytest.mark.parametrize("kind", ["inventory", "operations"])
+def test_invalid_json_is_quarantined_without_stopping_downstream_batch(
+    db, monkeypatch, kind,
+):
+    module = inventory if kind == "inventory" else operations
+    monkeypatch.setattr(
+        module.settings, f"{kind}_integration_enabled", True,
+    )
+    if kind == "inventory":
+        monkeypatch.setattr(inventory.settings, "inventory_api_base", "https://inventory.invalid/api")
+        monkeypatch.setattr(inventory.settings, "inventory_integration_token", "test-token")
+        monkeypatch.setattr(inventory.settings, "inventory_pos_events_path", "/integrations/pos/events")
+        event_type = "inventory.sale_completed"
+        status = "inventory_pending"
+        valid = VALID_INVENTORY
+        runner = inventory.run_inventory_outbox_sync
+    else:
+        monkeypatch.setattr(operations.settings, "operations_api_base", "https://operations.invalid/api")
+        monkeypatch.setattr(operations.settings, "operations_integration_key", "test-key")
+        event_type = "operations.v2.order.finalized"
+        status = "operations_pending"
+        valid = {"event_id": "good-15", "event_type": "order.finalized"}
+        runner = operations.run_operations_outbox_sync
+    calls = _http_spy(monkeypatch, module)
+    bad = _event(db, 1, event_type, status, valid)
+    good = _event(db, 2, event_type, status, valid)
+    bad.payload_json = '{"malformed":'
+    db.commit()
+
+    result = asyncio.run(runner(db, limit=2))
+    db.refresh(bad)
+    db.refresh(good)
+    assert result["blocked"] == 1
+    assert result["synced"] == 1
+    assert bad.status in {"blocked", "operations_blocked"}
+    assert bad.synced_at is None
+    assert good.status == "synced"
+    assert len(calls) == 1
