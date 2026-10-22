@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from sqlalchemy.orm import Session
 
 from app.models.entities import User
@@ -8,6 +10,22 @@ from app.schemas.staff_identity import StaffEmployeeSyncEnvelope
 
 EXPECTED_SOURCE = 'hidden_oasis_staff_payroll'
 EXPECTED_EVENT = 'employee.sync'
+
+
+def _source_timestamp(value: str | None) -> datetime | None:
+    """Compare source revisions when an ISO timestamp is available.
+
+    Naive historical timestamps are treated as UTC. Missing or unparseable
+    source times remain compatible with the existing contract, but cannot
+    establish message ordering.
+    """
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+    except (TypeError, ValueError):
+        return None
+    return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
 
 
 def serialize_identity(row: StaffIdentity) -> dict:
@@ -33,6 +51,8 @@ def sync_staff_employees(db: Session, envelope: StaffEmployeeSyncEnvelope) -> di
         raise ValueError('Unsupported Staff integration event type.')
 
     synced: list[StaffIdentity] = []
+    ignored_stale_count = 0
+    incoming_time = _source_timestamp(envelope.generated_at)
     for employee in envelope.payload.employees:
         code = employee.employee_code.strip()
         display_name = employee.display_name.strip()
@@ -46,7 +66,23 @@ def sync_staff_employees(db: Session, envelope: StaffEmployeeSyncEnvelope) -> di
         if by_code and not by_staff_id and by_code.source_staff_id != employee.source_staff_id:
             raise ValueError(f'Employee code {code} conflicts with a different Staff employee.')
 
-        row = by_staff_id or by_code or StaffIdentity(source_staff_id=employee.source_staff_id, employee_code=code, display_name=display_name)
+        row = by_staff_id or by_code
+        if row is not None:
+            # Replays of an already accepted source event are no-ops. If a
+            # newer HR snapshot made a cashier inactive, an older delivery
+            # must never reactivate the identity after retry or reordering.
+            old_time = _source_timestamp(row.last_synced_at_text)
+            if row.last_external_id == envelope.external_id or (
+                incoming_time is not None and old_time is not None and incoming_time < old_time
+            ):
+                ignored_stale_count += 1
+                continue
+        if row is None:
+            row = StaffIdentity(
+                source_staff_id=employee.source_staff_id,
+                employee_code=code,
+                display_name=display_name,
+            )
         row.source_staff_id = employee.source_staff_id
         row.employee_code = code
         row.display_name = display_name
@@ -67,6 +103,7 @@ def sync_staff_employees(db: Session, envelope: StaffEmployeeSyncEnvelope) -> di
         'ok': True,
         'external_id': envelope.external_id,
         'synced_count': len(synced),
+        'ignored_stale_count': ignored_stale_count,
         'identities': [serialize_identity(row) for row in synced],
     }
 
