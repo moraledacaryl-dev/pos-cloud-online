@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 import httpx
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.core.settings import settings
@@ -169,18 +170,24 @@ def _mark_suppressed(db: Session, row: SyncOutboxEvent) -> None:
 
 
 async def run_inventory_outbox_sync(db: Session, limit: int = 25, *, event_id: int | None = None) -> dict:
+    now_text = _now_text()
     query = (
         db.query(SyncOutboxEvent)
         .filter(SyncOutboxEvent.event_type.in_(list(INVENTORY_EVENT_TYPES.values())))
         .filter(SyncOutboxEvent.status.in_(['inventory_pending', 'inventory_retry', 'pending', 'suppressed']))
-        .order_by(SyncOutboxEvent.id.asc())
     )
     if event_id is not None:
         query = query.filter(SyncOutboxEvent.id == int(event_id))
-    rows = query.limit(max(1, min(int(limit or 25), 500))).all()
+    elif settings.inventory_integration_enabled:
+        # Apply retry eligibility before LIMIT so old deferred retries cannot
+        # starve due inventory sales. When disabled, still suppress queued rows.
+        query = query.filter(or_(
+            SyncOutboxEvent.next_retry_at.is_(None),
+            SyncOutboxEvent.next_retry_at <= now_text,
+        ))
+    rows = query.order_by(SyncOutboxEvent.id.asc()).limit(max(1, min(int(limit or 25), 500))).all()
 
     processed = synced = retried = blocked = skipped = 0
-    now_text = _now_text()
     for row in rows:
         if not settings.inventory_integration_enabled:
             if row.status != 'suppressed':
