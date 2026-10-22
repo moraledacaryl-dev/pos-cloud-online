@@ -174,11 +174,12 @@ def enqueue_operations_event(
     key = f'operations-v2:{event_id}'
     row = db.query(SyncOutboxEvent).filter(SyncOutboxEvent.idempotency_key == key).first()
     if row:
-        row.payload_json = json_dumps(envelope, ensure_ascii=False)
-        if row.status not in {'synced', 'operations_pending'}:
-            row.status = 'operations_pending'
-            row.last_error = None
-            row.next_retry_at = None
+        # A stable event_id is an immutable delivery identity. Re-enqueueing
+        # must never rewrite the original event, reset retry backoff, or
+        # resurrect an acknowledged/blocked/suppressed event.
+        if row.event_type != f'{OPERATIONS_EVENT_PREFIX}{event_type}':
+            raise ValueError('Operations event ID was already assigned to a different event type.')
+        return row
     else:
         row = SyncOutboxEvent(
             event_uuid=str(uuid.uuid4()),
@@ -252,10 +253,18 @@ async def run_operations_outbox_sync(
             retried += 1
             continue
         try:
-            envelope = jsonable_encoder(json.loads(row.payload_json or '{}'))
-        except Exception:
+            envelope = json.loads(row.payload_json or '{}')
+            if (
+                not isinstance(envelope, dict)
+                or not isinstance(envelope.get('event_id'), str)
+                or not envelope['event_id'].strip()
+                or envelope.get('event_type') != row.event_type.removeprefix(OPERATIONS_EVENT_PREFIX)
+            ):
+                raise ValueError('Invalid Operations event envelope.')
+            envelope = jsonable_encoder(envelope)
+        except (TypeError, ValueError):
             row.status = 'operations_blocked'
-            row.last_error = 'Operations event payload is not valid JSON.'
+            row.last_error = 'Operations event payload has invalid JSON or envelope fields.'
             row.next_retry_at = None
             db.add(row)
             db.commit()
