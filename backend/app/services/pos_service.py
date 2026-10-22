@@ -1568,7 +1568,7 @@ def _rebuild_order_lines(db: Session, row: PosOrder, line_payloads):
 
 
 def update_order(db: Session, order_id: int, payload: OrderUpdate, user_id: int | None = None):
-    row = db.query(PosOrder).options(selectinload(PosOrder.lines), selectinload(PosOrder.payments), selectinload(PosOrder.register), selectinload(PosOrder.cashier)).filter(PosOrder.id == int(order_id)).with_for_update().first()
+    row = db.query(PosOrder).options(selectinload(PosOrder.lines), selectinload(PosOrder.payments), selectinload(PosOrder.register), selectinload(PosOrder.cashier)).filter(PosOrder.id == int(order_id)).with_for_update().populate_existing().first()
     if not row:
         raise ValueError('Order not found.')
     # Recheck the canonical state policy under the locked row: the API's
@@ -2386,7 +2386,7 @@ def create_refund(db: Session, order_id: int, payload: RefundCreate, cashier_use
 
 
 def void_order(db: Session, order_id: int, reason: str, user_id: int | None = None, approved_by_user_id: int | None = None, *, commit: bool = True):
-    row = db.query(PosOrder).options(selectinload(PosOrder.payments), selectinload(PosOrder.register), selectinload(PosOrder.lines), selectinload(PosOrder.cashier)).filter(PosOrder.id == int(order_id)).with_for_update().first()
+    row = db.query(PosOrder).options(selectinload(PosOrder.payments), selectinload(PosOrder.register), selectinload(PosOrder.lines), selectinload(PosOrder.cashier)).filter(PosOrder.id == int(order_id)).with_for_update().populate_existing().first()
     if not row:
         raise ValueError('Order not found.')
     if row.status == 'voided':
