@@ -21,7 +21,6 @@ from app.models.entities import (
 from app.services import pos_service
 from app.services.reporting_service import build_dashboard_summary
 
-
 TODAY = '2026-10-22'
 
 
