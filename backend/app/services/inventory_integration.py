@@ -220,8 +220,36 @@ async def run_inventory_outbox_sync(db: Session, limit: int = 25, *, event_id: i
 
         try:
             payload = json.loads(row.payload_json or '{}')
-        except Exception:
+        except (TypeError, ValueError):
             _mark_blocked(db, row, 'Inventory event payload is not valid JSON.')
+            blocked += 1
+            continue
+        if (
+            not isinstance(payload, dict)
+            or not isinstance(payload.get('external_event_id'), str)
+            or not payload['external_event_id'].strip()
+            or not isinstance(payload.get('external_sale_id'), str)
+            or not payload['external_sale_id'].strip()
+            or payload.get('event_type') != row.event_type.removeprefix('inventory.')
+            or not isinstance(payload.get('lines'), list)
+            or not isinstance(payload.get('_unmapped_lines', []), list)
+            or any(not isinstance(item, dict) for item in payload.get('_unmapped_lines', []))
+        ):
+            _mark_blocked(db, row, 'Inventory event has invalid envelope or line fields.')
+            blocked += 1
+            continue
+        invalid_line = False
+        for line in payload['lines']:
+            if not isinstance(line, dict) or not str(line.get('external_product_id') or '').strip():
+                invalid_line = True
+                break
+            try:
+                _valid_inventory_quantity(line.get('quantity'), item_name='outbox line')
+            except ValueError:
+                invalid_line = True
+                break
+        if invalid_line:
+            _mark_blocked(db, row, 'Inventory event has invalid mapped SKU or quantity.')
             blocked += 1
             continue
 
