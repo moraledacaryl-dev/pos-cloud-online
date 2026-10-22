@@ -1831,12 +1831,16 @@ def update_room_charge_posting_status(db: Session, posting_id: int, payload: Roo
 
 
 def set_order_status(db: Session, order_id: int, status: str, user_id: int | None = None):
-    row = db.query(PosOrder).options(selectinload(PosOrder.lines), selectinload(PosOrder.payments), selectinload(PosOrder.register), selectinload(PosOrder.cashier)).filter(PosOrder.id == int(order_id)).with_for_update().first()
+    row = db.query(PosOrder).options(selectinload(PosOrder.lines), selectinload(PosOrder.payments), selectinload(PosOrder.register), selectinload(PosOrder.cashier)).filter(PosOrder.id == int(order_id)).with_for_update().populate_existing().first()
     if not row:
         raise ValueError('Order not found.')
-    if row.status in {'paid', 'folio_pending', 'voided'}:
-        raise ValueError('Finalized orders can no longer change draft / hold status.')
-    row.status = status
+    # This service must never provide a shortcut to "paid", "voided", or
+    # other terminal statuses. It is exclusively the hold/resume workflow.
+    requested_status = str(status or '').strip().lower()
+    if requested_status not in {'held', 'draft'}:
+        raise ValueError('Only hold and resume order status transitions are supported.')
+    assert_order_action(row.status, 'hold' if requested_status == 'held' else 'resume')
+    row.status = requested_status
     db.add(row)
     db.commit()
     _audit_event(db, action='order.status_updated', entity_type='order', entity_id=row.id, user_id=user_id, details={'order_id': row.id, 'order_no': row.order_no, 'status': status})
