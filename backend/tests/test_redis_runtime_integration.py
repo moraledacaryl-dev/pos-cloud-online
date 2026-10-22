@@ -50,6 +50,9 @@ settings.rate_limit_backend = 'redis'
 settings.redis_url = __import__('os').environ['REDIS_URL']
 settings.rate_limit_redis_prefix = __import__('os').environ['RATE_LIMIT_REDIS_PREFIX']
 rate_limit.init_rate_limiter()
+# All subprocesses must share the same fixed-window time bucket. Without
+# this, a run that spans an actual minute boundary can accept all 3 attempts.
+rate_limit.time = lambda: 1800000030.0
 try:
     rate_limit.enforce_rate_limit('login:shared-client', limit=2, window_seconds=60)
 except HTTPException as exc:
