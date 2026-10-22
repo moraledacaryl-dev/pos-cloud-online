@@ -123,11 +123,11 @@ export default function RecipesPage() {
         <div className="toolbar">
           <div>
             <h1>Recipe Library</h1>
-            <p className="muted">Staff recipe PDFs for dishes synced from the Accounting menu.</p>
-            <p className="small muted" style={{ marginTop: 4 }}>Accounting remains the menu master. Each dish can have one current POS recipe PDF, shared across its variants.</p>
+            <p className="muted">Staff recipe PDFs for dishes linked to the POS selling catalog.</p>
+            <p className="small muted" style={{ marginTop: 4 }}>Inventory & Procurement owns the master selling catalog. This POS library currently shows only catalog dishes with linked upstream IDs; each eligible dish may have a reference PDF shared across its variants.</p>
           </div>
           <div className="row wrap">
-            <span className="badge info">{dishes.length} Accounting dishes</span>
+            <span className="badge info">{dishes.length} linked dishes</span>
             <span className="badge success">{withPdfCount} with PDF</span>
             <span className="badge warn">{dishes.length - withPdfCount} missing PDF</span>
           </div>
@@ -144,17 +144,17 @@ export default function RecipesPage() {
         </div>
       </section>}
 
-      {!dishes.length && <section className="section"><div className="empty-state recipe-empty-state"><strong>No upstream dishes are available</strong><span>Recipes can only be attached after the selling catalog imports dishes from Accounting. Refresh the catalog first; recipe upload controls will appear once a dish exists.</span><div className="row wrap"><Link href="/catalog" className="button-link">Open Catalog Setup</Link><button type="button" className="secondary" onClick={() => loadDishes()}>Check again</button></div></div></section>}
+      {!dishes.length && <section className="section"><div className="empty-state recipe-empty-state"><strong>No upstream dishes are available</strong><span>This library lists only selling catalog items with a linked upstream dish ID. Other active POS menu items may still appear in Catalog. Check the Inventory catalog feed and ID mapping, then refresh; PDF upload becomes available when an eligible dish exists.</span><div className="row wrap"><Link href="/catalog" className="button-link">Open Catalog Setup</Link><button type="button" className="secondary" onClick={() => loadDishes()}>Check again</button></div></div></section>}
 
       {!!dishes.length && <div className="recipe-library-layout">
         <section className="section recipe-dish-list">
-          <div><h2>Accounting Dishes</h2><p className="small muted">{visibleDishes.length} matching dishes</p></div>
+          <div><h2>Linked Catalog Dishes</h2><p className="small muted">{visibleDishes.length} matching dishes</p></div>
           <div className="recipe-dish-grid">
             {visibleDishes.map((row) => <button type="button" key={row.external_menu_item_id} className={`recipe-dish-card ${selectedId === row.external_menu_item_id ? 'selected' : ''}`} onClick={() => setSelectedId(row.external_menu_item_id)}>
               <span><strong>{row.dish_name}</strong><small>{row.category_name || 'Uncategorized'} / {row.variant_count} {row.variant_count === 1 ? 'variant' : 'variants'}</small></span>
               <span className={`badge ${row.recipe ? 'success' : 'warn'}`}>{row.recipe ? 'PDF ready' : 'Missing'}</span>
             </button>)}
-            {!visibleDishes.length && <p className="muted">No Accounting dishes match this filter.</p>}
+            {!visibleDishes.length && <p className="muted">No linked catalog dishes match this filter.</p>}
           </div>
         </section>
 
@@ -162,7 +162,7 @@ export default function RecipesPage() {
           {!selected && <p className="muted">Select a dish to view its recipe.</p>}
           {selected && <>
             <div className="toolbar">
-              <div><h2>{selected.dish_name}</h2><p className="small muted">{selected.category_name || 'Uncategorized'} / Accounting menu item #{selected.external_menu_item_id}</p></div>
+              <div><h2>{selected.dish_name}</h2><p className="small muted">{selected.category_name || 'Uncategorized'} / Linked dish ID #{selected.external_menu_item_id}</p></div>
               <span className={`badge ${selected.recipe ? 'success' : 'warn'}`}>{selected.recipe ? 'PDF available' : 'No PDF yet'}</span>
             </div>
             {selected.recipe ? <div className="recipe-document-summary">
