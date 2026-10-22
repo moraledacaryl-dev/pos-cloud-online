@@ -67,6 +67,7 @@ from app.services.financial_precision import (
 )
 from app.services.kds_stream import publish_kds_event
 from app.services.permission_service import get_user_permission_keys
+from app.services.payment_control_policy import validate_payment_control
 from app.services.reporting_service import build_dashboard_summary
 
 logger = logging.getLogger(__name__)
@@ -1962,6 +1963,14 @@ def pay_order(db: Session, order_id: int, payload: OrderPayPayload, user_id: int
         applied_total += applied_amount
     if applied_total != order_total:
         raise ValueError('Payment applied total must exactly equal the current order total. Refresh the order before checkout.')
+    # The API preflight is advisory: settlement must enforce every cashier
+    # tender rule again on the authoritative row *after* acquiring its lock.
+    # Direct callers and concurrent edits must not bypass exact cents,
+    # received-cash minimums, non-cash equality, references or room identity.
+    # Keep this before clearing existing payments or creating downstream rows.
+    validate_payment_control(
+        {'status': row.status, 'total_amount': order_total}, payments,
+    )
 
     db.query(RoomChargePosting).filter(RoomChargePosting.order_id == row.id).delete(synchronize_session=False)
     row.payments.clear()
