@@ -2858,7 +2858,6 @@ def update_kitchen_line_status(db: Session, line_id: int, payload, user_id: int 
         line.item_readiness = 'not_ready'
         line.ready_quantity = 0
     db.add(line)
-    db.commit()
     order = line.order
     if order:
         statuses = {row.kitchen_status for row in order.lines}
@@ -2875,7 +2874,10 @@ def update_kitchen_line_status(db: Session, line_id: int, payload, user_id: int 
         elif 'queued' in statuses:
             order.kitchen_status = 'queued'
         db.add(order)
-        db.commit()
+    # Line and order must either both persist or both roll back. Publish only
+    # after that single transaction is durably committed.
+    db.commit()
+    if order:
         _publish_kds_refresh(_order_stations(order), reason='ticket_line_updated', payload={'order_id': order.id, 'order_no': order.order_no, 'line_id': line.id, 'kitchen_status': line.kitchen_status})
     return {'ok': True, 'line_id': line.id, 'kitchen_status': line.kitchen_status, 'acknowledgement_state': line.acknowledgement_state, 'item_readiness': line.item_readiness, 'ready_quantity': line.ready_quantity}
 
