@@ -230,15 +230,15 @@ async def run_operations_outbox_sync(
     rows = query.order_by(SyncOutboxEvent.id.asc()).limit(max(1, min(int(limit or 25), 500))).all()
     processed = synced = retried = blocked = skipped = 0
     for row in rows:
-        if row.next_retry_at and row.next_retry_at > now_text:
-            skipped += 1
-            continue
         if not settings.operations_integration_enabled:
             row.status = 'suppressed'
             row.last_error = 'Operations integration is disabled; no delivery was attempted.'
             row.next_retry_at = None
             db.add(row)
             db.commit()
+            skipped += 1
+            continue
+        if row.next_retry_at and row.next_retry_at > now_text:
             skipped += 1
             continue
         key = settings.operations_integration_key.strip()
