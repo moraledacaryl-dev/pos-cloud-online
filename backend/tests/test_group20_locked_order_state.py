@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.db.database import Base
 from app.models.entities import AuditLog, Outlet, PosOrder, Register, RegisterSession, SyncOutboxEvent
 from app.schemas.common import OrderUpdate
-from app.services.pos_service import update_order, void_order
+from app.services.pos_service import set_order_status, update_order, void_order
 
 
 @pytest.fixture
@@ -94,3 +94,29 @@ def test_cached_paid_cannot_be_voided_after_database_state_changes(db):
         void_order(db, order_id, reason="test stale cache")
     assert cached.status == "refunded"
     db.rollback()
+
+
+@pytest.mark.parametrize("target", ["paid", "voided", "refunded", "open", "", "folio_pending"])
+def test_direct_hold_resume_cannot_assign_arbitrary_state(db, target):
+    order_id = order_id_for(db, "draft")
+    with pytest.raises(ValueError, match="Only hold and resume"):
+        set_order_status(db, order_id, target)
+    db.rollback()
+    assert db.get(PosOrder, order_id).status == "draft"
+
+
+@pytest.mark.parametrize("state", ["paid", "folio_pending", "voided", "refunded", "merged", "cancelled", "closed"])
+def test_direct_hold_rejects_finalized_source_state(db, state):
+    order_id = order_id_for(db, state)
+    with pytest.raises(ValueError, match="Order action hold is not allowed"):
+        set_order_status(db, order_id, "held")
+    db.rollback()
+    assert db.get(PosOrder, order_id).status == state
+
+
+def test_direct_resume_rejects_order_not_on_hold(db):
+    order_id = order_id_for(db, "draft")
+    with pytest.raises(ValueError, match="Order action resume is not allowed"):
+        set_order_status(db, order_id, "draft")
+    db.rollback()
+    assert db.get(PosOrder, order_id).status == "draft"
