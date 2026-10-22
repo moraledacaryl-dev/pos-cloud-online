@@ -3,7 +3,7 @@
 import uuid
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, update
 from sqlalchemy.orm import Session
 
 from app.db.database import Base
@@ -64,3 +64,33 @@ def test_direct_void_rejects_terminal_state(db, state):
     assert db.get(PosOrder, order_id).status == state
     assert db.query(AuditLog).count() == 0
     assert db.query(SyncOutboxEvent).count() == 0
+
+
+def test_cached_draft_cannot_be_edited_after_database_state_changes(db):
+    order_id = order_id_for(db, "draft")
+    cached = db.get(PosOrder, order_id)
+    assert cached.status == "draft"
+    db.execute(
+        update(PosOrder).where(PosOrder.id == order_id).values(status="paid"),
+        execution_options={"synchronize_session": False},
+    )
+    assert cached.status == "draft"  # identity map is intentionally stale
+    with pytest.raises(ValueError, match="Order action edit is not allowed"):
+        update_order(db, order_id, OrderUpdate(note="after"))
+    assert cached.status == "paid"
+    db.rollback()
+
+
+def test_cached_paid_cannot_be_voided_after_database_state_changes(db):
+    order_id = order_id_for(db, "paid")
+    cached = db.get(PosOrder, order_id)
+    assert cached.status == "paid"
+    db.execute(
+        update(PosOrder).where(PosOrder.id == order_id).values(status="refunded"),
+        execution_options={"synchronize_session": False},
+    )
+    assert cached.status == "paid"
+    with pytest.raises(ValueError, match="Order action void is not allowed"):
+        void_order(db, order_id, reason="test stale cache")
+    assert cached.status == "refunded"
+    db.rollback()
