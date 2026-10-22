@@ -163,3 +163,108 @@ def test_checkout_cannot_settle_cancelled_order_via_internal_service():
         assert db.query(PosOrderPayment).filter(PosOrderPayment.order_id == order_id).count() == 0
     finally:
         db.close()
+
+
+@pytest.mark.parametrize(
+    ("payments", "message"),
+    [
+        (
+            [OrderPaymentCreate(
+                tender_type="cash", amount_applied=Decimal("99.995"),
+                amount_received=Decimal("100.00"),
+            )],
+            "fractions of a cent",
+        ),
+        (
+            [OrderPaymentCreate(
+                tender_type="cash", amount_applied=100, amount_received=99,
+            )],
+            "Cash amount received cannot be lower",
+        ),
+        (
+            [OrderPaymentCreate(
+                tender_type="gcash", amount_applied=100,
+                amount_received=99, reference_no="GC-MISMATCH",
+                accounting_financial_account_id=2,
+            )],
+            "Non-cash amount received must equal",
+        ),
+        (
+            [OrderPaymentCreate(
+                tender_type="gcash", amount_applied=100,
+                amount_received=100, accounting_financial_account_id=2,
+            )],
+            "requires a transaction reference",
+        ),
+        (
+            [
+                OrderPaymentCreate(
+                    tender_type="gcash", amount_applied=50, amount_received=50,
+                    reference_no="GC-SAME", accounting_financial_account_id=2,
+                ),
+                OrderPaymentCreate(
+                    tender_type="gcash", amount_applied=50, amount_received=50,
+                    reference_no="gc-same", accounting_financial_account_id=2,
+                ),
+            ],
+            "Duplicate tender references",
+        ),
+        (
+            [OrderPaymentCreate(
+                tender_type="room_charge", amount_applied=100,
+            )],
+            "Room charge requires a selected booking or room number",
+        ),
+        (
+            [OrderPaymentCreate(
+                tender_type="cash", amount_applied=100,
+                amount_received=Decimal("100.005"),
+            )],
+            "fractions of a cent",
+        ),
+    ],
+)
+def test_direct_settlement_enforces_full_tender_rules_before_any_mutations(
+    payments, message,
+):
+    db, order_id = _draft_order()
+    try:
+        # Bypass the API's validator deliberately: the locked service boundary
+        # must reject invalid tender metadata before rows or outbox writes.
+        with pytest.raises(ValueError, match=message):
+            pay_order(db, order_id, OrderPayPayload(payments=payments))
+        db.rollback()
+        _assert_not_settled(db, order_id)
+        assert db.query(SyncOutboxEvent).filter(
+            SyncOutboxEvent.aggregate_id == order_id,
+        ).count() == 0
+    finally:
+        db.close()
+
+
+def test_direct_settlement_keeps_valid_exact_cent_split_tenders():
+    db, order_id = _draft_order()
+    try:
+        result = pay_order(
+            db, order_id, OrderPayPayload(payments=[
+                OrderPaymentCreate(
+                    tender_type="cash", amount_applied=Decimal("60.00"),
+                    amount_received=Decimal("100.00"),
+                ),
+                OrderPaymentCreate(
+                    tender_type="gcash", amount_applied=Decimal("40.00"),
+                    amount_received=Decimal("40.00"),
+                    reference_no="GC-VALID-14",
+                    accounting_financial_account_id=2,
+                ),
+            ]),
+        )
+        assert result["status"] == "paid"
+        assert db.query(PosOrderPayment).filter(
+            PosOrderPayment.order_id == order_id,
+        ).count() == 2
+        assert db.query(CashMovement).filter(
+            CashMovement.source_order_id == order_id,
+        ).count() == 1
+    finally:
+        db.close()
