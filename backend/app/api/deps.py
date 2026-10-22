@@ -29,12 +29,25 @@ def get_current_user(request: Request, db: Session = Depends(get_db), bearer_tok
     if not token:
         raise credentials_exception
     try:
-        payload = jwt.decode(token, settings.secret_key, algorithms=['HS256'])
+        # PyJWT verifies supplied temporal claims but does not require them
+        # unless explicitly configured. Never accept access tokens lacking
+        # expiry or issue-time metadata, particularly after forced logout.
+        payload = jwt.decode(
+            token, settings.secret_key, algorithms=['HS256'],
+            options={'require': ['sub', 'exp', 'iat', 'typ', 'sv']},
+        )
         username = payload.get('sub')
         token_type = payload.get('typ')
-        token_sv = int(payload.get('sv') or 1)
-        issued_at = int(payload.get('iat') or 0)
-        if not username or token_type != 'access':
+        issued_at = payload.get('iat')
+        expiry = payload.get('exp')
+        token_sv = payload.get('sv')
+        if (
+            not isinstance(username, str) or not username.strip()
+            or token_type != 'access'
+            or type(issued_at) is not int or issued_at <= 0
+            or type(expiry) is not int or expiry <= issued_at
+            or type(token_sv) is not int or token_sv <= 0
+        ):
             raise credentials_exception
     except Exception:
         raise credentials_exception
@@ -44,7 +57,7 @@ def get_current_user(request: Request, db: Session = Depends(get_db), bearer_tok
     if int(user.session_version or 1) != token_sv:
         raise credentials_exception
     forced_after = _parse_iso(getattr(user, 'force_logout_after_text', None))
-    if forced_after is not None and issued_at and issued_at <= int(forced_after.timestamp()):
+    if forced_after is not None and issued_at <= int(forced_after.timestamp()):
         raise credentials_exception
     return user
 
