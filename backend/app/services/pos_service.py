@@ -1451,8 +1451,11 @@ def _rebuild_order_lines(db: Session, row: PosOrder, line_payloads):
         catalog for catalog in catalogs
         if catalog.is_active and catalog.is_available and catalog.availability_override is not False
     ]
-    from app.services.selling_rules import resolve_unit_price
+    from app.services.selling_rules import conditional_prices, pricing_tags, resolve_unit_price
 
+    # One consistent Inventory pricing-rule snapshot for this complete checkout.
+    # Avoid one SystemSetting query per conditional-priced order line.
+    pricing_rules = None
     has_qualifying_drink = any(c.pricing_role == 'drink' for c in payload_catalog)
     for item in requested_lines:
         catalog_item_id = getattr(item, 'catalog_item_id', None)
@@ -1467,8 +1470,15 @@ def _rebuild_order_lines(db: Session, row: PosOrder, line_payloads):
         if unit_price_value is None and isinstance(item, dict):
             unit_price_value = item.get('unit_price')
         catalog_price, tax_rate, service_rate = _validated_catalog_financials(catalog)
-        if json.loads(catalog.conditional_prices_json or '[]') and json.loads(catalog.pricing_tags_json or '[]'):
-            qualified_pastry_price = _money(resolve_unit_price(db, catalog, payload_catalog))
+        if conditional_prices(catalog) and pricing_tags(catalog):
+            if pricing_rules is None:
+                meta = setting_json(db, 'catalog_sync', default={})
+                pricing_rules = meta.get('pricing_rules') if isinstance(meta, dict) else []
+                if not isinstance(pricing_rules, list):
+                    pricing_rules = []
+            qualified_pastry_price = _money(resolve_unit_price(
+                db, catalog, payload_catalog, rules=pricing_rules,
+            ))
         else:
             qualified_pastry_price = _money(catalog.with_drink_price) if has_qualifying_drink and catalog.pricing_role == 'pastry' and catalog.with_drink_price is not None else catalog_price
         requested_modifiers = getattr(item, 'modifiers', None)
