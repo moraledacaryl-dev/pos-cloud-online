@@ -66,6 +66,7 @@ from app.services.financial_precision import (
     _decimal as _decimal,
 )
 from app.services.kds_stream import publish_kds_event
+from app.services.order_pricing_domain import validated_modifier_total
 from app.services.payment_control_policy import validate_payment_control
 from app.services.permission_service import get_user_permission_keys
 from app.services.refund_domain import allocate_refund_tenders, prepare_refund_line_plan
@@ -1439,8 +1440,8 @@ def _rebuild_order_lines(db: Session, row: PosOrder, line_payloads):
             if not catalog.is_available or catalog.availability_override is False:
                 raise ValueError(f'{label} is sold out. Refresh the catalog and remove this item.')
 
-    row.lines.clear()
-    db.flush()
+    # Compute and validate the complete replacement before mutating the order.
+    planned_lines = []
     subtotal = Decimal('0')
     discount = Decimal('0')
     tax_amount = Decimal('0')
@@ -1472,23 +1473,11 @@ def _rebuild_order_lines(db: Session, row: PosOrder, line_payloads):
             qualified_pastry_price = _money(catalog.with_drink_price) if has_qualifying_drink and catalog.pricing_role == 'pastry' and catalog.with_drink_price is not None else catalog_price
         requested_modifiers = getattr(item, 'modifiers', None)
         if requested_modifiers is None and isinstance(item, dict): requested_modifiers = item.get('modifiers')
-        configured_groups = json.loads(catalog.modifier_groups_json or '[]')
-        groups_by_id = {str(g.get('id')): g for g in configured_groups if isinstance(g, dict) and g.get('id')}
-        modifier_total = Decimal('0')
-        for selected_group in requested_modifiers or []:
-            group = groups_by_id.get(str(selected_group.get('id') or ''))
-            if not group: raise ValueError(f'{catalog.display_name} contains an invalid modifier group.')
-            allowed = {str(o.get('label')): o for o in group.get('options', []) if isinstance(o, dict)}
-            labels = selected_group.get('labels') or []
-            if group.get('mode') != 'multi' and len(labels) > 1: raise ValueError(f'{catalog.display_name} modifier allows only one selection.')
-            for label in labels:
-                option = allowed.get(str(label))
-                if not option: raise ValueError(f'{catalog.display_name} contains an invalid modifier option.')
-                modifier_total += _validated_money(
-                    option.get('price_delta') or 0,
-                    f'{catalog.display_name} modifier adjustment',
-                    allow_negative=True,
-                )
+        modifier_total = validated_modifier_total(
+            catalog.display_name or catalog.menu_item_name or 'Catalog item',
+            catalog.modifier_groups_json,
+            requested_modifiers,
+        )
         expected_unit_price = _validated_money(
             qualified_pastry_price + modifier_total,
             f'{catalog.display_name} unit price',
@@ -1522,7 +1511,7 @@ def _rebuild_order_lines(db: Session, row: PosOrder, line_payloads):
         requested_status = str(requested_status or 'queued').strip().lower()
         if requested_status not in {'held', 'queued'}:
             requested_status = 'queued'
-        row.lines.append(PosOrderLine(
+        planned_lines.append(PosOrderLine(
             catalog_item_id=catalog.id,
             external_menu_item_id=catalog.external_menu_item_id,
             external_sku_id=catalog.external_sku_id,
@@ -1538,6 +1527,11 @@ def _rebuild_order_lines(db: Session, row: PosOrder, line_payloads):
             ready_quantity=0,
             note=(item.get('note') if isinstance(item, dict) else getattr(item, 'note', None)),
         ))
+    # Only validated lines reach the delete-orphan flush, so a rejected edit
+    # leaves the existing in-session lines and financial totals untouched.
+    row.lines.clear()
+    db.flush()
+    row.lines.extend(planned_lines)
     row.subtotal_amount = _money(subtotal)
     row.discount_amount = _money(discount)
     row.tax_amount = _money(tax_amount)
