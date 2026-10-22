@@ -811,7 +811,7 @@ def _serialize_refund(row: Refund, include_details: bool = True) -> dict:
     return data
 
 
-def _serialize_order(row: PosOrder, include_lines: bool = True, db: Session | None = None) -> dict:
+def _serialize_order(row: PosOrder, include_lines: bool = True, db: Session | None = None, *, room_charge_postings: list[RoomChargePosting] | None = None) -> dict:
     refunds = list(row.refunds or [])
     refunded_total = _money(sum((_money(refund.refunded_amount) for refund in refunds), Decimal('0')))
     refundable_balance = _money(max(_money(row.total_amount) - refunded_total, Decimal('0')))
@@ -822,7 +822,8 @@ def _serialize_order(row: PosOrder, include_lines: bool = True, db: Session | No
         refund_status = 'partially_refunded'
     settled_amount, folio_pending_amount = _order_settlement_totals(row)
     settlement_state = _order_settlement_state(row)
-    room_charge_postings = _get_room_charge_postings_for_order(db, row.id) if db else []
+    if room_charge_postings is None:
+        room_charge_postings = _get_room_charge_postings_for_order(db, row.id) if db else []
     room_charge_by_payment_id = {posting.order_payment_id: posting for posting in room_charge_postings if posting.order_payment_id}
     payment_breakdown = []
     for p in (row.payments or []):
@@ -1576,6 +1577,11 @@ def list_orders(db: Session, status: str | None = None, session_id: int | None =
         selectinload(PosOrder.payments),
         selectinload(PosOrder.register),
         selectinload(PosOrder.cashier),
+        selectinload(PosOrder.refunds).selectinload(Refund.lines),
+        selectinload(PosOrder.refunds).selectinload(Refund.payments),
+        selectinload(PosOrder.refunds).selectinload(Refund.register),
+        selectinload(PosOrder.refunds).selectinload(Refund.cashier),
+        selectinload(PosOrder.refunds).selectinload(Refund.approved_by),
     ).order_by(PosOrder.id.desc())
     if status:
         query = query.filter(PosOrder.status == status)
@@ -1592,7 +1598,32 @@ def list_orders(db: Session, status: str | None = None, session_id: int | None =
             | PosOrder.table_label.ilike(like)
             | PosOrder.note.ilike(like)
         )
-    return [_serialize_order(row, include_lines=True, db=db) for row in query.limit(limit).all()]
+    orders = query.limit(limit).all()
+    if not orders:
+        return []
+
+    # Batch only the current page of order IDs. The previous serializer
+    # executed a separate RoomChargePosting query for every order, which
+    # caused 200+ SQL roundtrips in a typical list view.
+    postings = db.query(RoomChargePosting).options(
+        selectinload(RoomChargePosting.order),
+        selectinload(RoomChargePosting.booking_snapshot),
+        selectinload(RoomChargePosting.posted_by),
+        selectinload(RoomChargePosting.created_by),
+        selectinload(RoomChargePosting.selected_by),
+    ).filter(
+        RoomChargePosting.order_id.in_([order.id for order in orders])
+    ).order_by(RoomChargePosting.id.asc()).all()
+    postings_by_order: dict[int, list[RoomChargePosting]] = {}
+    for posting in postings:
+        postings_by_order.setdefault(posting.order_id, []).append(posting)
+    return [
+        _serialize_order(
+            row, include_lines=True, db=db,
+            room_charge_postings=postings_by_order.get(row.id, []),
+        )
+        for row in orders
+    ]
 
 
 def get_order(db: Session, order_id: int):
