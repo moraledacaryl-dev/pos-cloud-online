@@ -291,6 +291,12 @@ for (const scenario of [
         await record(page, testInfo, captures, prefix + 'pos-filled-cart');
         await page.locator('.order-primary-actions').getByRole('button', { name: 'Pay', exact: true }).click();
         await expect(page.locator('.payment-terminal-modal')).toBeVisible();
+        if (scenario.label === 'mobile') {
+          // The payment panel scrolls internally; Pay Now must be fully
+          // accessible immediately, without a hidden below-fold action.
+          const checkout = page.locator('.payment-terminal-modal .pos-pay-button');
+          await expect(checkout).toBeInViewport({ ratio: 0.99 });
+        }
         await record(page, testInfo, captures, prefix + 'pos-payment-dialog');
       }
     }
