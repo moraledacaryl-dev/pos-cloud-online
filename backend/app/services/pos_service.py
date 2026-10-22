@@ -1327,7 +1327,19 @@ def close_register_session(db: Session, session_id: int, payload: RegisterSessio
 
 
 def reopen_register_session(db: Session, session_id: int, payload: RegisterSessionReopen, user_id: int | None = None, approved_by_user_id: int | None = None):
-    row = db.query(RegisterSession).options(selectinload(RegisterSession.register)).filter(RegisterSession.id == int(session_id)).with_for_update().first()
+    # Opening a new session already locks the parent Register. A reopen must
+    # acquire that same lock *before* inspecting open sessions; otherwise two
+    # different closed sessions can both pass the check concurrently.
+    # Read only the foreign key first to preserve a consistent lock order.
+    target = db.query(RegisterSession.register_id).filter(RegisterSession.id == int(session_id)).first()
+    if not target:
+        raise ValueError('Register session not found.')
+    register = db.query(Register).filter(Register.id == target.register_id).with_for_update().first()
+    if not register:
+        raise ValueError('Register not found.')
+    row = db.query(RegisterSession).options(selectinload(RegisterSession.register)).filter(
+        RegisterSession.id == int(session_id),
+    ).with_for_update().populate_existing().first()
     if not row:
         raise ValueError('Register session not found.')
     if row.status != 'closed':
