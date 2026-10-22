@@ -328,7 +328,7 @@ def test_room_charge_marks_order_as_folio_pending_and_not_paid():
     session = open_register_session(db, RegisterSessionOpen(register_id=register.id, business_date='2026-04-19', shift_name='AM', opening_float=0, opening_note='open'))
     order = create_order(db, OrderCreate(register_session_id=session['id'], guest_name='Room 201', lines=[{'catalog_item_id': item.id, 'quantity': 1, 'unit_price': 100, 'discount_amount': 0}]))
 
-    settled = pay_order(db, order['id'], OrderPayPayload(payments=[OrderPaymentCreate(tender_type='room_charge', amount_applied=100, reference_no='RM-201')]))
+    settled = pay_order(db, order['id'], OrderPayPayload(payments=[OrderPaymentCreate(tender_type='room_charge', amount_applied=100, reference_no='RM-201', room_charge_room_number='201')]))
 
     assert settled['status'] == 'folio_pending'
     assert settled['paid_amount'] == 0
@@ -351,7 +351,7 @@ def test_mixed_cash_and_room_charge_tracks_only_immediate_settlement_as_paid_amo
 
     settled = pay_order(db, order['id'], OrderPayPayload(payments=[
         OrderPaymentCreate(tender_type='cash', amount_applied=50, amount_received=50),
-        OrderPaymentCreate(tender_type='room_charge', amount_applied=150, reference_no='RM-305'),
+        OrderPaymentCreate(tender_type='room_charge', amount_applied=150, reference_no='RM-305', room_charge_room_number='305'),
     ]))
 
     assert settled['status'] == 'folio_pending'
