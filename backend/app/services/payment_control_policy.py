@@ -33,13 +33,22 @@ SENSITIVE_CASH_MOVEMENTS = {
 MONEY_QUANTUM = Decimal('0.01')
 
 
-def _money(value, label: str) -> Decimal:
+def _money(value, label: str, *, exact_cents: bool = False) -> Decimal:
+    """Validate monetary values, rejecting silent rounding of entered tender sums.
+
+    Order totals are computed by the pricing engine and can be normalized to
+    cents. Cashiers' payment and drawer inputs, however, must already be valid
+    cent amounts: otherwise a submitted 100.005 could silently settle as 100.01.
+    """
     try:
-        amount = Decimal(str(value)).quantize(MONEY_QUANTUM, rounding=ROUND_HALF_UP)
-    except (InvalidOperation, TypeError, ValueError) as exc:
+        raw = Decimal(str(value))
+        if not raw.is_finite():
+            raise ValueError(f'{label} must be finite.')
+        amount = raw.quantize(MONEY_QUANTUM, rounding=ROUND_HALF_UP)
+    except (InvalidOperation, TypeError, OverflowError) as exc:
         raise ValueError(f'{label} must be a valid amount.') from exc
-    if not amount.is_finite():
-        raise ValueError(f'{label} must be finite.')
+    if exact_cents and raw != amount:
+        raise ValueError(f'{label} cannot include fractions of a cent.')
     return amount
 
 
@@ -59,17 +68,17 @@ def validate_payment_control(order: dict, payments) -> dict:
         tender = str(getattr(payment, 'tender_type', '') or '').strip().lower()
         if tender not in SUPPORTED_TENDERS:
             raise ValueError(f'Payment line {index} has an unsupported tender type.')
-        applied = _money(getattr(payment, 'amount_applied', None), f'Payment line {index} amount')
+        applied = _money(getattr(payment, 'amount_applied', None), f'Payment line {index} amount', exact_cents=True)
         if applied <= 0:
             raise ValueError(f'Payment line {index} amount must be greater than zero.')
         applied_total = (applied_total + applied).quantize(MONEY_QUANTUM, rounding=ROUND_HALF_UP)
 
         received_raw = getattr(payment, 'amount_received', None)
         if tender == 'cash':
-            received = _money(received_raw if received_raw is not None else applied, f'Payment line {index} amount received')
+            received = _money(received_raw if received_raw is not None else applied, f'Payment line {index} amount received', exact_cents=True)
             if received < applied:
                 raise ValueError('Cash amount received cannot be lower than the applied amount.')
-        elif received_raw is not None and abs(_money(received_raw, f'Payment line {index} amount received') - applied) >= MONEY_QUANTUM:
+        elif received_raw is not None and abs(_money(received_raw, f'Payment line {index} amount received', exact_cents=True) - applied) >= MONEY_QUANTUM:
             raise ValueError('Non-cash amount received must equal the applied amount.')
 
         reference = str(getattr(payment, 'reference_no', '') or '').strip()
@@ -99,7 +108,7 @@ def validate_payment_control(order: dict, payments) -> dict:
 def validate_cash_movement_control(payload) -> dict:
     direction = str(getattr(payload, 'direction', '') or '').strip().lower()
     movement_type = str(getattr(payload, 'movement_type', '') or '').strip().lower()
-    amount = _money(getattr(payload, 'amount', None), 'Cash movement amount')
+    amount = _money(getattr(payload, 'amount', None), 'Cash movement amount', exact_cents=True)
     note = str(getattr(payload, 'note', '') or '').strip()
     reference = str(getattr(payload, 'reference_no', '') or '').strip()
 
