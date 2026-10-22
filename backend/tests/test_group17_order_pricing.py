@@ -10,8 +10,8 @@ from sqlalchemy.orm import sessionmaker
 from app.db.database import Base
 from app.models.entities import CatalogItem, Outlet, PosOrder, Register
 from app.schemas.common import OrderCreate, OrderUpdate, RegisterSessionOpen
-from app.services.order_pricing_domain import validated_modifier_total
 from app.services.pos_service import create_order, open_register_session, update_order
+from app.services.order_pricing_domain import validated_modifier_total
 
 
 GROUPS = [
