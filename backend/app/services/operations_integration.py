@@ -6,6 +6,7 @@ from typing import Any
 
 import httpx
 from fastapi.encoders import jsonable_encoder
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.core.json_utils import json_dumps
@@ -216,11 +217,17 @@ async def run_operations_outbox_sync(
         db.query(SyncOutboxEvent)
         .filter(SyncOutboxEvent.event_type.like(f'{OPERATIONS_EVENT_PREFIX}%'))
         .filter(SyncOutboxEvent.status.in_(['operations_pending', 'operations_retry']))
-        .order_by(SyncOutboxEvent.id.asc())
     )
     if event_id is not None:
         query = query.filter(SyncOutboxEvent.id == int(event_id))
-    rows = query.limit(max(1, min(int(limit or 25), 500))).all()
+    elif settings.operations_integration_enabled:
+        # Deferred retries must not occupy the bounded batch ahead of due
+        # Operations events. Disabled integrations still suppress queued rows.
+        query = query.filter(or_(
+            SyncOutboxEvent.next_retry_at.is_(None),
+            SyncOutboxEvent.next_retry_at <= now_text,
+        ))
+    rows = query.order_by(SyncOutboxEvent.id.asc()).limit(max(1, min(int(limit or 25), 500))).all()
     processed = synced = retried = blocked = skipped = 0
     for row in rows:
         if row.next_retry_at and row.next_retry_at > now_text:
