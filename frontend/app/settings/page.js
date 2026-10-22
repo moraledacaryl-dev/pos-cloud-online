@@ -164,7 +164,7 @@ export default function SettingsPage() {
             )}
           </div>
         )}
-        <p className="muted">Accounting owns menu items, categories, pricing, recipes, and SKUs. POS consumes that catalog for sales and keeps only operational availability overrides. Saved secrets are never displayed again.</p>
+        <p className="muted">Inventory & Procurement owns menu items, SKUs, recipes, and master pricing. POS uses that selling catalog and may apply local sold-out overrides. Accounting receives financial postings. Saved secrets are never displayed again.</p>
         <form className="form-grid" style={{ marginTop: 12 }} onSubmit={handleSave}>
           <label className="field">Accounting Connector<select value="current_erp" disabled><option value="current_erp">Hidden Oasis Accounting</option></select></label>
           <label className="field">Accounting API Base<input value={sync.api_base || ''} onChange={(e) => setSyncField('api_base', e.target.value)} placeholder="https://accounting.hiddenoasis.app/api" /></label>
@@ -205,7 +205,7 @@ export default function SettingsPage() {
             <p className={`small ${receipt.registration_status === 'registered' ? 'success-text' : 'notice-text'}`} style={{ marginTop: 10 }}>{receipt.registration_status === 'registered' ? 'Official Sales Invoice mode will be used after all fields are saved.' : 'Printed documents are visibly marked as provisional and not valid for tax claims.'}</p>
           </div>
 
-          <div className="settings-save-bar"><span className={`small ${dirty ? 'notice-text' : 'muted'}`}>{dirty ? 'Unsaved changes' : 'All changes saved'}</span><div className="row wrap">{dirty && <button type="button" className="secondary" onClick={() => setSettings(savedSettings)}>Discard changes</button>}<button type="submit" className="primary" disabled={!!busy || !dirty}>{busy === 'save' ? 'Saving...' : 'Save Settings'}</button></div></div>
+          {(dirty || busy === 'save') && <div className="settings-save-bar"><span className="small notice-text">{busy === 'save' ? 'Saving changes...' : 'Unsaved changes'}</span><div className="row wrap">{dirty && <button type="button" className="secondary" disabled={!!busy} onClick={() => setSettings(savedSettings)}>Discard changes</button>}<button type="submit" className="primary" disabled={!!busy || !dirty}>{busy === 'save' ? 'Saving...' : 'Save Settings'}</button></div></div>}
         </form>
       </section>
       <ActionModal
