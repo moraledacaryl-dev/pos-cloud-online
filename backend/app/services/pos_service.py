@@ -67,6 +67,7 @@ from app.services.financial_precision import (
 )
 from app.services.kds_stream import publish_kds_event
 from app.services.order_pricing_domain import validated_modifier_total
+from app.services.order_state_policy import assert_order_action
 from app.services.payment_control_policy import validate_payment_control
 from app.services.permission_service import get_user_permission_keys
 from app.services.refund_domain import allocate_refund_tenders, prepare_refund_line_plan
@@ -1570,8 +1571,9 @@ def update_order(db: Session, order_id: int, payload: OrderUpdate, user_id: int 
     row = db.query(PosOrder).options(selectinload(PosOrder.lines), selectinload(PosOrder.payments), selectinload(PosOrder.register), selectinload(PosOrder.cashier)).filter(PosOrder.id == int(order_id)).with_for_update().first()
     if not row:
         raise ValueError('Order not found.')
-    if row.status in {'paid', 'voided'}:
-        raise ValueError('Paid or voided orders can no longer be edited.')
+    # Recheck the canonical state policy under the locked row: the API's
+    # unlocked preflight is advisory and direct callers must be equally safe.
+    assert_order_action(row.status, 'edit')
     data = payload.model_dump(exclude_unset=True)
     line_payloads = data.pop('lines', None)
     approved_by_user_id = data.pop('approved_by_user_id', None)
@@ -2389,6 +2391,9 @@ def void_order(db: Session, order_id: int, reason: str, user_id: int | None = No
         raise ValueError('Order not found.')
     if row.status == 'voided':
         raise ValueError('Order is already voided.')
+    # Do not void merged, refunded, cancelled or closed records through a
+    # direct service call; the locked policy matches the API authorization.
+    assert_order_action(row.status, 'void')
     approval = _record_approval(db, approval_type='void', entity_type='order', entity_id=row.id, requested_by_user_id=user_id, approved_by_user_id=approved_by_user_id, requested_reason=reason, request_details={'order_id': row.id, 'order_no': row.order_no}, required=True, commit=False)
     row.status = 'voided'
     row.void_reason = reason
