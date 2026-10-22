@@ -4105,6 +4105,21 @@ button.danger {
   .payment-terminal-modal .room-charge-compact .form-grid {
     grid-template-columns: 1fr;
   }
+
+  /* A long tender form scrolls internally. Keep checkout accessible without
+     forcing cashiers to discover the final action below the visible fold. */
+  .payment-terminal-modal .modal-form > .row.wrap:last-child {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    background: #fff;
+    box-shadow: 0 -6px 16px rgba(20, 24, 32, 0.10);
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+  }
+
+  .payment-terminal-modal .modal-form > .row.wrap:last-child .pos-pay-button {
+    flex: 1 0 100%;
+  }
 }
 
 .map-manager-modal {
