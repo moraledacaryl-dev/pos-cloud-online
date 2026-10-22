@@ -951,9 +951,12 @@ def outbox_suppression_reason(event_type: str | None, payload: dict | str | None
             payload = {}
     payload = payload if isinstance(payload, dict) else {}
     if str(event_type or '') in {'order.finalized', 'order.voided'}:
-        lines = payload.get('lines') or []
-        if lines and any(not (line or {}).get('external_menu_item_id') for line in lines):
-            return 'Order contains a POS-local catalog line, so no Accounting sale delivery was attempted.'
+        lines = payload.get('lines')
+        # Malformed or non-dictionary line entries are not evidence of a
+        # POS-local item. Keep those events visible for operator diagnosis.
+        if isinstance(lines, list) and lines and all(isinstance(line, dict) for line in lines):
+            if any(not line.get('external_menu_item_id') for line in lines):
+                return 'Order contains a POS-local catalog line, so no Accounting sale delivery was attempted.'
     return None
 
 
@@ -2878,11 +2881,30 @@ def update_kitchen_line_status(db: Session, line_id: int, payload, user_id: int 
 
 
 def list_outbox_events(db: Session, status: str | None = None, limit: int = 200):
+    """Return the newest N rows matching the *effective* operator status.
+
+    Stored outbox statuses can be suppressed for POS-local catalog events and
+    disabled Inventory integrations. Filtering after LIMIT silently concealed
+    older matching rows. Stream the read-only query in batches instead and
+    apply the limit after effective-status evaluation.
+    """
     query = db.query(SyncOutboxEvent).order_by(SyncOutboxEvent.id.desc())
-    if status and status != 'suppressed':
+    if status == 'suppressed':
+        query = query.filter(SyncOutboxEvent.status.in_([
+            'pending', 'failed', 'error', 'blocked',
+            'inventory_pending', 'inventory_retry', 'suppressed',
+        ]))
+    elif status:
         query = query.filter(SyncOutboxEvent.status == status)
-    rows = [_serialize_outbox(row) for row in query.limit(limit).all()]
-    return [row for row in rows if not status or row['status'] == status]
+    rows = []
+    for event in query.yield_per(100):
+        row = _serialize_outbox(event)
+        if status and row['status'] != status:
+            continue
+        rows.append(row)
+        if len(rows) >= limit:
+            break
+    return rows
 
 
 def dashboard_summary(db: Session):
