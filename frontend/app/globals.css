@@ -3887,6 +3887,10 @@ button.danger {
 .payment-terminal-modal {
   width: min(1120px, calc(100vw - 32px));
   max-width: min(1120px, calc(100vw - 32px));
+  max-height: calc(100dvh - 36px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
 }
 
 .payment-terminal-modal .modal-header {
@@ -3903,8 +3907,9 @@ button.danger {
   grid-template-columns: minmax(250px, 0.72fr) minmax(430px, 1.28fr);
   gap: 10px;
   align-items: start;
-  max-height: calc(100vh - 118px);
-  overflow: auto;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
   padding: 10px 14px 14px;
 }
 
@@ -3971,7 +3976,7 @@ button.danger {
 
 .payment-terminal-modal .quick-tender-panel button,
 .payment-terminal-modal .payment-row-card button,
-.payment-terminal-modal .modal-form > .row.wrap:last-child button {
+.payment-terminal-modal .payment-terminal-actions button {
   padding: 7px 9px;
   font-size: 12px;
 }
@@ -4050,13 +4055,15 @@ button.danger {
   padding: 9px 10px;
 }
 
-.payment-terminal-modal .modal-form > .row.wrap:last-child {
-  grid-column: 1 / -1;
+.payment-terminal-modal .payment-terminal-actions {
+  display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 7px;
   border-top: 1px solid var(--line);
-  padding-top: 10px;
-  margin-top: 2px;
+  padding: 10px 14px max(10px, env(safe-area-inset-bottom));
+  background: #fff;
+  box-shadow: 0 -6px 16px rgba(20, 24, 32, 0.08);
 }
 
 .status-guidance {
@@ -4106,18 +4113,8 @@ button.danger {
     grid-template-columns: 1fr;
   }
 
-  /* A long tender form scrolls internally. Keep checkout accessible without
-     forcing cashiers to discover the final action below the visible fold. */
-  .payment-terminal-modal .modal-form > .row.wrap:last-child {
-    position: sticky;
-    bottom: 0;
-    z-index: 2;
-    background: #fff;
-    box-shadow: 0 -6px 16px rgba(20, 24, 32, 0.10);
-    padding-bottom: max(10px, env(safe-area-inset-bottom));
-  }
-
-  .payment-terminal-modal .modal-form > .row.wrap:last-child .pos-pay-button {
+  /* Keep the primary checkout action fully visible while tender fields scroll. */
+  .payment-terminal-modal .payment-terminal-actions .pos-pay-button {
     flex: 1 0 100%;
   }
 }
