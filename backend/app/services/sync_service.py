@@ -37,10 +37,16 @@ def _join(base: str, path: str) -> str:
 
 
 def _load_payload(row: SyncOutboxEvent) -> dict:
+    # Never turn a damaged persisted event into an empty Accounting request.
+    # Invalid outbox records must be visibly blocked for investigation, not
+    # silently acknowledged as synced by a tolerant downstream endpoint.
     try:
-        return json.loads(row.payload_json or '{}')
-    except Exception:
-        return {}
+        payload = json.loads(row.payload_json or '{}')
+    except (TypeError, ValueError) as exc:
+        raise ValueError('Accounting outbox payload is not valid JSON.') from exc
+    if not isinstance(payload, dict):
+        raise ValueError('Accounting outbox payload must be a JSON object.')
+    return payload
 
 
 def _serialize_outbox_event(row: SyncOutboxEvent) -> dict:
@@ -823,9 +829,9 @@ async def run_outbox_sync(db: Session, limit: int = 25) -> dict:
             if _accounting_void_waits_for_sale(db, row):
                 skipped += 1
                 continue
-            payload = _load_payload(row)
             row.last_attempt_at = now_iso()
             try:
+                payload = _load_payload(row)
                 if row.event_type == 'cash_movement.created' and config.get('sync_cash_movements', True):
                     res = await _push_cash_movement(client, base, config, payload)
                 elif row.event_type == 'transfer.created' and config.get('sync_cash_movements', True):
@@ -948,9 +954,9 @@ async def retry_outbox_event(db: Session, event_id: int) -> dict:
         headers=_client_headers(config),
         follow_redirects=True,
     ) as client:
-        payload = _load_payload(row)
         row.last_attempt_at = now_iso()
         try:
+            payload = _load_payload(row)
             if row.event_type == 'cash_movement.created' and config.get('sync_cash_movements', True):
                 res = await _push_cash_movement(client, base, config, payload)
             elif row.event_type == 'transfer.created' and config.get('sync_cash_movements', True):
