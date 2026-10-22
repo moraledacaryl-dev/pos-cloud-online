@@ -66,8 +66,8 @@ from app.services.financial_precision import (
     _decimal as _decimal,
 )
 from app.services.kds_stream import publish_kds_event
-from app.services.permission_service import get_user_permission_keys
 from app.services.payment_control_policy import validate_payment_control
+from app.services.permission_service import get_user_permission_keys
 from app.services.reporting_service import build_dashboard_summary
 
 logger = logging.getLogger(__name__)
