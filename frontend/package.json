@@ -18,7 +18,7 @@
     "test:visual-audit": "playwright test e2e/visual-audit.spec.mjs --project=chromium --reporter=list"
   },
   "dependencies": {
-    "next": "16.4.0",
+    "next": "16.4.2",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "sharp": "0.35.5"

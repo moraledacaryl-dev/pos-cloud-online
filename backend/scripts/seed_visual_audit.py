@@ -3,7 +3,8 @@
 This script is intentionally only invoked by the screenshot workflow. It creates enough
 catalog, register, session, and order density to exercise real operational layouts.
 """
-from datetime import date
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 import os
 from decimal import Decimal
 
@@ -20,6 +21,12 @@ from app.services.pos_service import (
     open_register_session,
     set_order_status,
 )
+
+def visual_audit_business_date(now: datetime | None = None) -> str:
+    """Match the POS Philippine business date even on UTC GitHub runners."""
+    instant = now if now is not None else datetime.now(timezone.utc)
+    return instant.astimezone(ZoneInfo("Asia/Manila")).date().isoformat()
+
 
 CATALOG = [
     ("Classic Beef Burger", "Burgers", "kitchen", "285"),
@@ -110,7 +117,7 @@ def main():
         else:
             opened = open_register_session(db, RegisterSessionOpen(
                 register_id=register.id,
-                business_date=date.today().isoformat(),
+                business_date=visual_audit_business_date(),
                 shift_name="Visual Audit Day Shift",
                 opening_float=Decimal("5000"),
                 opening_note="Deterministic screenshot fixture",
