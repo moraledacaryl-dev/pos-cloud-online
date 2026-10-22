@@ -797,6 +797,10 @@ async def run_outbox_sync(db: Session, limit: int = 25) -> dict:
     config = await _ensure_accounting_token(db, config)
     current_time = now_iso()
     query = db.query(SyncOutboxEvent).filter(
+        # Accounting must not consume legacy generic pending/failed events owned
+        # by Inventory or Operations. Filter before LIMIT to avoid starvation.
+        ~SyncOutboxEvent.event_type.like('inventory.%'),
+        ~SyncOutboxEvent.event_type.like(f'{OPERATIONS_EVENT_PREFIX}%'),
         or_(
             SyncOutboxEvent.status == 'pending',
             and_(
@@ -845,6 +849,7 @@ async def run_outbox_sync(db: Session, limit: int = 25) -> dict:
                     row.last_error = f'Unsupported or disabled event type: {row.event_type}'
                     blocked += 1
                     db.add(row)
+                    db.commit()
                     continue
 
                 if res is None or 200 <= res.status_code < 300:
