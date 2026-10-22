@@ -298,6 +298,21 @@ for (const scenario of [
           await expect(checkout).toBeInViewport({ ratio: 0.99 });
         }
         await record(page, testInfo, captures, prefix + 'pos-payment-dialog');
+        if (scenario.label === 'mobile') {
+          // Compact 320px phones need a reachable checkout CTA, even with
+          // split-tender fields scrolled all the way to the bottom.
+          await page.setViewportSize({ width: 320, height: 700 });
+          const modal = page.locator('.payment-terminal-modal');
+          const checkout = modal.locator('.pos-pay-button');
+          await expect(checkout).toBeInViewport({ ratio: 0.99 });
+          const bounds = await checkout.boundingBox();
+          expect(bounds, 'Compact checkout action should have a measurable box').not.toBeNull();
+          expect(bounds.x, 'Checkout action must not clip left').toBeGreaterThanOrEqual(0);
+          expect(bounds.x + bounds.width, 'Checkout action must not clip right').toBeLessThanOrEqual(320);
+          await modal.locator('.modal-form').evaluate((node) => { node.scrollTop = node.scrollHeight; });
+          await expect(checkout, 'Checkout action should survive tender scrolling').toBeInViewport({ ratio: 0.99 });
+          await record(page, testInfo, captures, 'pass9-compact-pos-payment-dialog');
+        }
       }
     }
 
