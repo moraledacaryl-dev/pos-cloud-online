@@ -29,7 +29,10 @@ class _Broadcaster:
 
     async def publish(self, channel: str, payload: dict):
         async with self._lock:
-            targets = list(self._listeners.get(channel, set())) + list(self._listeners.get('*', set()))
+            # publish_kds_event already sends one global event, then one event
+            # per station. Including '*' here caused wildcard listeners
+            # to receive duplicates (and one more per selected station).
+            targets = list(self._listeners.get(channel, set()))
         dropped = []
         for queue in targets:
             try:
@@ -63,7 +66,7 @@ async def publish_kds_event(event: str, payload: dict | None = None, *, stations
         'ts': round(time.time(), 3),
     }
     await _broadcaster.publish('*', message)
-    for station in {s for s in (stations or []) if s}:
+    for station in {s for s in (stations or []) if s and s != '*'}:
         await _broadcaster.publish(station, message)
 
 
